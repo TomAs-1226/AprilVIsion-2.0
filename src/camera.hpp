@@ -27,11 +27,11 @@ public:
     Camera(int id, const CameraConfig& config);
     ~Camera();
 
-    // Non-copyable, movable
+    // Non-copyable and non-movable (RingBuffer contains mutex)
     Camera(const Camera&) = delete;
     Camera& operator=(const Camera&) = delete;
-    Camera(Camera&&) = default;
-    Camera& operator=(Camera&&) = default;
+    Camera(Camera&&) = delete;
+    Camera& operator=(Camera&&) = delete;
 
     /**
      * @brief Start capture thread

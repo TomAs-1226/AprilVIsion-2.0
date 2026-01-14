@@ -4,6 +4,7 @@
  */
 
 #include "nt_publisher.hpp"
+#include "pose.hpp"
 #include <networktables/NetworkTableInstance.h>
 #include <networktables/NetworkTable.h>
 #include <networktables/DoubleTopic.h>
@@ -14,6 +15,7 @@
 #include <networktables/StringTopic.h>
 #include <iostream>
 #include <chrono>
+#include <vector>
 
 namespace frc_vision {
 
@@ -304,20 +306,20 @@ void NTPublisher::publish_loop() {
             // Camera pose
             if (det.multi_tag_pose_valid) {
                 auto& cam_pose = det.camera_to_field;
-                pub->pose_cam.Set({
+                pub->pose_cam.Set(std::vector<double>{
                     cam_pose.position.x, cam_pose.position.y, cam_pose.position.z,
                     cam_pose.orientation.w, cam_pose.orientation.x,
                     cam_pose.orientation.y, cam_pose.orientation.z
                 });
 
-                pub->pose_robot.Set({
+                pub->pose_robot.Set(std::vector<double>{
                     det.robot_pose_field.x,
                     det.robot_pose_field.y,
                     det.robot_pose_field.theta
                 });
             } else {
-                pub->pose_cam.Set({});
-                pub->pose_robot.Set({});
+                pub->pose_cam.Set(std::vector<double>{});
+                pub->pose_robot.Set(std::vector<double>{});
             }
 
             // Quality metrics
@@ -328,19 +330,19 @@ void NTPublisher::publish_loop() {
 
             // Compute quality and std devs
             auto quality = PoseEstimator::compute_quality(det.detections, det.multi_tag_reproj_error);
-            pub->std_devs.Set({quality.std_dev_x, quality.std_dev_y, quality.std_dev_theta});
+            pub->std_devs.Set(std::vector<double>{quality.std_dev_x, quality.std_dev_y, quality.std_dev_theta});
             pub->confidence.Set(quality.confidence);
         }
 
         // Publish fused pose (filtered)
         fused_pubs_->timestamp.Set(
             std::chrono::duration<double>(SystemClock::now().time_since_epoch()).count());
-        fused_pubs_->pose.Set({
+        fused_pubs_->pose.Set(std::vector<double>{
             fused.pose_filtered.x,
             fused.pose_filtered.y,
             fused.pose_filtered.theta
         });
-        fused_pubs_->std_devs.Set({
+        fused_pubs_->std_devs.Set(std::vector<double>{
             fused.quality.std_dev_x,
             fused.quality.std_dev_y,
             fused.quality.std_dev_theta
@@ -353,12 +355,12 @@ void NTPublisher::publish_loop() {
         // Publish fused raw pose
         fused_raw_pubs_->timestamp.Set(
             std::chrono::duration<double>(SystemClock::now().time_since_epoch()).count());
-        fused_raw_pubs_->pose.Set({
+        fused_raw_pubs_->pose.Set(std::vector<double>{
             fused.pose_raw.x,
             fused.pose_raw.y,
             fused.pose_raw.theta
         });
-        fused_raw_pubs_->std_devs.Set({
+        fused_raw_pubs_->std_devs.Set(std::vector<double>{
             fused.quality.std_dev_x,
             fused.quality.std_dev_y,
             fused.quality.std_dev_theta
