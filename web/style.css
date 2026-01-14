@@ -1,0 +1,381 @@
+/* FRC Vision Dashboard Styles */
+
+:root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-panel: #0f3460;
+    --accent: #e94560;
+    --accent-green: #00ff88;
+    --accent-blue: #00d9ff;
+    --text-primary: #ffffff;
+    --text-secondary: #a0a0a0;
+    --border-color: #2a3a5e;
+    --success: #00ff88;
+    --warning: #ffaa00;
+    --error: #ff4444;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header */
+header {
+    background: var(--bg-secondary);
+    padding: 15px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid var(--accent);
+}
+
+header h1 {
+    font-size: 1.5rem;
+    color: var(--accent);
+}
+
+.status-bar {
+    display: flex;
+    gap: 20px;
+    font-size: 0.9rem;
+}
+
+.status-bar span {
+    padding: 5px 10px;
+    background: var(--bg-panel);
+    border-radius: 4px;
+}
+
+.status-indicator {
+    position: relative;
+}
+
+.status-indicator::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+
+.status-indicator.connected::before {
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success);
+}
+
+.status-indicator.disconnected::before {
+    background: var(--error);
+}
+
+/* Main Content */
+main {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Camera Grid */
+.camera-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 15px;
+}
+
+.camera-panel {
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.camera-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.camera-header h3 {
+    font-size: 1rem;
+    color: var(--accent-blue);
+}
+
+.cam-stats {
+    display: flex;
+    gap: 15px;
+    font-size: 0.85rem;
+}
+
+.cam-stats .fps {
+    color: var(--accent-green);
+}
+
+.cam-stats .latency {
+    color: var(--warning);
+}
+
+.cam-stats .tags {
+    color: var(--accent-blue);
+}
+
+.camera-container {
+    position: relative;
+    aspect-ratio: 4/3;
+    background: #000;
+}
+
+.camera-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.camera-container canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+/* Data Panels */
+.data-panels {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 15px;
+}
+
+@media (max-width: 1200px) {
+    .data-panels {
+        grid-template-columns: 1fr;
+    }
+}
+
+.panel {
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid var(--border-color);
+}
+
+.panel h3 {
+    margin-bottom: 15px;
+    color: var(--accent);
+    font-size: 1.1rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+}
+
+/* Fused Pose Panel */
+.pose-display {
+    display: flex;
+    gap: 20px;
+}
+
+.pose-field {
+    flex: 1;
+    background: #0a0a15;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.pose-field canvas {
+    width: 100%;
+    height: auto;
+}
+
+.pose-values {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.pose-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.pose-row label {
+    width: 80px;
+    color: var(--text-secondary);
+}
+
+.pose-row span {
+    font-family: 'Courier New', monospace;
+    font-size: 1.1rem;
+}
+
+.pose-row .unit {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.pose-row.quality {
+    margin-top: 10px;
+}
+
+.confidence-bar {
+    flex: 1;
+    height: 12px;
+    background: var(--bg-panel);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+#confidence-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--error), var(--warning), var(--success));
+    transition: width 0.3s ease;
+}
+
+.pose-row .small {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.pose-row.std-dev {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+/* Config Panel */
+.config-section {
+    margin-bottom: 20px;
+}
+
+.config-section h4 {
+    font-size: 0.95rem;
+    color: var(--accent-blue);
+    margin-bottom: 10px;
+}
+
+.config-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.config-row label {
+    width: 100px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.config-row input[type="range"] {
+    flex: 1;
+    height: 6px;
+    -webkit-appearance: none;
+    background: var(--bg-panel);
+    border-radius: 3px;
+    outline: none;
+}
+
+.config-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+}
+
+.config-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+}
+
+.config-row span {
+    width: 40px;
+    text-align: right;
+    font-family: 'Courier New', monospace;
+}
+
+.config-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.config-buttons button {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+}
+
+#apply-config {
+    background: var(--accent);
+    color: white;
+}
+
+#apply-config:hover {
+    background: #ff5a77;
+}
+
+#reload-config {
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+#reload-config:hover {
+    background: var(--border-color);
+}
+
+/* Footer */
+footer {
+    background: var(--bg-secondary);
+    padding: 15px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Animations */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.disconnected {
+    animation: pulse 1s infinite;
+}
+
+/* Overlay Colors */
+.overlay-tag {
+    stroke: var(--accent-green);
+    stroke-width: 2;
+    fill: none;
+}
+
+.overlay-id {
+    fill: var(--accent);
+    font-size: 14px;
+    font-weight: bold;
+}

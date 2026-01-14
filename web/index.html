@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FRC Vision Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>FRC AprilTag Vision</h1>
+        <div class="status-bar">
+            <span id="status-uptime">Uptime: --</span>
+            <span id="status-temp">CPU: --°C</span>
+            <span id="status-nt" class="status-indicator disconnected">NT: Disconnected</span>
+            <span id="status-clients">Clients: 0</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Camera Grid -->
+        <section class="camera-grid">
+            <div class="camera-panel" data-cam="0">
+                <div class="camera-header">
+                    <h3>Camera 0</h3>
+                    <span class="cam-stats">
+                        <span class="fps" data-cam="0">-- fps</span>
+                        <span class="latency" data-cam="0">-- ms</span>
+                        <span class="tags" data-cam="0">0 tags</span>
+                    </span>
+                </div>
+                <div class="camera-container">
+                    <img id="cam0-img" src="/cam0.mjpeg" alt="Camera 0">
+                    <canvas id="cam0-overlay"></canvas>
+                </div>
+            </div>
+
+            <div class="camera-panel" data-cam="1">
+                <div class="camera-header">
+                    <h3>Camera 1</h3>
+                    <span class="cam-stats">
+                        <span class="fps" data-cam="1">-- fps</span>
+                        <span class="latency" data-cam="1">-- ms</span>
+                        <span class="tags" data-cam="1">0 tags</span>
+                    </span>
+                </div>
+                <div class="camera-container">
+                    <img id="cam1-img" src="/cam1.mjpeg" alt="Camera 1">
+                    <canvas id="cam1-overlay"></canvas>
+                </div>
+            </div>
+
+            <div class="camera-panel" data-cam="2">
+                <div class="camera-header">
+                    <h3>Camera 2</h3>
+                    <span class="cam-stats">
+                        <span class="fps" data-cam="2">-- fps</span>
+                        <span class="latency" data-cam="2">-- ms</span>
+                        <span class="tags" data-cam="2">0 tags</span>
+                    </span>
+                </div>
+                <div class="camera-container">
+                    <img id="cam2-img" src="/cam2.mjpeg" alt="Camera 2">
+                    <canvas id="cam2-overlay"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Data Panels -->
+        <section class="data-panels">
+            <!-- Fused Pose Panel -->
+            <div class="panel fused-pose-panel">
+                <h3>Robot Pose (Fused)</h3>
+                <div class="pose-display">
+                    <div class="pose-field">
+                        <canvas id="field-canvas" width="400" height="200"></canvas>
+                    </div>
+                    <div class="pose-values">
+                        <div class="pose-row">
+                            <label>X:</label>
+                            <span id="pose-x">--.--</span>
+                            <span class="unit">m</span>
+                        </div>
+                        <div class="pose-row">
+                            <label>Y:</label>
+                            <span id="pose-y">--.--</span>
+                            <span class="unit">m</span>
+                        </div>
+                        <div class="pose-row">
+                            <label>θ:</label>
+                            <span id="pose-theta">--.--</span>
+                            <span class="unit">°</span>
+                        </div>
+                        <div class="pose-row quality">
+                            <label>Confidence:</label>
+                            <div class="confidence-bar">
+                                <div id="confidence-fill"></div>
+                            </div>
+                            <span id="confidence-value">--%</span>
+                        </div>
+                        <div class="pose-row">
+                            <label>Tags:</label>
+                            <span id="total-tags">0</span>
+                            <span class="small">from</span>
+                            <span id="cameras-count">0</span>
+                            <span class="small">cameras</span>
+                        </div>
+                        <div class="pose-row std-dev">
+                            <label>σ:</label>
+                            <span id="std-x">--.--</span>,
+                            <span id="std-y">--.--</span>,
+                            <span id="std-theta">--.--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuration Panel -->
+            <div class="panel config-panel">
+                <h3>Configuration</h3>
+                <div class="config-section">
+                    <h4>Detector</h4>
+                    <div class="config-row">
+                        <label for="decimation">Decimation:</label>
+                        <input type="range" id="decimation" min="1" max="4" value="2">
+                        <span id="decimation-value">2</span>
+                    </div>
+                    <div class="config-row">
+                        <label for="min-margin">Min Margin:</label>
+                        <input type="range" id="min-margin" min="5" max="50" value="20">
+                        <span id="min-margin-value">20</span>
+                    </div>
+                    <div class="config-row">
+                        <label for="max-tags">Max Tags:</label>
+                        <input type="range" id="max-tags" min="4" max="32" value="16">
+                        <span id="max-tags-value">16</span>
+                    </div>
+                </div>
+                <div class="config-section">
+                    <h4>Tracking</h4>
+                    <div class="config-row">
+                        <label for="tracking-enabled">Enabled:</label>
+                        <input type="checkbox" id="tracking-enabled" checked>
+                    </div>
+                    <div class="config-row">
+                        <label for="filter-alpha">Smoothing:</label>
+                        <input type="range" id="filter-alpha" min="0.1" max="1.0" step="0.1" value="0.3">
+                        <span id="filter-alpha-value">0.3</span>
+                    </div>
+                </div>
+                <div class="config-section">
+                    <h4>Display</h4>
+                    <div class="config-row">
+                        <label for="show-overlay">Show Overlay:</label>
+                        <input type="checkbox" id="show-overlay" checked>
+                    </div>
+                    <div class="config-row">
+                        <label for="jpeg-quality">JPEG Quality:</label>
+                        <input type="range" id="jpeg-quality" min="30" max="100" value="70">
+                        <span id="jpeg-quality-value">70</span>
+                    </div>
+                </div>
+                <div class="config-buttons">
+                    <button id="apply-config">Apply</button>
+                    <button id="reload-config">Reload from File</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>FRC Vision Coprocessor v2.0 | FRC 2026 Season</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

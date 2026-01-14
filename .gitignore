@@ -1,0 +1,33 @@
+# Build directories
+build/
+cmake-build-*/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.o
+*.a
+*.so
+*.dylib
+
+# Binary output
+frc_vision
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies (fetched by CMake)
+_deps/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

@@ -1,0 +1,46 @@
+[Unit]
+Description=FRC AprilTag Vision Coprocessor
+Documentation=https://github.com/team/frc-vision
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Working directory
+WorkingDirectory=/opt/frc-vision
+
+# Main executable
+ExecStart=/opt/frc-vision/frc_vision /opt/frc-vision/config/config.yml
+
+# Restart policy
+Restart=always
+RestartSec=3
+
+# Real-time priority
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+
+# Resource limits
+LimitMEMLOCK=infinity
+LimitRTPRIO=99
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=frc-vision
+
+# Environment
+Environment="DISPLAY="
+Environment="HOME=/opt/frc-vision"
+
+# Security hardening (optional, comment out if causing issues)
+# NoNewPrivileges=true
+# ProtectSystem=strict
+# ProtectHome=true
+# ReadWritePaths=/opt/frc-vision
+
+[Install]
+WantedBy=multi-user.target

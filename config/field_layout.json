@@ -1,0 +1,200 @@
+{
+  "name": "FRC 2026 Field Layout",
+  "tag_size_m": 0.1651,
+  "field_length_m": 16.54,
+  "field_width_m": 8.21,
+  "tags": [
+    {
+      "id": 1,
+      "pose": {
+        "x": 15.08,
+        "y": 0.98,
+        "z": 1.45,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 180
+      },
+      "description": "Red source right"
+    },
+    {
+      "id": 2,
+      "pose": {
+        "x": 15.08,
+        "y": 2.66,
+        "z": 1.45,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 180
+      },
+      "description": "Red source left"
+    },
+    {
+      "id": 3,
+      "pose": {
+        "x": 16.54,
+        "y": 4.10,
+        "z": 1.45,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 180
+      },
+      "description": "Red speaker center"
+    },
+    {
+      "id": 4,
+      "pose": {
+        "x": 16.54,
+        "y": 5.55,
+        "z": 1.45,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 180
+      },
+      "description": "Red speaker side"
+    },
+    {
+      "id": 5,
+      "pose": {
+        "x": 1.46,
+        "y": 0.98,
+        "z": 1.45,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 0
+      },
+      "description": "Blue source right"
+    },
+    {
+      "id": 6,
+      "pose": {
+        "x": 1.46,
+        "y": 2.66,
+        "z": 1.45,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 0
+      },
+      "description": "Blue source left"
+    },
+    {
+      "id": 7,
+      "pose": {
+        "x": 0.0,
+        "y": 4.10,
+        "z": 1.45,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 0
+      },
+      "description": "Blue speaker center"
+    },
+    {
+      "id": 8,
+      "pose": {
+        "x": 0.0,
+        "y": 5.55,
+        "z": 1.45,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 0
+      },
+      "description": "Blue speaker side"
+    },
+    {
+      "id": 9,
+      "pose": {
+        "x": 4.64,
+        "y": 4.50,
+        "z": 1.32,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 120
+      },
+      "description": "Blue stage left"
+    },
+    {
+      "id": 10,
+      "pose": {
+        "x": 4.64,
+        "y": 3.71,
+        "z": 1.32,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 60
+      },
+      "description": "Blue stage right"
+    },
+    {
+      "id": 11,
+      "pose": {
+        "x": 5.32,
+        "y": 4.10,
+        "z": 1.32,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 0
+      },
+      "description": "Blue stage center"
+    },
+    {
+      "id": 12,
+      "pose": {
+        "x": 11.90,
+        "y": 4.50,
+        "z": 1.32,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 60
+      },
+      "description": "Red stage left"
+    },
+    {
+      "id": 13,
+      "pose": {
+        "x": 11.90,
+        "y": 3.71,
+        "z": 1.32,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 120
+      },
+      "description": "Red stage right"
+    },
+    {
+      "id": 14,
+      "pose": {
+        "x": 11.22,
+        "y": 4.10,
+        "z": 1.32,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 180
+      },
+      "description": "Red stage center"
+    },
+    {
+      "id": 15,
+      "pose": {
+        "x": 0.0,
+        "y": 7.62,
+        "z": 1.30,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 90
+      },
+      "description": "Blue amp"
+    },
+    {
+      "id": 16,
+      "pose": {
+        "x": 16.54,
+        "y": 7.62,
+        "z": 1.30,
+        "roll": 0,
+        "pitch": 0,
+        "yaw": 270
+      },
+      "description": "Red amp"
+    }
+  ]
+}
