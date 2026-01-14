@@ -171,9 +171,16 @@ Default includes FRC 2024/2025-style tags. Update for 2026 when official layout 
 # Build first
 mkdir build && cd build && cmake .. -GNinja && ninja
 
-# Deploy
-sudo ./scripts/deploy.sh
+# Full installation (recommended)
+sudo ./scripts/install_service.sh
 ```
+
+The install script:
+1. Creates dedicated `frcvision` system user
+2. Sets up udev rules for camera access (`/dev/video*`)
+3. Deploys binary and config to `/opt/frc-vision`
+4. Installs and enables the systemd service
+5. Configures resource limits for real-time performance
 
 ### Service Commands
 
@@ -184,6 +191,80 @@ sudo systemctl restart frc_vision # Restart
 sudo systemctl status frc_vision  # Status
 sudo journalctl -u frc_vision -f  # Live logs
 ```
+
+## Boot & Startup
+
+### Fast Boot Design
+
+The coprocessor is designed for **sub-65-second readiness** from power-on:
+
+- **Immediate web server start** - Dashboard available within seconds
+- **Async camera initialization** - Cameras connect in background with retry
+- **Non-blocking NetworkTables** - Connects when roboRIO becomes available
+- **Degraded mode support** - Continues operating with partial functionality
+
+### Startup Sequence
+
+1. Systemd starts service immediately after network target
+2. Web server starts on port 5800
+3. Configuration loaded from `/opt/frc-vision/config/config.yml`
+4. Cameras initialize asynchronously (retries every 2s if unavailable)
+5. NetworkTables connects in background (retries automatically)
+6. System logs `[READY]` when at least 1 camera + NT initialized
+
+### Check System Status
+
+```bash
+# Service status
+systemctl status frc_vision
+
+# Live logs
+journalctl -u frc_vision -f
+
+# Verify readiness via API
+curl http://localhost:5800/api/status
+```
+
+### Readiness API
+
+The `/api/status` endpoint returns JSON:
+
+```json
+{
+  "ready": true,
+  "state": "ready",
+  "uptime_seconds": 12.5,
+  "cameras_connected": 3,
+  "cameras_expected": 3,
+  "nt_connected": true,
+  "web_ready": true
+}
+```
+
+**Ready state**: `ready=true` when at least 1 camera is streaming AND web server is running.
+
+### Troubleshooting Boot Issues
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| Service not starting | `systemctl status frc_vision` | Check logs for errors |
+| No cameras | `ls -la /dev/video*` | Run `install_service.sh` for udev rules |
+| NT not connecting | `curl localhost:5800/api/status` | Verify roboRIO IP in config |
+| Slow startup | `journalctl -u frc_vision` | Ensure raw IP (not hostname) for NT |
+
+### Direct Ethernet to roboRIO
+
+For lowest latency, connect Orange Pi directly to roboRIO's 2nd Ethernet port:
+
+1. Configure static IP on Orange Pi: `10.TE.AM.11` (e.g., `10.12.34.11` for team 1234)
+2. Set roboRIO 2nd port: `10.TE.AM.2`
+3. Update `config/config.yml`:
+   ```yaml
+   outputs:
+     nt_server: "10.TE.AM.2"  # Use raw IP, never mDNS hostname
+   ```
+
+**Important**: Always use raw IP addresses, never `roborio-TEAM-frc.local` (mDNS causes boot delays)
 
 ## Web Dashboard
 

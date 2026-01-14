@@ -227,9 +227,32 @@ void NTPublisher::publish_loop() {
     running_.store(true);
 
     auto period = std::chrono::microseconds(1000000 / publish_rate_hz_);
+    bool was_connected = false;
+    auto last_connection_log = SteadyClock::now();
 
     while (!should_stop_.load()) {
         auto start = SteadyClock::now();
+
+        // Log connection status changes (non-blocking)
+        bool now_connected = is_connected();
+        if (now_connected != was_connected) {
+            if (now_connected) {
+                std::cout << "[NT] Connected to roboRIO" << std::endl;
+            } else {
+                std::cout << "[NT] Disconnected from roboRIO, retrying..." << std::endl;
+            }
+            was_connected = now_connected;
+        }
+
+        // Periodic connection retry logging (every 10 seconds if disconnected)
+        if (!now_connected) {
+            auto elapsed_since_log = std::chrono::duration<double>(
+                SteadyClock::now() - last_connection_log).count();
+            if (elapsed_since_log >= 10.0) {
+                std::cout << "[NT] Still trying to connect..." << std::endl;
+                last_connection_log = SteadyClock::now();
+            }
+        }
 
         // Get latest data
         std::vector<FrameDetections> detections;
@@ -241,6 +264,9 @@ void NTPublisher::publish_loop() {
             fused = latest_fused_;
             status = latest_status_;
         }
+
+        // Publish even if disconnected - ntcore buffers and will send when connected
+        // This is non-blocking and won't cause hangs
 
         // Publish camera data
         for (size_t i = 0; i < detections.size() && i < camera_pubs_.size(); i++) {

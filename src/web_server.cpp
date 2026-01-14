@@ -301,6 +301,80 @@ bool WebServer::initialize(int port, const std::string& web_root,
         }
     });
 
+    // ==========================================================================
+    // Readiness / Health Check Endpoint (CRITICAL for boot monitoring)
+    // ==========================================================================
+    impl_->server.Get("/api/status", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Cache-Control", "no-cache");
+
+        // Get latest status from stored JSON
+        auto status_opt = impl_->latest_status_json.get();
+
+        json j;
+
+        if (status_opt) {
+            try {
+                j = json::parse(*status_opt);
+            } catch (...) {
+                j = json::object();
+            }
+        }
+
+        // Determine readiness
+        bool cameras_ok = false;
+        int cameras_connected = 0;
+
+        if (j.contains("cameras") && j["cameras"].is_array()) {
+            for (const auto& cam : j["cameras"]) {
+                if (cam.contains("connected") && cam["connected"].get<bool>()) {
+                    cameras_connected++;
+                    cameras_ok = true;
+                }
+            }
+        }
+
+        bool web_ok = running_.load();
+        bool ready = cameras_ok && web_ok;
+
+        // Build response
+        json response;
+        response["ready"] = ready;
+        response["state"] = ready ? "ready" : "warming_up";
+        response["uptime"] = j.value("uptime", 0.0);
+        response["cameras_connected"] = cameras_connected;
+        response["cameras_configured"] = num_cameras_;
+        response["web_server"] = web_ok;
+        response["sse_clients"] = impl_->sse_client_count.load();
+
+        if (j.contains("cpu_temp")) {
+            response["cpu_temp"] = j["cpu_temp"];
+        }
+        if (j.contains("fused_valid")) {
+            response["pose_valid"] = j["fused_valid"];
+        }
+
+        // Detailed camera status
+        response["cameras"] = json::array();
+        if (j.contains("cameras") && j["cameras"].is_array()) {
+            for (const auto& cam : j["cameras"]) {
+                response["cameras"].push_back({
+                    {"id", cam.value("id", -1)},
+                    {"connected", cam.value("connected", false)},
+                    {"fps", cam.value("fps", 0.0)}
+                });
+            }
+        }
+
+        res.set_content(response.dump(), "application/json");
+    });
+
+    // Simple health check (just returns 200 if web server is up)
+    impl_->server.Get("/health", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_content("{\"status\": \"ok\"}", "application/json");
+    });
+
     // CORS preflight
     impl_->server.Options(".*", [](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
