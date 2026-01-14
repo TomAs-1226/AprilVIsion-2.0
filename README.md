@@ -362,10 +362,10 @@ sudo modprobe -r uvcvideo && sudo modprobe uvcvideo
 
 ```
 /
-├── CMakeLists.txt           # Build configuration
+├── CMakeLists.txt           # Build configuration (supports Orange Pi + Mac)
 ├── README.md                # This file
 ├── src/
-│   ├── main.cpp            # Entry point
+│   ├── main.cpp            # Orange Pi entry point
 │   ├── types.hpp           # Core data types
 │   ├── ring_buffer.hpp     # Lock-free SPSC buffer
 │   ├── config.hpp/cpp      # YAML configuration
@@ -376,19 +376,37 @@ sudo modprobe -r uvcvideo && sudo modprobe uvcvideo
 │   ├── fusion.hpp/cpp      # Multi-camera fusion
 │   ├── nt_publisher.hpp/cpp # NetworkTables 4
 │   ├── web_server.hpp/cpp  # HTTP + SSE
-│   └── field_layout.hpp/cpp # Field tag positions
+│   ├── field_layout.hpp/cpp # Field tag positions
+│   ├── platform/
+│   │   └── frame_source.hpp # Platform abstraction interface
+│   └── sim/                 # Mac Simulator
+│       ├── sim_main.cpp     # Simulator entry point
+│       ├── simulator.hpp/cpp # Main simulator orchestration
+│       ├── sim_types.hpp    # Simulator data types
+│       ├── robot_dynamics.hpp/cpp # WASD robot physics
+│       ├── field_renderer.hpp/cpp # Synthetic tag rendering
+│       └── auto_align.hpp/cpp # PID auto-align controller
+├── assets/                  # Simulator assets
+│   ├── 2024-crescendo.json  # WPILib field layout
+│   ├── mac_cam_intrinsics.yml # Mac webcam calibration
+│   └── mac_cam_extrinsics.yml # Camera mount transform
 ├── web/
 │   ├── index.html          # Dashboard
 │   ├── app.js              # Dashboard logic
 │   └── style.css           # Dashboard styles
 ├── config/
-│   ├── config.yml          # Main configuration
+│   ├── config.yml          # Orange Pi configuration
+│   ├── sim_config.yml      # Mac Simulator configuration
 │   ├── cam*_intrinsics.yml # Camera calibration
 │   └── field_layout.json   # Tag positions
 ├── scripts/
-│   ├── install_deps.sh     # Dependency installer
-│   ├── run.sh              # Run script
-│   └── deploy.sh           # Production deploy
+│   ├── install_deps.sh     # Orange Pi dependency installer
+│   ├── install_mac.sh      # Mac dependency installer
+│   ├── build_mac.sh        # Mac build script
+│   ├── run_sim.sh          # Run simulator
+│   ├── fetch_layout.sh     # Download field layout
+│   ├── run.sh              # Orange Pi run script
+│   └── install_service.sh  # Production deploy
 └── deploy/
     └── frc_vision.service  # systemd service
 ```
@@ -403,6 +421,212 @@ MIT License - Free for FRC teams and educational use.
 - WPILib for NetworkTables
 - cpp-httplib for web server
 - Orange Pi community for hardware support
+
+---
+
+## Mac Simulator
+
+The Mac simulator allows testing and validation of the vision system on a MacBook without requiring actual robot hardware. It uses the same core vision pipeline as the Orange Pi build.
+
+### Features
+
+- **2024 CRESCENDO Field Layout** - All 16 AprilTags in correct positions
+- **Robot Dynamics** - WASD movement with realistic physics and odometry drift
+- **Synthetic Tag Rendering** - Perspective-correct AprilTag rendering
+- **Webcam Compositing** - Overlay synthetic tags on live webcam feed
+- **Three Pose Views** - Ground truth, odometry (drifting), and vision-corrected
+- **Auto-Align Demo** - PID controller to align with nearest tag
+- **Full Pipeline** - Same detection, pose estimation, and fusion as production
+
+### Quick Start (macOS)
+
+#### 1. Install Dependencies
+
+```bash
+# Run the install script (installs Xcode tools, Homebrew, OpenCV, etc.)
+./scripts/install_mac.sh
+```
+
+**Required tools installed:**
+- Xcode Command Line Tools (Apple Clang compiler)
+- Homebrew package manager
+- CMake 3.16+
+- OpenCV 4.x with highgui
+- yaml-cpp
+- pkg-config
+
+#### 2. Build
+
+```bash
+# Using the convenience script:
+./scripts/build_mac.sh
+
+# Or manually:
+mkdir build && cd build
+cmake .. -DBUILD_MAC_SIM=ON
+make -j$(sysctl -n hw.ncpu)
+```
+
+#### 3. Run
+
+```bash
+# Using the convenience script:
+./scripts/run_sim.sh
+
+# Or directly:
+./build/frc_vision_sim
+
+# Without webcam (synthetic only):
+./build/frc_vision_sim --no-webcam
+```
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| **W/A/S/D** | Move robot (forward/left/back/right) |
+| **Q/E** | Rotate CCW/CW |
+| **Shift** | Turbo mode (faster movement) |
+| **V** | Toggle auto-align to nearest tag |
+| **R** | Reset robot pose |
+| **1** | Toggle true pose (green) |
+| **2** | Toggle odometry pose (orange) |
+| **3** | Toggle fused pose (magenta) |
+| **4** | Toggle webcam composite |
+| **5** | Toggle detection source (composite vs synthetic) |
+| **ESC** | Quit |
+
+### Windows
+
+The simulator opens two windows:
+
+1. **Camera View** - Shows the synthetic/composite camera feed with detected tag overlays
+2. **Field View** - Top-down view of the field showing robot poses and all tags
+
+### Configuration
+
+Edit `config/sim_config.yml`:
+
+```yaml
+dynamics:
+  max_speed: 4.0         # m/s
+  max_turbo_speed: 5.5   # m/s with Shift
+  odom_noise: 0.02       # Odometry noise factor
+
+auto_align:
+  standoff_distance: 1.0 # meters from tag when aligned
+
+camera:
+  width: 640
+  height: 480
+  add_noise: false       # Simulate sensor noise
+  motion_blur: false     # Simulate motion blur
+
+start_pose:
+  x: 2.0                 # Starting X position (meters)
+  y: 2.0                 # Starting Y position (meters)
+  theta: 0.0             # Starting heading (radians)
+
+webcam:
+  enable: true           # Use MacBook webcam
+  device: 0              # Camera device index
+```
+
+### Assets
+
+The simulator uses these asset files:
+
+| File | Description |
+|------|-------------|
+| `assets/2024-crescendo.json` | WPILib field layout with all 16 tags |
+| `assets/mac_cam_intrinsics.yml` | Camera calibration (default for MacBook webcam) |
+| `assets/mac_cam_extrinsics.yml` | Camera mount position on robot |
+
+To download the official field layout:
+```bash
+./scripts/fetch_layout.sh
+```
+
+### Camera Calibration
+
+The default intrinsics are approximate for a MacBook webcam. For best accuracy:
+
+1. Print a checkerboard calibration pattern
+2. Use OpenCV's `cv::calibrateCamera()` with 20+ images
+3. Save results to `assets/mac_cam_intrinsics.yml`:
+
+```yaml
+%YAML:1.0
+camera_matrix: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ fx, 0, cx, 0, fy, cy, 0, 0, 1 ]
+distortion_coefficients: !!opencv-matrix
+   rows: 5
+   cols: 1
+   dt: d
+   data: [ k1, k2, p1, p2, k3 ]
+```
+
+### Architecture
+
+The Mac simulator uses the same core modules as the Orange Pi production build:
+
+```
+Mac Simulator                       Orange Pi Build
+--------------                      ---------------
+sim_main.cpp                        main.cpp
+    │                                   │
+    ▼                                   ▼
+┌──────────────┐                   ┌──────────────┐
+│  Simulator   │                   │   Camera     │
+│  (WASD/QE)   │                   │   Capture    │
+└──────┬───────┘                   └──────┬───────┘
+       │                                  │
+       ▼                                  ▼
+┌──────────────┐                   ┌──────────────┐
+│  Field       │                   │              │
+│  Renderer    │                   │              │
+└──────┬───────┘                   │              │
+       │                           │              │
+       ▼                           │              │
+┌──────────────────────────────────┴──────────────┐
+│                 SHARED CORE                      │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐          │
+│  │Detector │  │ Tracker │  │  Pose   │          │
+│  └────┬────┘  └────┬────┘  └────┬────┘          │
+│       └────────────┴────────────┘               │
+│                    │                             │
+│                    ▼                             │
+│              ┌──────────┐                        │
+│              │  Fusion  │                        │
+│              └────┬─────┘                        │
+│                   │                              │
+│       ┌───────────┼───────────┐                 │
+│       ▼           ▼           ▼                 │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐           │
+│  │ NT Pub  │ │Web Serv │ │ Status  │           │
+│  └─────────┘ └─────────┘ └─────────┘           │
+└─────────────────────────────────────────────────┘
+```
+
+### Validation Use Cases
+
+1. **Pose Correction** - Watch the fused pose (magenta) correct towards true pose (green) while odometry (orange) drifts
+2. **Fast Motion Tracking** - Move quickly and observe dropout recovery
+3. **Auto-Align** - Press V and watch the robot converge to face the nearest tag
+4. **Multi-Tag Accuracy** - Position robot to see multiple tags for better pose estimates
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| No webcam | Run with `--no-webcam` or check camera permissions in System Preferences |
+| Build fails | Run `./scripts/install_mac.sh` to install dependencies |
+| Field layout missing | Run `./scripts/fetch_layout.sh` |
+| Window not appearing | Ensure OpenCV highgui is installed (`brew reinstall opencv`) |
+| Low FPS | Reduce camera resolution in config, or disable motion blur |
 
 ---
 

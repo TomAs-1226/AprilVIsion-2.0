@@ -1,0 +1,24 @@
+%YAML:1.0
+---
+# Camera-to-robot extrinsic transform for Mac simulator
+#
+# This defines where the simulated camera is mounted on the robot:
+# - Position is relative to robot center (meters)
+# - Rotation is relative to robot forward direction (degrees)
+#
+# Default: Camera mounted at front of robot, 0.5m high, facing forward
+
+# Position in robot frame (meters)
+translation:
+  x: 0.30    # Forward from robot center
+  y: 0.0     # Left from robot center (0 = centered)
+  z: 0.45    # Height from ground
+
+# Rotation from robot frame (degrees)
+# Roll: rotation around X (forward) axis
+# Pitch: rotation around Y (left) axis - positive = looking down
+# Yaw: rotation around Z (up) axis - positive = looking left
+rotation:
+  roll: 0.0
+  pitch: 15.0   # Camera tilted down slightly to see floor tags
+  yaw: 0.0      # Facing straight forward

@@ -1,0 +1,57 @@
+# FRC Vision Mac Simulator Configuration
+# 2024 CRESCENDO Field Layout
+#
+# This config controls the Mac simulator for testing pose correction,
+# tracking, and auto-align logic on desktop.
+
+# ==============================================================================
+# Robot Dynamics
+# ==============================================================================
+dynamics:
+  max_speed: 4.0         # m/s normal speed
+  max_turbo_speed: 5.5   # m/s with Shift held
+  max_rotation: 6.0      # rad/s
+  odom_noise: 0.02       # fraction of motion added as noise
+
+# ==============================================================================
+# Auto-Align Controller
+# ==============================================================================
+auto_align:
+  pos_kp: 2.0            # Position P gain
+  pos_ki: 0.1            # Position I gain
+  pos_kd: 0.3            # Position D gain
+  heading_kp: 4.0        # Heading P gain
+  heading_ki: 0.1        # Heading I gain
+  heading_kd: 0.2        # Heading D gain
+  standoff_distance: 1.0 # meters from tag when aligned
+
+# ==============================================================================
+# Synthetic Camera
+# ==============================================================================
+camera:
+  width: 640
+  height: 480
+  add_noise: false       # Add sensor noise
+  motion_blur: false     # Simulate motion blur
+
+# ==============================================================================
+# Start Position
+# ==============================================================================
+start_pose:
+  x: 2.0                 # meters from origin
+  y: 2.0                 # meters from origin
+  theta: 0.0             # radians (0 = facing +X)
+
+# ==============================================================================
+# Webcam Settings
+# ==============================================================================
+webcam:
+  enable: true           # Use MacBook webcam for composite
+  device: 0              # Camera device index
+
+# ==============================================================================
+# Asset Paths (relative to config directory)
+# ==============================================================================
+field_layout: "../assets/2024-crescendo.json"
+intrinsics: "../assets/mac_cam_intrinsics.yml"
+extrinsics: "../assets/mac_cam_extrinsics.yml"
