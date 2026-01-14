@@ -224,6 +224,15 @@ private:
 template <typename T>
 class LatestValue {
 public:
+    LatestValue() = default;
+    ~LatestValue() = default;
+
+    // Non-copyable and non-movable (due to mutex)
+    LatestValue(const LatestValue&) = delete;
+    LatestValue& operator=(const LatestValue&) = delete;
+    LatestValue(LatestValue&&) = delete;
+    LatestValue& operator=(LatestValue&&) = delete;
+
     void set(T value) {
         std::lock_guard<std::mutex> lock(mutex_);
         value_ = std::move(value);

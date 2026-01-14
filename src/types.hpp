@@ -15,8 +15,11 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <cmath>
 
 #include <opencv2/core.hpp>
+#include <opencv2/calib3d.hpp>
 
 namespace frc_vision {
 

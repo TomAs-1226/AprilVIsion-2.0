@@ -31,32 +31,38 @@ bool ConfigManager::reload() {
 
         // Parse cameras
         if (root["cameras"]) {
-            parse_cameras(&root["cameras"]);
+            YAML::Node cameras_node = root["cameras"];
+            parse_cameras(&cameras_node);
         }
 
         // Parse detector settings
         if (root["apriltag"]) {
-            parse_detector(&root["apriltag"]);
+            YAML::Node apriltag_node = root["apriltag"];
+            parse_detector(&apriltag_node);
         }
 
         // Parse tracking settings
         if (root["tracking"]) {
-            parse_tracker(&root["tracking"]);
+            YAML::Node tracking_node = root["tracking"];
+            parse_tracker(&tracking_node);
         }
 
         // Parse field layout
         if (root["field"]) {
-            parse_field(&root["field"]);
+            YAML::Node field_node = root["field"];
+            parse_field(&field_node);
         }
 
         // Parse output settings
         if (root["outputs"]) {
-            parse_output(&root["outputs"]);
+            YAML::Node outputs_node = root["outputs"];
+            parse_output(&outputs_node);
         }
 
         // Parse performance settings
         if (root["performance"]) {
-            parse_performance(&root["performance"]);
+            YAML::Node performance_node = root["performance"];
+            parse_performance(&performance_node);
         }
 
         std::cout << "[Config] Loaded configuration from " << config_path_ << std::endl;
@@ -96,7 +102,8 @@ bool ConfigManager::parse_cameras(void* node_ptr) {
         }
 
         if (cam_node["extrinsics"]) {
-            cam.camera_to_robot = parse_transform(&cam_node["extrinsics"]);
+            YAML::Node extrinsics_node = cam_node["extrinsics"];
+            cam.camera_to_robot = parse_transform(&extrinsics_node);
         }
 
         config_.cameras.push_back(std::move(cam));

@@ -10,7 +10,9 @@
 #include "../tracker.hpp"
 
 #include <opencv2/imgproc.hpp>
+#include <opencv2/calib3d.hpp>
 #include <yaml-cpp/yaml.h>
+#include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
 #include <iomanip>

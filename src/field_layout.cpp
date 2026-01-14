@@ -5,6 +5,7 @@
 
 #include "field_layout.hpp"
 #include <nlohmann/json.hpp>
+#include <opencv2/calib3d.hpp>
 #include <fstream>
 #include <iostream>
 #include <cmath>

@@ -9,8 +9,11 @@
 
 #include "types.hpp"
 #include "tracker.hpp"
+#include "detector.hpp"
+#include "pose.hpp"
 #include <vector>
 #include <mutex>
+#include <memory>
 
 namespace frc_vision {
 

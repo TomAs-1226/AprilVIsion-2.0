@@ -26,12 +26,18 @@ public:
     httplib::Server server;
 
     // Latest frames for MJPEG streaming (per camera)
-    std::vector<LatestValue<std::vector<uint8_t>>> latest_frames;
+    std::vector<std::unique_ptr<LatestValue<std::vector<uint8_t>>>> latest_frames;
 
     // Latest data for WebSocket-like SSE
-    LatestValue<std::string> latest_detections_json;
-    LatestValue<std::string> latest_fused_json;
-    LatestValue<std::string> latest_status_json;
+    std::unique_ptr<LatestValue<std::string>> latest_detections_json;
+    std::unique_ptr<LatestValue<std::string>> latest_fused_json;
+    std::unique_ptr<LatestValue<std::string>> latest_status_json;
+
+    Impl() :
+        latest_detections_json(std::make_unique<LatestValue<std::string>>()),
+        latest_fused_json(std::make_unique<LatestValue<std::string>>()),
+        latest_status_json(std::make_unique<LatestValue<std::string>>())
+    {}
 
     // SSE client management
     std::atomic<int> sse_client_count{0};
@@ -62,7 +68,10 @@ bool WebServer::initialize(int port, const std::string& web_root,
     impl_->num_cameras = num_cameras;
     impl_->web_root = web_root;
     impl_->config_manager = config_manager;
-    impl_->latest_frames.resize(num_cameras);
+    impl_->latest_frames.clear();
+    for (int i = 0; i < num_cameras; i++) {
+        impl_->latest_frames.push_back(std::make_unique<LatestValue<std::vector<uint8_t>>>());
+    }
 
     // ==========================================================================
     // Static file serving
@@ -91,7 +100,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                     uint64_t last_version = 0;
 
                     while (!should_stop_.load()) {
-                        auto frame_opt = impl_->latest_frames[i].get_if_changed(last_version);
+                        auto frame_opt = impl_->latest_frames[i]->get_if_changed(last_version);
 
                         if (frame_opt) {
                             const auto& [frame, version] = *frame_opt;
@@ -143,7 +152,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                     bool sent = false;
 
                     // Check detections
-                    auto det_opt = impl_->latest_detections_json.get_if_changed(last_det_version);
+                    auto det_opt = impl_->latest_detections_json->get_if_changed(last_det_version);
                     if (det_opt) {
                         const auto& [data, version] = *det_opt;
                         last_det_version = version;
@@ -155,7 +164,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                     }
 
                     // Check fused pose
-                    auto fused_opt = impl_->latest_fused_json.get_if_changed(last_fused_version);
+                    auto fused_opt = impl_->latest_fused_json->get_if_changed(last_fused_version);
                     if (fused_opt) {
                         const auto& [data, version] = *fused_opt;
                         last_fused_version = version;
@@ -167,7 +176,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                     }
 
                     // Check status
-                    auto status_opt = impl_->latest_status_json.get_if_changed(last_status_version);
+                    auto status_opt = impl_->latest_status_json->get_if_changed(last_status_version);
                     if (status_opt) {
                         const auto& [data, version] = *status_opt;
                         last_status_version = version;
@@ -309,7 +318,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
         res.set_header("Cache-Control", "no-cache");
 
         // Get latest status from stored JSON
-        auto status_opt = impl_->latest_status_json.get();
+        auto status_opt = impl_->latest_status_json->get();
 
         json j;
 
@@ -421,7 +430,7 @@ void WebServer::stop() {
 
 void WebServer::push_frame(int camera_id, const std::vector<uint8_t>& jpeg) {
     if (camera_id >= 0 && camera_id < static_cast<int>(impl_->latest_frames.size())) {
-        impl_->latest_frames[camera_id].set(jpeg);
+        impl_->latest_frames[camera_id]->set(jpeg);
     }
 }
 
@@ -467,7 +476,7 @@ void WebServer::push_detections(const FrameDetections& detections) {
         j["tags_used"] = detections.tags_used_for_pose;
     }
 
-    impl_->latest_detections_json.set(j.dump());
+    impl_->latest_detections_json->set(j.dump());
 }
 
 void WebServer::push_fused_pose(const FusedPose& fused) {
@@ -503,7 +512,7 @@ void WebServer::push_fused_pose(const FusedPose& fused) {
     j["cameras_contributing"] = fused.cameras_contributing;
     j["total_tags"] = fused.total_tags;
 
-    impl_->latest_fused_json.set(j.dump());
+    impl_->latest_fused_json->set(j.dump());
 }
 
 void WebServer::push_status(const SystemStatus& status) {
@@ -531,7 +540,7 @@ void WebServer::push_status(const SystemStatus& status) {
     j["fused_valid"] = status.fused_pose_valid;
     j["sse_clients"] = impl_->sse_client_count.load();
 
-    impl_->latest_status_json.set(j.dump());
+    impl_->latest_status_json->set(j.dump());
 }
 
 int WebServer::websocket_client_count() const {
