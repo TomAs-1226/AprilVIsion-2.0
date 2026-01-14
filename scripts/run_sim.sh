@@ -18,6 +18,13 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 EXECUTABLE="$BUILD_DIR/frc_vision_sim"
 
+# Setup Homebrew environment (needed for dynamic libraries)
+if [[ -f "/opt/homebrew/bin/brew" ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -f "/usr/local/bin/brew" ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 # Check if executable exists
 if [[ ! -f "$EXECUTABLE" ]]; then
     echo "Simulator not built. Building now..."

@@ -27,6 +27,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Setup Homebrew environment
+setup_homebrew_env() {
+    if [[ -f "/opt/homebrew/bin/brew" ]]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [[ -f "/usr/local/bin/brew" ]]; then
+        eval "$(/usr/local/bin/brew shellenv)"
+    fi
+}
+
 print_status() {
     echo -e "${GREEN}[✓]${NC} $1"
 }
@@ -88,24 +97,23 @@ print_status "Compiler: $CLANG_VERSION"
 echo ""
 echo "Checking Homebrew..."
 
+# Try to setup Homebrew env first (in case it's installed but not in PATH)
+setup_homebrew_env
+
 if ! command -v brew &>/dev/null; then
     print_warning "Homebrew not installed."
     echo "Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
     # Add Homebrew to PATH for this session
-    if [[ -f "/opt/homebrew/bin/brew" ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    elif [[ -f "/usr/local/bin/brew" ]]; then
-        eval "$(/usr/local/bin/brew shellenv)"
-    fi
+    setup_homebrew_env
 else
     print_status "Homebrew installed"
 fi
 
-# Update Homebrew
+# Update Homebrew (non-fatal if it fails)
 echo "Updating Homebrew..."
-brew update
+brew update || print_warning "Homebrew update failed (network issue?), continuing anyway..."
 
 # ============================================================================
 # Install Dependencies

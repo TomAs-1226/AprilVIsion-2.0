@@ -14,6 +14,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 
+# Setup Homebrew environment (needed for cmake, pkg-config, etc.)
+if [[ -f "/opt/homebrew/bin/brew" ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -f "/usr/local/bin/brew" ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 # Parse arguments
 BUILD_TYPE="Release"
 if [[ "$1" == "debug" ]]; then
@@ -28,12 +35,18 @@ echo ""
 
 # Check if dependencies are installed
 if ! command -v cmake &>/dev/null; then
-    echo "CMake not found. Run: ./scripts/install_mac.sh"
+    echo "CMake not found."
+    echo ""
+    echo "Install it with: brew install cmake"
+    echo "Or run: ./scripts/install_mac.sh"
     exit 1
 fi
 
-if ! pkg-config --exists opencv4; then
-    echo "OpenCV not found. Run: ./scripts/install_mac.sh"
+if ! pkg-config --exists opencv4 2>/dev/null; then
+    echo "OpenCV not found."
+    echo ""
+    echo "Install it with: brew install opencv"
+    echo "Or run: ./scripts/install_mac.sh"
     exit 1
 fi
 
