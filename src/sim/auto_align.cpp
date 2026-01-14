@@ -126,9 +126,31 @@ bool AutoAlignController::update(const Pose2D& current_pose,
         return false;
     }
 
-    // Compute target position and heading
-    double target_x, target_y, target_heading;
-    compute_target(current_pose, target_tag_id_, target_x, target_y, target_heading);
+    // Get tag position
+    const auto& tag = field_.get_tag(target_tag_id_);
+    double tag_x = tag.center_field.x;
+    double tag_y = tag.center_field.y;
+
+    // Compute direction from robot to tag
+    double dx_to_tag = tag_x - current_pose.x;
+    double dy_to_tag = tag_y - current_pose.y;
+    double dist_to_tag = std::sqrt(dx_to_tag * dx_to_tag + dy_to_tag * dy_to_tag);
+
+    // Target heading: face the tag
+    double target_heading = std::atan2(dy_to_tag, dx_to_tag);
+
+    // Target position: standoff distance from tag, towards the robot's current direction
+    double target_x, target_y;
+    if (dist_to_tag > 0.01) {
+        // Move towards a position that is standoff_distance from tag, along the line robot->tag
+        double unit_x = dx_to_tag / dist_to_tag;
+        double unit_y = dy_to_tag / dist_to_tag;
+        target_x = tag_x - unit_x * params_.standoff_distance;
+        target_y = tag_y - unit_y * params_.standoff_distance;
+    } else {
+        target_x = current_pose.x;
+        target_y = current_pose.y;
+    }
 
     // Position error in field frame
     double error_x = target_x - current_pose.x;
@@ -153,10 +175,21 @@ bool AutoAlignController::update(const Pose2D& current_pose,
         return false;
     }
 
-    // Compute control outputs (in robot frame)
-    vx_out = pos_x_pid_.calculate(0, -error_forward, dt);
-    vy_out = pos_y_pid_.calculate(0, -error_left, dt);
-    omega_out = heading_pid_.calculate(0, -error_heading, dt);
+    // Two-phase approach:
+    // Phase 1: If not facing the tag, rotate first
+    // Phase 2: Once facing approximately right, drive towards target while correcting heading
+
+    if (std::abs(error_heading) > 0.5) {  // More than ~30 degrees off
+        // Phase 1: Just rotate to face the tag
+        vx_out = 0;
+        vy_out = 0;
+        omega_out = heading_pid_.calculate(0, -error_heading, dt);
+    } else {
+        // Phase 2: Drive and correct heading simultaneously
+        vx_out = pos_x_pid_.calculate(0, -error_forward, dt);
+        vy_out = pos_y_pid_.calculate(0, -error_left, dt);
+        omega_out = heading_pid_.calculate(0, -error_heading, dt);
+    }
 
     return true;
 }

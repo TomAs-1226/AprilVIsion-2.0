@@ -151,11 +151,22 @@ cv::Point2d FieldRenderer::project_point(const cv::Point3d& world_pt, const cv::
 }
 
 bool FieldRenderer::is_tag_visible(const FieldTag& tag, const cv::Mat& R, const cv::Mat& t) const {
-    // Check if tag center is in front of camera and within image bounds
+    // Check if tag center is in front of camera
     cv::Point2d center_proj = project_point(tag.center_field.to_cv(), R, t);
 
-    if (center_proj.x < -100 || center_proj.x > params_.width + 100 ||
-        center_proj.y < -100 || center_proj.y > params_.height + 100) {
+    // Allow tags that are partially off-screen (more generous bounds)
+    if (center_proj.x < -300 || center_proj.x > params_.width + 300 ||
+        center_proj.y < -300 || center_proj.y > params_.height + 300) {
+        return false;
+    }
+
+    // Check distance to tag - don't render if too far (> 15 meters)
+    cv::Mat t_cam = -R.t() * t;  // Camera position in world
+    double dx = tag.center_field.x - t_cam.at<double>(0);
+    double dy = tag.center_field.y - t_cam.at<double>(1);
+    double dz = tag.center_field.z - t_cam.at<double>(2);
+    double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (distance > 15.0) {
         return false;
     }
 
@@ -173,29 +184,36 @@ bool FieldRenderer::is_tag_visible(const FieldTag& tag, const cv::Mat& R, const 
     cv::Mat normal_world = R_tag.col(2);
 
     // View direction (from camera to tag center in world frame)
-    cv::Mat t_cam = -R.t() * t;  // Camera position in world
     cv::Mat view_dir(3, 1, CV_64F);
-    view_dir.at<double>(0) = tag.center_field.x - t_cam.at<double>(0);
-    view_dir.at<double>(1) = tag.center_field.y - t_cam.at<double>(1);
-    view_dir.at<double>(2) = tag.center_field.z - t_cam.at<double>(2);
-
-    double norm = cv::norm(view_dir);
-    view_dir /= norm;
+    view_dir.at<double>(0) = dx;
+    view_dir.at<double>(1) = dy;
+    view_dir.at<double>(2) = dz;
+    view_dir /= distance;
 
     double dot = normal_world.dot(view_dir);
 
     // Tag is visible if normal points towards camera (dot < 0 means facing camera)
-    return dot < 0.5;  // Allow some side viewing
+    // Allow viewing from up to ~75 degrees from perpendicular
+    return dot < 0.7;
 }
 
 void FieldRenderer::render_tag(cv::Mat& image, const FieldTag& tag, const cv::Mat& R, const cv::Mat& t) {
     // Get tag corners in image
     std::vector<cv::Point2f> img_corners;
+    int behind_camera = 0;
     for (const auto& corner : tag.corners_field) {
         cv::Point2d proj = project_point(corner.to_cv(), R, t);
-        if (proj.x < 0) return;  // Tag is behind camera
+        if (proj.x < 0) {
+            behind_camera++;
+            // Approximate corner position for partially visible tags
+            proj.x = params_.width / 2;
+            proj.y = params_.height / 2;
+        }
         img_corners.push_back(cv::Point2f(static_cast<float>(proj.x), static_cast<float>(proj.y)));
     }
+
+    // If more than 2 corners are behind camera, skip rendering
+    if (behind_camera > 2) return;
 
     // Get source pattern
     auto it = tag_patterns_.find(tag.id);

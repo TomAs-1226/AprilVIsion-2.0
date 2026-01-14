@@ -83,6 +83,7 @@ private:
 
     TimePoint last_update_time_;
     TimePoint last_render_time_;
+    TimePoint key_hold_time_;  // Last time a movement key was pressed
 
     // Configuration
     SimConfig sim_config_;

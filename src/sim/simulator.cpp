@@ -26,6 +26,7 @@ namespace sim {
 Simulator::Simulator()
     : last_update_time_(Clock::now())
     , last_render_time_(Clock::now())
+    , key_hold_time_(Clock::now())
     , fps_start_time_(Clock::now()) {
 }
 
@@ -501,9 +502,7 @@ void Simulator::process_input() {
     if (key >= 0) {
         handle_key(key);
     }
-
-    // Reset one-shot keys
-    input_.reset_pose = false;
+    // Note: Don't reset movement keys here - they stay active until handle_key releases them
 }
 
 void Simulator::handle_key(int key) {
@@ -512,21 +511,28 @@ void Simulator::handle_key(int key) {
         key = key - 'A' + 'a';
     }
 
-    switch (key) {
-        // Movement
-        case 'w': input_.forward = true; break;
-        case 's': input_.backward = true; break;
-        case 'a': input_.left = true; break;
-        case 'd': input_.right = true; break;
-        case 'q': input_.rotate_ccw = true; break;
-        case 'e': input_.rotate_cw = true; break;
+    // Reset movement key hold timers - movement keys need repeated key events to stay active
+    // When a WASD/QE key is pressed, it sets the flag and resets the timer
+    // The timer in update_dynamics will clear the flag if no key event in ~100ms
 
-        // Modifiers (check for no key to release)
-        case 0x10: // Shift (varies by platform)
+    switch (key) {
+        // Movement - these stay active while key is held (key repeat)
+        case 'w': input_.forward = true; key_hold_time_ = Clock::now(); break;
+        case 's': input_.backward = true; key_hold_time_ = Clock::now(); break;
+        case 'a': input_.left = true; key_hold_time_ = Clock::now(); break;
+        case 'd': input_.right = true; key_hold_time_ = Clock::now(); break;
+        case 'q': input_.rotate_ccw = true; key_hold_time_ = Clock::now(); break;
+        case 'e': input_.rotate_cw = true; key_hold_time_ = Clock::now(); break;
+
+        // Shift for turbo (varies by platform)
+        case 0x10:
+        case 225:  // macOS left shift
+        case 229:  // macOS right shift
             input_.turbo = true;
+            key_hold_time_ = Clock::now();
             break;
 
-        // Toggles
+        // Toggles - one-shot, don't need hold
         case 'v':
             input_.auto_align = !input_.auto_align;
             auto_align_.set_enabled(input_.auto_align);
@@ -571,29 +577,28 @@ void Simulator::handle_key(int key) {
             break;
 
         default:
-            // Release movement keys when any other key
-            input_.forward = input_.backward = false;
-            input_.left = input_.right = false;
-            input_.rotate_ccw = input_.rotate_cw = false;
-            input_.turbo = false;
+            // Unknown key - don't clear movement, it might be a modifier
             break;
     }
-
-    // Always release movement on key release (can't detect directly, so release on next frame)
-    // This is handled by the default case above
 }
 
 void Simulator::update_dynamics(double dt) {
     if (!auto_align_.is_enabled()) {
         dynamics_.set_external_command_mode(false);
     }
-    dynamics_.update(input_, dt);
 
-    // Clear movement keys after update (for keyboard release detection)
-    input_.forward = input_.backward = false;
-    input_.left = input_.right = false;
-    input_.rotate_ccw = input_.rotate_cw = false;
-    input_.turbo = false;
+    // Check if we should clear movement keys (no key event for 150ms)
+    auto now = Clock::now();
+    double elapsed_ms = std::chrono::duration<double, std::milli>(now - key_hold_time_).count();
+    if (elapsed_ms > 150.0) {
+        // No recent key event - clear all movement
+        input_.forward = input_.backward = false;
+        input_.left = input_.right = false;
+        input_.rotate_ccw = input_.rotate_cw = false;
+        input_.turbo = false;
+    }
+
+    dynamics_.update(input_, dt);
 }
 
 void Simulator::handle_auto_align(double dt) {
