@@ -691,14 +691,14 @@ int Simulator::get_tag_at_screen_pos(int x, int y) const {
     auto [fx, fy] = screen_to_field(x, y);
 
     // Check each tag in the field layout
-    for (const auto& tag : field_.get_all_tags()) {
+    for (const auto& [tag_id, tag] : field_.tags) {
         double tag_x = tag.center_field.x;
         double tag_y = tag.center_field.y;
 
         // Check if click is within 0.3 meters of tag center
         double dist = std::sqrt(std::pow(fx - tag_x, 2) + std::pow(fy - tag_y, 2));
         if (dist < 0.3) {
-            return tag.id;
+            return tag_id;
         }
     }
 

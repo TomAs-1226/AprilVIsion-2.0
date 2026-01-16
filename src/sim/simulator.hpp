@@ -98,6 +98,11 @@ public:
      */
     void shutdown() { shutdown_requested_.store(true); }
 
+    /**
+     * @brief Override webcam usage setting
+     */
+    void set_use_webcam(bool enable) { sim_config_.use_webcam = enable; }
+
 private:
     // Initialization
     bool load_config(const std::string& path);

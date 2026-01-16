@@ -129,12 +129,14 @@ int main(int argc, char* argv[]) {
     frc_vision::sim::Simulator simulator;
     g_simulator = &simulator;
 
-    // Override webcam setting if --no-webcam was specified
-    // (config will be modified after load)
-
     if (!simulator.initialize(config_path)) {
         std::cerr << "[Sim] Failed to initialize simulator" << std::endl;
         return 1;
+    }
+
+    // Override webcam setting if --no-webcam was specified
+    if (!use_webcam) {
+        simulator.set_use_webcam(false);
     }
 
     int result = simulator.run();

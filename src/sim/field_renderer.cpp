@@ -20,7 +20,6 @@ namespace sim {
 // Generate tag pattern for 36h11 family
 // Tag pattern is 10x10 grid with 8x8 data region
 static const int TAG_GRID_SIZE = 10;
-static const int TAG_DATA_SIZE = 8;
 
 // ============================================================================
 // FieldRenderer Implementation
