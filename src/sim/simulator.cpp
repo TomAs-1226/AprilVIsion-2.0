@@ -1022,7 +1022,7 @@ void Simulator::handle_path_execution(double dt) {
 
 std::set<int> Simulator::get_visible_tags() const {
     std::set<int> visible;
-    for (const auto& det : last_detections_.tags) {
+    for (const auto& det : last_detections_.detections) {
         visible.insert(det.id);
     }
     return visible;
@@ -1032,7 +1032,7 @@ std::map<int, double> Simulator::get_tag_distances() const {
     std::map<int, double> distances;
     Pose2D robot = dynamics_.state().true_pose;
 
-    for (const auto& det : last_detections_.tags) {
+    for (const auto& det : last_detections_.detections) {
         // Calculate distance from robot to tag
         if (field_.has_tag(det.id)) {
             const auto& tag = field_.get_tag(det.id);
@@ -1085,7 +1085,7 @@ void Simulator::execute_action_step(const ActionBlock::ActionStep& step) {
                     auto_align_.set_target_tag(tag_id);
                 }
             }
-            auto_align_.enable(true);
+            auto_align_.set_enabled(true);
             break;
 
         case RobotAction::FACE_TAG:

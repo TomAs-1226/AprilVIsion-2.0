@@ -72,6 +72,122 @@ enum class ConditionLogic {
 };
 
 /**
+ * @brief Available robot actions for auto builder
+ */
+enum class RobotAction {
+    // Intake actions
+    INTAKE_IN,
+    INTAKE_OUT,
+    INTAKE_STOP,
+
+    // Shooter actions
+    SPIN_UP_SHOOTER,
+    SHOOT,
+    SHOOTER_STOP,
+
+    // Elevator/arm actions
+    SET_ELEVATOR_HEIGHT,
+    STOW,
+    EXTEND_ARM,
+    RETRACT_ARM,
+
+    // Vision/alignment actions
+    AUTO_ALIGN_TO_TAG,
+    FACE_TAG,
+    TRACK_TAG,
+
+    // Climbing
+    DEPLOY_CLIMBER,
+    CLIMB,
+
+    // Generic
+    WAIT,
+    CUSTOM_COMMAND
+};
+
+/**
+ * @brief Get human-readable name for action
+ */
+inline std::string action_to_string(RobotAction action) {
+    switch (action) {
+        case RobotAction::INTAKE_IN: return "Intake In";
+        case RobotAction::INTAKE_OUT: return "Intake Out";
+        case RobotAction::INTAKE_STOP: return "Intake Stop";
+        case RobotAction::SPIN_UP_SHOOTER: return "Spin Up Shooter";
+        case RobotAction::SHOOT: return "Shoot";
+        case RobotAction::SHOOTER_STOP: return "Shooter Stop";
+        case RobotAction::SET_ELEVATOR_HEIGHT: return "Set Elevator Height";
+        case RobotAction::STOW: return "Stow";
+        case RobotAction::EXTEND_ARM: return "Extend Arm";
+        case RobotAction::RETRACT_ARM: return "Retract Arm";
+        case RobotAction::AUTO_ALIGN_TO_TAG: return "Auto-Align to Tag";
+        case RobotAction::FACE_TAG: return "Face Tag";
+        case RobotAction::TRACK_TAG: return "Track Tag";
+        case RobotAction::DEPLOY_CLIMBER: return "Deploy Climber";
+        case RobotAction::CLIMB: return "Climb";
+        case RobotAction::WAIT: return "Wait";
+        case RobotAction::CUSTOM_COMMAND: return "Custom Command";
+        default: return "Unknown";
+    }
+}
+
+/**
+ * @brief Get WPILib command class name for action
+ */
+inline std::string action_to_command_name(RobotAction action) {
+    switch (action) {
+        case RobotAction::INTAKE_IN: return "IntakeIn";
+        case RobotAction::INTAKE_OUT: return "IntakeOut";
+        case RobotAction::INTAKE_STOP: return "IntakeStop";
+        case RobotAction::SPIN_UP_SHOOTER: return "SpinUpShooter";
+        case RobotAction::SHOOT: return "Shoot";
+        case RobotAction::SHOOTER_STOP: return "ShooterStop";
+        case RobotAction::SET_ELEVATOR_HEIGHT: return "SetElevatorHeight";
+        case RobotAction::STOW: return "Stow";
+        case RobotAction::EXTEND_ARM: return "ExtendArm";
+        case RobotAction::RETRACT_ARM: return "RetractArm";
+        case RobotAction::AUTO_ALIGN_TO_TAG: return "AutoAlignToTarget";
+        case RobotAction::FACE_TAG: return "FaceTag";
+        case RobotAction::TRACK_TAG: return "TrackTag";
+        case RobotAction::DEPLOY_CLIMBER: return "DeployClimber";
+        case RobotAction::CLIMB: return "Climb";
+        case RobotAction::WAIT: return "WaitCommand";
+        case RobotAction::CUSTOM_COMMAND: return "CustomCommand";
+        default: return "UnknownCommand";
+    }
+}
+
+/**
+ * @brief Get required subsystem for action
+ */
+inline std::string action_to_subsystem(RobotAction action) {
+    switch (action) {
+        case RobotAction::INTAKE_IN:
+        case RobotAction::INTAKE_OUT:
+        case RobotAction::INTAKE_STOP:
+            return "IntakeSubsystem";
+        case RobotAction::SPIN_UP_SHOOTER:
+        case RobotAction::SHOOT:
+        case RobotAction::SHOOTER_STOP:
+            return "ShooterSubsystem";
+        case RobotAction::SET_ELEVATOR_HEIGHT:
+        case RobotAction::STOW:
+        case RobotAction::EXTEND_ARM:
+        case RobotAction::RETRACT_ARM:
+            return "ElevatorSubsystem";
+        case RobotAction::AUTO_ALIGN_TO_TAG:
+        case RobotAction::FACE_TAG:
+        case RobotAction::TRACK_TAG:
+            return "VisionSubsystem";
+        case RobotAction::DEPLOY_CLIMBER:
+        case RobotAction::CLIMB:
+            return "ClimberSubsystem";
+        default:
+            return "";
+    }
+}
+
+/**
  * @brief Single condition in a block (for visual block coding style)
  *
  * Represents one condition that can be combined with others.
@@ -190,122 +306,6 @@ struct ActionBlock {
         return desc;
     }
 };
-
-/**
- * @brief Available robot actions for auto builder
- */
-enum class RobotAction {
-    // Intake actions
-    INTAKE_IN,
-    INTAKE_OUT,
-    INTAKE_STOP,
-
-    // Shooter actions
-    SPIN_UP_SHOOTER,
-    SHOOT,
-    SHOOTER_STOP,
-
-    // Elevator/arm actions
-    SET_ELEVATOR_HEIGHT,
-    STOW,
-    EXTEND_ARM,
-    RETRACT_ARM,
-
-    // Vision/alignment actions
-    AUTO_ALIGN_TO_TAG,
-    FACE_TAG,
-    TRACK_TAG,
-
-    // Climbing
-    DEPLOY_CLIMBER,
-    CLIMB,
-
-    // Generic
-    WAIT,
-    CUSTOM_COMMAND
-};
-
-/**
- * @brief Get human-readable name for action
- */
-inline std::string action_to_string(RobotAction action) {
-    switch (action) {
-        case RobotAction::INTAKE_IN: return "Intake In";
-        case RobotAction::INTAKE_OUT: return "Intake Out";
-        case RobotAction::INTAKE_STOP: return "Intake Stop";
-        case RobotAction::SPIN_UP_SHOOTER: return "Spin Up Shooter";
-        case RobotAction::SHOOT: return "Shoot";
-        case RobotAction::SHOOTER_STOP: return "Shooter Stop";
-        case RobotAction::SET_ELEVATOR_HEIGHT: return "Set Elevator Height";
-        case RobotAction::STOW: return "Stow";
-        case RobotAction::EXTEND_ARM: return "Extend Arm";
-        case RobotAction::RETRACT_ARM: return "Retract Arm";
-        case RobotAction::AUTO_ALIGN_TO_TAG: return "Auto-Align to Tag";
-        case RobotAction::FACE_TAG: return "Face Tag";
-        case RobotAction::TRACK_TAG: return "Track Tag";
-        case RobotAction::DEPLOY_CLIMBER: return "Deploy Climber";
-        case RobotAction::CLIMB: return "Climb";
-        case RobotAction::WAIT: return "Wait";
-        case RobotAction::CUSTOM_COMMAND: return "Custom Command";
-        default: return "Unknown";
-    }
-}
-
-/**
- * @brief Get WPILib command class name for action
- */
-inline std::string action_to_command_name(RobotAction action) {
-    switch (action) {
-        case RobotAction::INTAKE_IN: return "IntakeIn";
-        case RobotAction::INTAKE_OUT: return "IntakeOut";
-        case RobotAction::INTAKE_STOP: return "IntakeStop";
-        case RobotAction::SPIN_UP_SHOOTER: return "SpinUpShooter";
-        case RobotAction::SHOOT: return "Shoot";
-        case RobotAction::SHOOTER_STOP: return "ShooterStop";
-        case RobotAction::SET_ELEVATOR_HEIGHT: return "SetElevatorHeight";
-        case RobotAction::STOW: return "Stow";
-        case RobotAction::EXTEND_ARM: return "ExtendArm";
-        case RobotAction::RETRACT_ARM: return "RetractArm";
-        case RobotAction::AUTO_ALIGN_TO_TAG: return "AutoAlignToTarget";
-        case RobotAction::FACE_TAG: return "FaceTag";
-        case RobotAction::TRACK_TAG: return "TrackTag";
-        case RobotAction::DEPLOY_CLIMBER: return "DeployClimber";
-        case RobotAction::CLIMB: return "Climb";
-        case RobotAction::WAIT: return "WaitCommand";
-        case RobotAction::CUSTOM_COMMAND: return "CustomCommand";
-        default: return "UnknownCommand";
-    }
-}
-
-/**
- * @brief Get required subsystem for action
- */
-inline std::string action_to_subsystem(RobotAction action) {
-    switch (action) {
-        case RobotAction::INTAKE_IN:
-        case RobotAction::INTAKE_OUT:
-        case RobotAction::INTAKE_STOP:
-            return "IntakeSubsystem";
-        case RobotAction::SPIN_UP_SHOOTER:
-        case RobotAction::SHOOT:
-        case RobotAction::SHOOTER_STOP:
-            return "ShooterSubsystem";
-        case RobotAction::SET_ELEVATOR_HEIGHT:
-        case RobotAction::STOW:
-        case RobotAction::EXTEND_ARM:
-        case RobotAction::RETRACT_ARM:
-            return "ElevatorSubsystem";
-        case RobotAction::AUTO_ALIGN_TO_TAG:
-        case RobotAction::FACE_TAG:
-        case RobotAction::TRACK_TAG:
-            return "VisionSubsystem";
-        case RobotAction::DEPLOY_CLIMBER:
-        case RobotAction::CLIMB:
-            return "ClimberSubsystem";
-        default:
-            return "";
-    }
-}
 
 /**
  * @brief Tag action binding (what to do when seeing/clicking a tag)
