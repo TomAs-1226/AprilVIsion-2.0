@@ -6,9 +6,13 @@
 
 #include "../types.hpp"
 #include <opencv2/core.hpp>
+#include <array>
 
 namespace frc_vision {
 namespace sim {
+
+// Forward declaration
+struct SwerveModuleState;
 
 /**
  * @brief Simulated robot state with ground truth and odometry
@@ -23,10 +27,26 @@ struct RobotState {
     // Vision-corrected fused pose
     Pose2D fused_pose;
 
-    // Velocities
+    // Velocities (robot frame)
     double vx = 0;      // m/s forward
     double vy = 0;      // m/s left
     double omega = 0;   // rad/s CCW
+
+    // Accelerations (for realistic feel)
+    double ax = 0;      // m/s^2 forward
+    double ay = 0;      // m/s^2 left
+    double alpha = 0;   // rad/s^2 CCW
+
+    // Swerve module states (FL, FR, BL, BR)
+    std::array<SwerveModuleState, 4> modules;
+
+    // Battery state
+    double battery_voltage = 12.5;
+    double total_current_draw = 0;
+
+    // Wheel slip indicators
+    bool is_slipping = false;
+    double slip_ratio = 0;
 
     // Robot dimensions
     static constexpr double LENGTH = 0.75;  // meters (front to back)
@@ -58,6 +78,58 @@ struct InputState {
 };
 
 /**
+ * @brief Swerve module state
+ */
+struct SwerveModuleState {
+    double wheel_speed = 0;     // m/s (actual wheel speed)
+    double steer_angle = 0;     // radians (actual module angle)
+    double target_speed = 0;    // m/s (commanded)
+    double target_angle = 0;    // radians (commanded)
+
+    // Motor currents (for realistic acceleration)
+    double drive_current = 0;   // Amps
+    double steer_current = 0;   // Amps
+};
+
+/**
+ * @brief Swerve drive parameters for realistic simulation
+ */
+struct SwerveDriveParams {
+    // Geometry (default: 23.5" x 23.5" - common FRC size)
+    double track_width = 0.5969;    // meters (distance between left/right wheels)
+    double wheel_base = 0.5969;     // meters (distance between front/back wheels)
+
+    // Wheel properties
+    double wheel_diameter = 0.1016; // meters (4 inches)
+    double drive_gear_ratio = 6.75; // L2 ratio
+    double steer_gear_ratio = 12.8;
+
+    // Motor characteristics (NEO defaults)
+    double drive_motor_kv = 473;    // rpm/V (NEO)
+    double drive_motor_kt = 0.0181; // Nm/A (NEO torque constant)
+    double drive_motor_resistance = 0.025; // Ohms
+    double drive_motor_inertia = 0.0005; // kg*m^2 (rotor + gearbox)
+
+    double steer_motor_kv = 917;    // rpm/V (NEO 550)
+    double steer_motor_kt = 0.0095; // Nm/A
+
+    // Motor response (first-order lag time constants)
+    double drive_response_tau = 0.04;  // seconds (how fast drive motors respond)
+    double steer_response_tau = 0.02;  // seconds (how fast steer motors respond)
+
+    // Friction and slip
+    double wheel_cof = 1.1;         // coefficient of friction (tread on carpet)
+    double slip_ratio_threshold = 0.15; // slip ratio before losing traction
+    double robot_mass = 55.0;       // kg (with battery and bumpers)
+    double robot_moi = 6.5;         // kg*m^2 (moment of inertia about center)
+
+    // Battery
+    double battery_voltage = 12.5;  // Nominal voltage
+    double battery_internal_resistance = 0.015; // Ohms
+    double brownout_voltage = 6.8;  // Voltage where robot browns out
+};
+
+/**
  * @brief Robot dynamics parameters
  */
 struct DynamicsParams {
@@ -75,6 +147,10 @@ struct DynamicsParams {
     double odom_trans_noise = 0.02; // fraction of motion
     double odom_rot_noise = 0.03;   // fraction of rotation
     double odom_drift_rate = 0.005; // m/s drift
+
+    // Swerve drive (for accurate simulation)
+    SwerveDriveParams swerve;
+    bool use_accurate_swerve = true; // Use detailed swerve simulation
 };
 
 /**

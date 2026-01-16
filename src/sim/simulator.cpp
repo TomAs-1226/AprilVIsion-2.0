@@ -1,6 +1,6 @@
 /**
  * @file simulator.cpp
- * @brief Simulator implementation
+ * @brief Simulator implementation with PathPlanner and field selection
  */
 
 #include "simulator.hpp"
@@ -28,6 +28,11 @@ Simulator::Simulator()
     , last_render_time_(Clock::now())
     , key_hold_time_(Clock::now())
     , fps_start_time_(Clock::now()) {
+
+    // Initialize path
+    current_path_.name = "UserPath";
+    current_path_.max_velocity = 4.0;
+    current_path_.max_acceleration = 3.0;
 }
 
 Simulator::~Simulator() {
@@ -47,8 +52,8 @@ Simulator::~Simulator() {
 
 bool Simulator::initialize(const std::string& config_path) {
     std::cout << "========================================" << std::endl;
-    std::cout << "FRC Vision Mac Simulator v2.0" << std::endl;
-    std::cout << "2024 CRESCENDO Field Layout" << std::endl;
+    std::cout << "FRC Vision Mac Simulator v2.1" << std::endl;
+    std::cout << "With PathPlanner & Multi-Game Support" << std::endl;
     std::cout << "========================================" << std::endl;
 
     // Load configuration
@@ -84,6 +89,14 @@ bool Simulator::initialize(const std::string& config_path) {
     // Initialize auto-align
     auto_align_.initialize(sim_config_.auto_align, field_);
 
+    // Initialize scoring system
+    scoring_.initialize(current_game_year_, Alliance::BLUE);
+
+    // Initialize path planner
+    path_planner_.set_field_layout(field_);
+    SwerveConfig swerve_cfg;
+    path_planner_.set_swerve_config(swerve_cfg);
+
     // Initialize vision pipeline
     if (!initialize_vision_pipeline()) {
         return false;
@@ -92,6 +105,9 @@ bool Simulator::initialize(const std::string& config_path) {
     // Create windows
     cv::namedWindow(CAMERA_WINDOW, cv::WINDOW_AUTOSIZE);
     cv::namedWindow(FIELD_WINDOW, cv::WINDOW_AUTOSIZE);
+
+    // Set mouse callback for field window
+    cv::setMouseCallback(FIELD_WINDOW, mouse_callback, this);
 
     // Position windows
     cv::moveWindow(CAMERA_WINDOW, 50, 50);
@@ -109,14 +125,18 @@ bool Simulator::load_config(const std::string& path) {
     if (!fs::exists(path)) {
         std::cerr << "[Sim] Config file not found: " << path << std::endl;
         std::cerr << "[Sim] Using default configuration" << std::endl;
-
-        // Use defaults
         sim_config_ = SimConfig();
         return true;
     }
 
     try {
         YAML::Node config = YAML::LoadFile(path);
+
+        // Game year selection
+        if (config["game_year"]) {
+            std::string year_str = config["game_year"].as<std::string>();
+            current_game_year_ = game_year_from_string(year_str);
+        }
 
         // Dynamics
         if (config["dynamics"]) {
@@ -174,59 +194,84 @@ bool Simulator::load_config(const std::string& path) {
 }
 
 bool Simulator::load_field_layout() {
-    // Try config-relative path first
-    fs::path layout_path = fs::path(config_dir_) / sim_config_.field_layout_path;
+    return load_field_for_year(current_game_year_);
+}
 
-    // Try assets directory
-    if (!fs::exists(layout_path)) {
-        layout_path = fs::path(config_dir_) / ".." / "assets" / "2024-crescendo.json";
+bool Simulator::load_field_for_year(GameYear year) {
+    std::string filename;
+    switch (year) {
+        case GameYear::CRESCENDO_2024:
+            filename = "2024-crescendo.json";
+            field_length_ = 16.541;
+            field_width_ = 8.211;
+            break;
+        case GameYear::REEFSCAPE_2025:
+            filename = "2025-reefscape.json";
+            field_length_ = 17.548;
+            field_width_ = 8.052;
+            break;
+        case GameYear::REBUILT_2026:
+        default:
+            filename = "2026-rebuilt.json";
+            field_length_ = 16.541;
+            field_width_ = 8.069;
+            break;
     }
 
-    // Try current directory
+    // Try to find the file
+    fs::path layout_path = fs::path(config_dir_) / ".." / "assets" / filename;
     if (!fs::exists(layout_path)) {
-        layout_path = "assets/2024-crescendo.json";
+        layout_path = "assets/" + filename;
+    }
+    if (!fs::exists(layout_path)) {
+        layout_path = fs::path(config_dir_) / sim_config_.field_layout_path;
     }
 
     if (!fs::exists(layout_path)) {
-        std::cerr << "\n[ERROR] Field layout not found!" << std::endl;
-        std::cerr << "Please ensure assets/2024-crescendo.json exists." << std::endl;
-        std::cerr << "\nTo fix:" << std::endl;
-        std::cerr << "  ./scripts/fetch_layout.sh" << std::endl;
-        std::cerr << "\nOr download from:" << std::endl;
-        std::cerr << "  https://github.com/wpilibsuite/allwpilib/raw/main/apriltag/src/main/native/resources/edu/wpi/first/apriltag/2024-crescendo.json" << std::endl;
+        std::cerr << "[Sim] Field layout not found: " << filename << std::endl;
         return false;
     }
 
     try {
-        // Load using our existing loader, but we need to parse WPILib format
-        // The field_layout.cpp expects a different format, so we'll parse directly here
-
         std::ifstream file(layout_path);
         nlohmann::json json;
         file >> json;
 
-        field_.name = "FRC 2024 CRESCENDO";
+        field_.tags.clear();
+        field_.name = json.value("name", "FRC Field");
         field_.tag_size_m = 0.1651;  // 6.5 inches
 
         double half_size = field_.tag_size_m / 2.0;
 
         for (const auto& tag_json : json["tags"]) {
-            int id = tag_json["ID"];
+            int id = tag_json.contains("ID") ? tag_json["ID"].get<int>() : tag_json["id"].get<int>();
             FieldTag tag;
             tag.id = id;
 
-            // Parse translation
-            double tx = tag_json["pose"]["translation"]["x"];
-            double ty = tag_json["pose"]["translation"]["y"];
-            double tz = tag_json["pose"]["translation"]["z"];
+            // Parse translation (support both formats)
+            double tx, ty, tz;
+            if (tag_json["pose"].contains("translation")) {
+                tx = tag_json["pose"]["translation"]["x"];
+                ty = tag_json["pose"]["translation"]["y"];
+                tz = tag_json["pose"]["translation"]["z"];
+            } else {
+                tx = tag_json["pose"]["x"];
+                ty = tag_json["pose"]["y"];
+                tz = tag_json["pose"]["z"];
+            }
 
             tag.center_field = {tx, ty, tz};
 
             // Parse quaternion rotation
-            double qw = tag_json["pose"]["rotation"]["quaternion"]["W"];
-            double qx = tag_json["pose"]["rotation"]["quaternion"]["X"];
-            double qy = tag_json["pose"]["rotation"]["quaternion"]["Y"];
-            double qz = tag_json["pose"]["rotation"]["quaternion"]["Z"];
+            double qw, qx, qy, qz;
+            if (tag_json["pose"].contains("rotation") && tag_json["pose"]["rotation"].contains("quaternion")) {
+                qw = tag_json["pose"]["rotation"]["quaternion"]["W"];
+                qx = tag_json["pose"]["rotation"]["quaternion"]["X"];
+                qy = tag_json["pose"]["rotation"]["quaternion"]["Y"];
+                qz = tag_json["pose"]["rotation"]["quaternion"]["Z"];
+            } else {
+                qw = 1.0; qx = 0; qy = 0; qz = 0;
+            }
 
             // Convert quaternion to rotation matrix
             cv::Mat R = cv::Mat::eye(3, 3, CV_64F);
@@ -240,18 +285,16 @@ bool Simulator::load_field_layout() {
             R.at<double>(2, 1) = 2 * (qy * qz + qx * qw);
             R.at<double>(2, 2) = 1 - 2 * (qx * qx + qy * qy);
 
-            // Convert to rvec
             cv::Vec3d rvec;
             cv::Rodrigues(R, rvec);
             tag.pose_field = Pose3D::from_rvec_tvec(rvec, cv::Vec3d(tx, ty, tz));
 
             // Compute corners in field frame
-            // Tag corners in tag-local frame (counter-clockwise from bottom-left)
             std::array<cv::Point3d, 4> corners_local = {
-                cv::Point3d(-half_size, -half_size, 0),  // Bottom-left
-                cv::Point3d(half_size, -half_size, 0),   // Bottom-right
-                cv::Point3d(half_size, half_size, 0),    // Top-right
-                cv::Point3d(-half_size, half_size, 0)    // Top-left
+                cv::Point3d(-half_size, -half_size, 0),
+                cv::Point3d(half_size, -half_size, 0),
+                cv::Point3d(half_size, half_size, 0),
+                cv::Point3d(-half_size, half_size, 0)
             };
 
             for (int i = 0; i < 4; i++) {
@@ -268,8 +311,8 @@ bool Simulator::load_field_layout() {
             field_.tags[id] = tag;
         }
 
-        std::cout << "[Sim] Loaded " << field_.tags.size() << " AprilTags from "
-                  << layout_path << std::endl;
+        std::cout << "[Sim] Loaded " << field_.tags.size() << " AprilTags for "
+                  << game_year_to_string(year) << std::endl;
         return true;
 
     } catch (const std::exception& e) {
@@ -278,8 +321,48 @@ bool Simulator::load_field_layout() {
     }
 }
 
+void Simulator::cycle_field() {
+    switch (current_game_year_) {
+        case GameYear::CRESCENDO_2024:
+            set_game_year(GameYear::REEFSCAPE_2025);
+            break;
+        case GameYear::REEFSCAPE_2025:
+            set_game_year(GameYear::REBUILT_2026);
+            break;
+        case GameYear::REBUILT_2026:
+        default:
+            set_game_year(GameYear::CRESCENDO_2024);
+            break;
+    }
+}
+
+void Simulator::set_game_year(GameYear year) {
+    if (load_field_for_year(year)) {
+        current_game_year_ = year;
+
+        // Reinitialize components with new field
+        field_renderer_.initialize(field_, intrinsics_, camera_to_robot_, sim_config_.camera);
+        topdown_renderer_.initialize(field_, sim_config_.visualization);
+        auto_align_.initialize(sim_config_.auto_align, field_);
+        scoring_.initialize(year, Alliance::BLUE);
+        path_planner_.set_field_layout(field_);
+
+        if (pipeline_) {
+            DetectorConfig det_cfg;
+            det_cfg.family = "tag36h11";
+            det_cfg.decimation = 2;
+            TrackerConfig track_cfg;
+            pipeline_->initialize(1, field_, det_cfg, track_cfg, 0.3);
+        }
+
+        // Clear path when changing fields
+        clear_path();
+
+        std::cout << "[Sim] Switched to " << game_year_to_string(year) << std::endl;
+    }
+}
+
 bool Simulator::load_camera_calibration() {
-    // Load intrinsics
     fs::path intr_path = fs::path(config_dir_) / sim_config_.intrinsics_path;
     if (!fs::exists(intr_path)) {
         intr_path = fs::path(config_dir_) / ".." / "assets" / "mac_cam_intrinsics.yml";
@@ -295,11 +378,9 @@ bool Simulator::load_camera_calibration() {
             fs_intr["distortion_coefficients"] >> intrinsics_.dist_coeffs;
             fs_intr["image_width"] >> intrinsics_.width;
             fs_intr["image_height"] >> intrinsics_.height;
-            std::cout << "[Sim] Loaded intrinsics from: " << intr_path << std::endl;
         }
     }
 
-    // Set defaults if not loaded
     if (!intrinsics_.valid()) {
         intrinsics_.camera_matrix = (cv::Mat_<double>(3, 3) <<
             sim_config_.camera.fx, 0, sim_config_.camera.cx,
@@ -315,56 +396,30 @@ bool Simulator::load_camera_calibration() {
     if (!fs::exists(extr_path)) {
         extr_path = fs::path(config_dir_) / ".." / "assets" / "mac_cam_extrinsics.yml";
     }
-    if (!fs::exists(extr_path)) {
-        extr_path = "assets/mac_cam_extrinsics.yml";
-    }
 
     if (fs::exists(extr_path)) {
         try {
             YAML::Node extr = YAML::LoadFile(extr_path.string());
-
             double x = extr["translation"]["x"].as<double>();
             double y = extr["translation"]["y"].as<double>();
             double z = extr["translation"]["z"].as<double>();
-
             double roll = extr["rotation"]["roll"].as<double>() * M_PI / 180.0;
             double pitch = extr["rotation"]["pitch"].as<double>() * M_PI / 180.0;
             double yaw = extr["rotation"]["yaw"].as<double>() * M_PI / 180.0;
 
-            // Compute rotation matrix from Euler angles (ZYX convention)
-            cv::Mat Rx = (cv::Mat_<double>(3, 3) <<
-                1, 0, 0,
-                0, cos(roll), -sin(roll),
-                0, sin(roll), cos(roll));
-            cv::Mat Ry = (cv::Mat_<double>(3, 3) <<
-                cos(pitch), 0, sin(pitch),
-                0, 1, 0,
-                -sin(pitch), 0, cos(pitch));
-            cv::Mat Rz = (cv::Mat_<double>(3, 3) <<
-                cos(yaw), -sin(yaw), 0,
-                sin(yaw), cos(yaw), 0,
-                0, 0, 1);
-
+            cv::Mat Rx = (cv::Mat_<double>(3, 3) << 1,0,0, 0,cos(roll),-sin(roll), 0,sin(roll),cos(roll));
+            cv::Mat Ry = (cv::Mat_<double>(3, 3) << cos(pitch),0,sin(pitch), 0,1,0, -sin(pitch),0,cos(pitch));
+            cv::Mat Rz = (cv::Mat_<double>(3, 3) << cos(yaw),-sin(yaw),0, sin(yaw),cos(yaw),0, 0,0,1);
             cv::Mat R = Rz * Ry * Rx;
             cv::Vec3d rvec;
             cv::Rodrigues(R, rvec);
-
             camera_to_robot_ = Pose3D::from_rvec_tvec(rvec, cv::Vec3d(x, y, z));
-
-            std::cout << "[Sim] Loaded extrinsics from: " << extr_path << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "[Sim] Error loading extrinsics: " << e.what() << std::endl;
-        }
+        } catch (...) {}
     }
 
-    // Default extrinsics if not loaded
     if (camera_to_robot_.position.x == 0 && camera_to_robot_.position.z == 0) {
         camera_to_robot_.position = {0.30, 0.0, 0.45};
-        // Small downward pitch
-        cv::Mat R = (cv::Mat_<double>(3, 3) <<
-            1, 0, 0,
-            0, cos(0.26), -sin(0.26),
-            0, sin(0.26), cos(0.26));
+        cv::Mat R = (cv::Mat_<double>(3, 3) << 1,0,0, 0,cos(0.26),-sin(0.26), 0,sin(0.26),cos(0.26));
         cv::Vec3d rvec;
         cv::Rodrigues(R, rvec);
         camera_to_robot_.orientation = Quaternion::from_rvec(rvec);
@@ -374,20 +429,13 @@ bool Simulator::load_camera_calibration() {
 }
 
 bool Simulator::initialize_webcam() {
-    std::cout << "[Sim] Opening webcam device " << sim_config_.webcam_device << "..." << std::endl;
-
     webcam_.open(sim_config_.webcam_device);
+    if (!webcam_.isOpened()) return false;
 
-    if (!webcam_.isOpened()) {
-        return false;
-    }
-
-    // Configure webcam
     webcam_.set(cv::CAP_PROP_FRAME_WIDTH, sim_config_.camera.width);
     webcam_.set(cv::CAP_PROP_FRAME_HEIGHT, sim_config_.camera.height);
     webcam_.set(cv::CAP_PROP_FPS, sim_config_.camera.target_fps);
 
-    // Start webcam capture thread
     webcam_running_.store(true);
     webcam_thread_ = std::thread([this]() {
         cv::Mat frame;
@@ -399,19 +447,12 @@ bool Simulator::initialize_webcam() {
         }
     });
 
-    std::cout << "[Sim] Webcam initialized: "
-              << webcam_.get(cv::CAP_PROP_FRAME_WIDTH) << "x"
-              << webcam_.get(cv::CAP_PROP_FRAME_HEIGHT) << " @ "
-              << webcam_.get(cv::CAP_PROP_FPS) << " fps" << std::endl;
-
     return true;
 }
 
 bool Simulator::initialize_vision_pipeline() {
-    // Create vision pipeline
     pipeline_ = std::make_unique<VisionPipeline>();
 
-    // Use default detector and tracker config
     DetectorConfig det_cfg;
     det_cfg.family = "tag36h11";
     det_cfg.decimation = 2;
@@ -426,8 +467,6 @@ bool Simulator::initialize_vision_pipeline() {
     track_cfg.filter_alpha = 0.3;
 
     pipeline_->initialize(1, field_, det_cfg, track_cfg, 0.3);
-
-    std::cout << "[Sim] Vision pipeline initialized" << std::endl;
     return true;
 }
 
@@ -435,52 +474,223 @@ void Simulator::print_keybinds() {
     std::cout << "\n========================================" << std::endl;
     std::cout << "CONTROLS:" << std::endl;
     std::cout << "========================================" << std::endl;
-    std::cout << "  WASD     - Move robot (forward/back/strafe)" << std::endl;
+    std::cout << "  WASD     - Move robot" << std::endl;
     std::cout << "  Q/E      - Rotate CCW/CW" << std::endl;
-    std::cout << "  SHIFT    - Turbo mode (faster movement)" << std::endl;
-    std::cout << "  V        - Toggle auto-align to nearest tag" << std::endl;
+    std::cout << "  SHIFT    - Turbo mode" << std::endl;
+    std::cout << "  V        - Toggle auto-align" << std::endl;
     std::cout << "  R        - Reset robot pose" << std::endl;
-    std::cout << "  1        - Toggle true pose (green)" << std::endl;
-    std::cout << "  2        - Toggle odometry pose (orange)" << std::endl;
-    std::cout << "  3        - Toggle fused pose (magenta)" << std::endl;
-    std::cout << "  4        - Toggle webcam composite" << std::endl;
-    std::cout << "  5        - Toggle detect on composite vs synthetic" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "PATH PLANNER:" << std::endl;
+    std::cout << "  P        - Toggle path edit mode (click field to add waypoints)" << std::endl;
+    std::cout << "  X        - Execute path" << std::endl;
+    std::cout << "  C        - Clear path" << std::endl;
+    std::cout << "  Z        - Remove last waypoint" << std::endl;
+    std::cout << "  G        - Generate code (prints to console)" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "FIELD:" << std::endl;
+    std::cout << "  F        - Cycle field (2024->2025->2026)" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "DISPLAY:" << std::endl;
+    std::cout << "  1-5      - Toggle overlays" << std::endl;
     std::cout << "  ESC      - Quit" << std::endl;
     std::cout << "========================================\n" << std::endl;
 }
 
+// Mouse callback for waypoint placement
+void Simulator::mouse_callback(int event, int x, int y, int flags, void* userdata) {
+    Simulator* sim = static_cast<Simulator*>(userdata);
+    sim->handle_mouse(event, x, y, flags);
+}
+
+void Simulator::handle_mouse(int event, int x, int y, int flags) {
+    (void)flags;
+
+    if (mode_ != SimMode::PATH_EDIT) return;
+
+    if (event == cv::EVENT_LBUTTONDOWN) {
+        // Convert screen coords to field coords
+        auto [fx, fy] = screen_to_field(x, y);
+
+        // Validate bounds
+        if (fx >= 0 && fx <= field_length_ && fy >= 0 && fy <= field_width_) {
+            add_waypoint_at_click(fx, fy);
+        }
+    }
+}
+
+cv::Point2d Simulator::field_to_screen(double fx, double fy) const {
+    double scale = sim_config_.visualization.field_view_scale;
+    int margin = sim_config_.visualization.field_margin;
+
+    double sx = margin + fx * scale;
+    double sy = margin + (field_width_ - fy) * scale;  // Flip Y
+
+    return cv::Point2d(sx, sy);
+}
+
+std::pair<double, double> Simulator::screen_to_field(int sx, int sy) const {
+    double scale = sim_config_.visualization.field_view_scale;
+    int margin = sim_config_.visualization.field_margin;
+
+    double fx = (sx - margin) / scale;
+    double fy = field_width_ - (sy - margin) / scale;  // Flip Y
+
+    return {fx, fy};
+}
+
+void Simulator::add_waypoint_at_click(double field_x, double field_y) {
+    PathWaypoint wp;
+    wp.pose.x = field_x;
+    wp.pose.y = field_y;
+
+    // Calculate heading towards the next waypoint or use current robot heading
+    if (current_path_.waypoints.empty()) {
+        wp.pose.theta = dynamics_.state().true_pose.theta;
+    } else {
+        // Point towards the new waypoint from the previous one
+        const auto& prev = current_path_.waypoints.back();
+        wp.pose.theta = std::atan2(field_y - prev.pose.y, field_x - prev.pose.x);
+    }
+
+    wp.name = "WP" + std::to_string(current_path_.waypoints.size());
+
+    current_path_.waypoints.push_back(wp);
+
+    std::cout << "[Path] Added waypoint " << wp.name << " at ("
+              << field_x << ", " << field_y << ")" << std::endl;
+}
+
+void Simulator::remove_last_waypoint() {
+    if (!current_path_.waypoints.empty()) {
+        std::cout << "[Path] Removed " << current_path_.waypoints.back().name << std::endl;
+        current_path_.waypoints.pop_back();
+    }
+}
+
+void Simulator::clear_path() {
+    current_path_.waypoints.clear();
+    current_path_.trajectory.clear();
+    path_executing_ = false;
+    path_time_ = 0;
+    std::cout << "[Path] Cleared all waypoints" << std::endl;
+}
+
+void Simulator::execute_path() {
+    if (current_path_.waypoints.size() < 2) {
+        std::cout << "[Path] Need at least 2 waypoints to execute" << std::endl;
+        return;
+    }
+
+    // Add start position as first waypoint if not already there
+    auto& first_wp = current_path_.waypoints.front();
+    auto robot_pose = dynamics_.state().true_pose;
+
+    double dist = std::sqrt(std::pow(first_wp.pose.x - robot_pose.x, 2) +
+                           std::pow(first_wp.pose.y - robot_pose.y, 2));
+    if (dist > 0.5) {
+        // Insert current position as starting point
+        PathWaypoint start;
+        start.pose = robot_pose;
+        start.name = "Start";
+        current_path_.waypoints.insert(current_path_.waypoints.begin(), start);
+    }
+
+    // Generate trajectory
+    path_planner_.generate_trajectory(current_path_);
+
+    path_time_ = 0;
+    path_executing_ = true;
+    mode_ = SimMode::PATH_EXECUTE;
+
+    std::cout << "[Path] Executing path with " << current_path_.waypoints.size()
+              << " waypoints, total time: " << current_path_.total_time << "s" << std::endl;
+}
+
+void Simulator::stop_path_execution() {
+    path_executing_ = false;
+    mode_ = SimMode::DRIVE;
+    dynamics_.set_external_command_mode(false);
+    std::cout << "[Path] Execution stopped" << std::endl;
+}
+
+void Simulator::generate_path_code() {
+    if (current_path_.waypoints.empty()) {
+        std::cout << "[Path] No waypoints to generate code for" << std::endl;
+        return;
+    }
+
+    std::cout << "\n========== GENERATED JAVA CODE ==========\n" << std::endl;
+    std::cout << path_planner_.generate_code(current_path_, CodeFormat::WPILIB_JAVA) << std::endl;
+    std::cout << "=========================================\n" << std::endl;
+}
+
+void Simulator::handle_path_execution(double dt) {
+    if (!path_executing_ || current_path_.trajectory.empty()) {
+        return;
+    }
+
+    path_time_ += dt;
+
+    if (path_time_ >= current_path_.total_time) {
+        // Path complete
+        stop_path_execution();
+        std::cout << "[Path] Execution complete!" << std::endl;
+        return;
+    }
+
+    // Sample trajectory
+    Pose2D target = path_planner_.sample_path(current_path_, path_time_);
+    double target_vel = path_planner_.sample_velocity(current_path_, path_time_);
+
+    // Simple path following: drive towards target
+    Pose2D robot = dynamics_.state().true_pose;
+    double dx = target.x - robot.x;
+    double dy = target.y - robot.y;
+    double dist = std::sqrt(dx * dx + dy * dy);
+
+    // Calculate velocities in robot frame
+    double cos_th = std::cos(robot.theta);
+    double sin_th = std::sin(robot.theta);
+    double vx_field = (dist > 0.01) ? (dx / dist) * target_vel : 0;
+    double vy_field = (dist > 0.01) ? (dy / dist) * target_vel : 0;
+
+    double vx_robot = vx_field * cos_th + vy_field * sin_th;
+    double vy_robot = -vx_field * sin_th + vy_field * cos_th;
+
+    // Heading control
+    double heading_error = target.theta - robot.theta;
+    while (heading_error > M_PI) heading_error -= 2 * M_PI;
+    while (heading_error < -M_PI) heading_error += 2 * M_PI;
+    double omega = heading_error * 3.0;  // P controller
+
+    dynamics_.set_external_command_mode(true);
+    dynamics_.apply_velocity_command(vx_robot, vy_robot, omega);
+}
+
 int Simulator::run() {
-    std::cout << "[Sim] Running... Press ESC to quit.\n" << std::endl;
+    std::cout << "[Sim] Running " << game_year_to_string(current_game_year_)
+              << "... Press ESC to quit.\n" << std::endl;
 
     while (!shutdown_requested_.load()) {
         auto now = Clock::now();
         double dt = std::chrono::duration<double>(now - last_update_time_).count();
         last_update_time_ = now;
-
-        // Clamp dt to avoid physics explosions
         dt = std::min(dt, 0.1);
 
-        // Process input
         process_input();
-
         if (shutdown_requested_.load()) break;
 
-        // Update dynamics
-        update_dynamics(dt);
+        // Handle path execution
+        if (mode_ == SimMode::PATH_EXECUTE) {
+            handle_path_execution(dt);
+        } else {
+            update_dynamics(dt);
+            handle_auto_align(dt);
+        }
 
-        // Handle auto-align
-        handle_auto_align(dt);
-
-        // Capture and render
         capture_and_render();
-
-        // Run detection
         run_detection();
-
-        // Update fusion
         update_fusion();
-
-        // Update visualization
         update_visualization();
 
         // FPS calculation
@@ -502,21 +712,15 @@ void Simulator::process_input() {
     if (key >= 0) {
         handle_key(key);
     }
-    // Note: Don't reset movement keys here - they stay active until handle_key releases them
 }
 
 void Simulator::handle_key(int key) {
-    // Handle lowercase
     if (key >= 'A' && key <= 'Z') {
         key = key - 'A' + 'a';
     }
 
-    // Reset movement key hold timers - movement keys need repeated key events to stay active
-    // When a WASD/QE key is pressed, it sets the flag and resets the timer
-    // The timer in update_dynamics will clear the flag if no key event in ~100ms
-
     switch (key) {
-        // Movement - these stay active while key is held (key repeat)
+        // Movement
         case 'w': input_.forward = true; key_hold_time_ = Clock::now(); break;
         case 's': input_.backward = true; key_hold_time_ = Clock::now(); break;
         case 'a': input_.left = true; key_hold_time_ = Clock::now(); break;
@@ -524,74 +728,95 @@ void Simulator::handle_key(int key) {
         case 'q': input_.rotate_ccw = true; key_hold_time_ = Clock::now(); break;
         case 'e': input_.rotate_cw = true; key_hold_time_ = Clock::now(); break;
 
-        // Shift for turbo (varies by platform)
-        case 0x10:
-        case 225:  // macOS left shift
-        case 229:  // macOS right shift
+        case 0x10: case 225: case 229:
             input_.turbo = true;
             key_hold_time_ = Clock::now();
             break;
 
-        // Toggles - one-shot, don't need hold
+        // Auto-align
         case 'v':
+            if (mode_ == SimMode::PATH_EXECUTE) stop_path_execution();
             input_.auto_align = !input_.auto_align;
             auto_align_.set_enabled(input_.auto_align);
+            mode_ = input_.auto_align ? SimMode::AUTO_ALIGN : SimMode::DRIVE;
             std::cout << "[Sim] Auto-align: " << (input_.auto_align ? "ENABLED" : "disabled") << std::endl;
             break;
 
+        // Reset
         case 'r':
             dynamics_.reset(sim_config_.start_pose);
             auto_align_.reset();
             input_.auto_align = false;
             auto_align_.set_enabled(false);
+            stop_path_execution();
+            mode_ = SimMode::DRIVE;
             std::cout << "[Sim] Robot pose reset" << std::endl;
             break;
 
+        // Path planning
+        case 'p':
+            if (mode_ == SimMode::PATH_EXECUTE) stop_path_execution();
+            mode_ = (mode_ == SimMode::PATH_EDIT) ? SimMode::DRIVE : SimMode::PATH_EDIT;
+            input_.auto_align = false;
+            auto_align_.set_enabled(false);
+            std::cout << "[Path] Edit mode: " << (mode_ == SimMode::PATH_EDIT ? "ON - click field to add waypoints" : "OFF") << std::endl;
+            break;
+
+        case 'x':
+            execute_path();
+            break;
+
+        case 'c':
+            clear_path();
+            break;
+
+        case 'z':
+            remove_last_waypoint();
+            break;
+
+        case 'g':
+            generate_path_code();
+            break;
+
+        // Field selection
+        case 'f':
+            cycle_field();
+            break;
+
+        // Display toggles
         case '1':
             input_.show_true_pose = !input_.show_true_pose;
             topdown_renderer_.set_show_true_pose(input_.show_true_pose);
             break;
-
         case '2':
             input_.show_odom_pose = !input_.show_odom_pose;
             topdown_renderer_.set_show_odom_pose(input_.show_odom_pose);
             break;
-
         case '3':
             input_.show_fused_pose = !input_.show_fused_pose;
             topdown_renderer_.set_show_fused_pose(input_.show_fused_pose);
             break;
-
         case '4':
             input_.show_webcam = !input_.show_webcam;
-            std::cout << "[Sim] Webcam: " << (input_.show_webcam ? "ON" : "OFF") << std::endl;
             break;
-
         case '5':
             input_.detect_on_composite = !input_.detect_on_composite;
-            std::cout << "[Sim] Detection on: " << (input_.detect_on_composite ? "composite" : "synthetic") << std::endl;
             break;
 
         case 27: // ESC
             shutdown_requested_.store(true);
             break;
-
-        default:
-            // Unknown key - don't clear movement, it might be a modifier
-            break;
     }
 }
 
 void Simulator::update_dynamics(double dt) {
-    if (!auto_align_.is_enabled()) {
+    if (!auto_align_.is_enabled() && mode_ != SimMode::PATH_EXECUTE) {
         dynamics_.set_external_command_mode(false);
     }
 
-    // Check if we should clear movement keys (no key event for 150ms)
     auto now = Clock::now();
     double elapsed_ms = std::chrono::duration<double, std::milli>(now - key_hold_time_).count();
     if (elapsed_ms > 150.0) {
-        // No recent key event - clear all movement
         input_.forward = input_.backward = false;
         input_.left = input_.right = false;
         input_.rotate_ccw = input_.rotate_cw = false;
@@ -604,9 +829,7 @@ void Simulator::update_dynamics(double dt) {
 void Simulator::handle_auto_align(double dt) {
     if (!auto_align_.is_enabled()) return;
 
-    // Get visible tags
     auto visible = field_renderer_.get_visible_tags(dynamics_.state().fused_pose);
-
     double vx, vy, omega;
     bool active = auto_align_.update(dynamics_.state().fused_pose, visible, dt, vx, vy, omega);
 
@@ -621,11 +844,8 @@ void Simulator::handle_auto_align(double dt) {
 
 void Simulator::capture_and_render() {
     const auto& true_pose = dynamics_.state().true_pose;
-
-    // Render synthetic view
     cv::Mat synthetic = field_renderer_.render(true_pose);
 
-    // Get webcam frame if available
     cv::Mat webcam;
     if (sim_config_.use_webcam && input_.show_webcam) {
         std::lock_guard<std::mutex> lock(webcam_mutex_);
@@ -634,33 +854,22 @@ void Simulator::capture_and_render() {
         }
     }
 
-    // Create composite or use synthetic
     if (!webcam.empty()) {
-        // Resize webcam to match synthetic if needed
         if (webcam.size() != synthetic.size()) {
             cv::resize(webcam, webcam, synthetic.size());
         }
-
-        // Composite (mode 0 = overlay tags on webcam)
         current_frame_ = field_renderer_.composite(webcam, true_pose, 0);
     } else {
         current_frame_ = synthetic;
     }
 
-    // Display frame
     display_frame_ = current_frame_.clone();
 }
 
 void Simulator::run_detection() {
-    // Choose frame for detection
-    cv::Mat detect_frame;
-    if (input_.detect_on_composite) {
-        detect_frame = current_frame_;
-    } else {
-        detect_frame = field_renderer_.render(dynamics_.state().true_pose);
-    }
+    cv::Mat detect_frame = input_.detect_on_composite ? current_frame_ :
+        field_renderer_.render(dynamics_.state().true_pose);
 
-    // Create Frame object
     Frame frame;
     frame.camera_id = 0;
     frame.frame_number = frame_count_;
@@ -668,34 +877,23 @@ void Simulator::run_detection() {
     frame.capture_wall_time = SystemClock::now();
     frame.image = detect_frame;
 
-    // Process through pipeline
     auto processed = pipeline_->process_frame(frame, intrinsics_, camera_to_robot_);
     last_detections_ = processed.detections;
 
-    // Update stats
     stats_.tag_count = static_cast<int>(last_detections_.detections.size());
     stats_.detect_ms = last_detections_.timestamps.detect_ms();
     stats_.pose_ms = last_detections_.timestamps.pose_ms();
     stats_.reproj_error = last_detections_.avg_reproj_error();
+    stats_.confidence = last_detections_.multi_tag_pose_valid ? 1.0 :
+        (last_detections_.detections.empty() ? 0.0 : 0.5);
 
-    if (last_detections_.multi_tag_pose_valid) {
-        stats_.confidence = 1.0;  // Could compute from quality
-    } else if (!last_detections_.detections.empty()) {
-        stats_.confidence = 0.5;
-    } else {
-        stats_.confidence = 0.0;
-    }
-
-    // Draw detections on display frame
+    // Draw detections
     for (const auto& det : last_detections_.detections) {
-        // Draw corners
         for (int i = 0; i < 4; i++) {
             cv::Point2d p1(det.corners.corners[i].x, det.corners.corners[i].y);
             cv::Point2d p2(det.corners.corners[(i+1)%4].x, det.corners.corners[(i+1)%4].y);
             cv::line(display_frame_, p1, p2, cv::Scalar(0, 255, 0), 2);
         }
-
-        // Draw ID
         auto center = det.corners.center();
         cv::putText(display_frame_, std::to_string(det.id),
                    cv::Point(static_cast<int>(center.x) - 10, static_cast<int>(center.y)),
@@ -704,44 +902,106 @@ void Simulator::run_detection() {
 }
 
 void Simulator::update_fusion() {
-    // Get fused pose from pipeline
     auto fused = pipeline_->get_fused_pose();
-
     if (fused.valid) {
-        // Update robot state with vision-corrected pose
         dynamics_.state().fused_pose = fused.pose_filtered;
     } else {
-        // Use true pose as fallback (for now)
         dynamics_.state().fused_pose = dynamics_.state().true_pose;
     }
 }
 
 void Simulator::update_visualization() {
-    // Draw stats on camera view
-    std::string fps_text = "FPS: " + std::to_string(static_cast<int>(stats_.fps));
-    std::string tags_text = "Tags: " + std::to_string(stats_.tag_count);
-    std::string latency_text = "Latency: " + std::to_string(static_cast<int>(stats_.detect_ms + stats_.pose_ms)) + "ms";
+    // Camera view stats
+    cv::putText(display_frame_, "FPS: " + std::to_string(static_cast<int>(stats_.fps)),
+               cv::Point(10, 25), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+    cv::putText(display_frame_, "Tags: " + std::to_string(stats_.tag_count),
+               cv::Point(10, 50), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
+    cv::putText(display_frame_, game_year_to_string(current_game_year_),
+               cv::Point(10, 75), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
 
-    cv::putText(display_frame_, fps_text, cv::Point(10, 25),
-               cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
-    cv::putText(display_frame_, tags_text, cv::Point(10, 50),
-               cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
-    cv::putText(display_frame_, latency_text, cv::Point(10, 75),
-               cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
-
-    if (auto_align_.is_enabled()) {
-        std::string align_text = "AUTO-ALIGN: Tag " + std::to_string(auto_align_.target_tag_id());
-        if (auto_align_.is_at_target()) {
-            align_text += " [AT TARGET]";
-        }
-        cv::putText(display_frame_, align_text, cv::Point(10, 100),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+    // Mode indicator
+    std::string mode_str;
+    cv::Scalar mode_color(255, 255, 255);
+    switch (mode_) {
+        case SimMode::PATH_EDIT:
+            mode_str = "MODE: PATH EDIT (click field)";
+            mode_color = cv::Scalar(255, 165, 0);
+            break;
+        case SimMode::PATH_EXECUTE:
+            mode_str = "MODE: EXECUTING PATH";
+            mode_color = cv::Scalar(0, 255, 0);
+            break;
+        case SimMode::AUTO_ALIGN:
+            mode_str = "MODE: AUTO-ALIGN Tag " + std::to_string(auto_align_.target_tag_id());
+            mode_color = cv::Scalar(0, 255, 0);
+            break;
+        default:
+            mode_str = "MODE: DRIVE";
+            break;
     }
+    cv::putText(display_frame_, mode_str, cv::Point(10, 100),
+               cv::FONT_HERSHEY_SIMPLEX, 0.6, mode_color, 2);
 
     cv::imshow(CAMERA_WINDOW, display_frame_);
 
-    // Render top-down view
+    // Field view
     cv::Mat field_view = topdown_renderer_.render(dynamics_.state());
+
+    // Draw waypoints and path
+    if (!current_path_.waypoints.empty()) {
+        // Draw waypoints
+        for (size_t i = 0; i < current_path_.waypoints.size(); i++) {
+            const auto& wp = current_path_.waypoints[i];
+            auto pt = field_to_screen(wp.pose.x, wp.pose.y);
+
+            // Draw waypoint circle
+            cv::Scalar color = (i == 0) ? cv::Scalar(0, 255, 0) :
+                              (i == current_path_.waypoints.size() - 1) ? cv::Scalar(0, 0, 255) :
+                              cv::Scalar(255, 165, 0);
+            cv::circle(field_view, cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+                      8, color, -1);
+            cv::putText(field_view, wp.name,
+                       cv::Point(static_cast<int>(pt.x) + 10, static_cast<int>(pt.y)),
+                       cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255, 255, 255), 1);
+
+            // Draw line to previous waypoint
+            if (i > 0) {
+                const auto& prev = current_path_.waypoints[i - 1];
+                auto prev_pt = field_to_screen(prev.pose.x, prev.pose.y);
+                cv::line(field_view,
+                        cv::Point(static_cast<int>(prev_pt.x), static_cast<int>(prev_pt.y)),
+                        cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+                        cv::Scalar(255, 165, 0), 2);
+            }
+        }
+
+        // Draw trajectory if generated
+        if (!current_path_.trajectory.empty()) {
+            for (size_t i = 1; i < current_path_.trajectory.size(); i++) {
+                auto p1 = field_to_screen(current_path_.trajectory[i-1].pose.x,
+                                         current_path_.trajectory[i-1].pose.y);
+                auto p2 = field_to_screen(current_path_.trajectory[i].pose.x,
+                                         current_path_.trajectory[i].pose.y);
+                cv::line(field_view,
+                        cv::Point(static_cast<int>(p1.x), static_cast<int>(p1.y)),
+                        cv::Point(static_cast<int>(p2.x), static_cast<int>(p2.y)),
+                        cv::Scalar(0, 255, 255), 1);
+            }
+        }
+    }
+
+    // Draw path info
+    if (mode_ == SimMode::PATH_EDIT) {
+        cv::putText(field_view, "CLICK TO ADD WAYPOINTS",
+                   cv::Point(10, field_view.rows - 10),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 165, 0), 2);
+    }
+    if (!current_path_.waypoints.empty()) {
+        cv::putText(field_view, "Waypoints: " + std::to_string(current_path_.waypoints.size()),
+                   cv::Point(10, field_view.rows - 30),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+    }
+
     topdown_renderer_.draw_stats(field_view, stats_.fps, stats_.detect_ms + stats_.pose_ms,
                                  stats_.tag_count, stats_.reproj_error, stats_.confidence,
                                  auto_align_.target_tag_id(), auto_align_.is_enabled());
