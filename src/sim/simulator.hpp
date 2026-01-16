@@ -192,6 +192,13 @@ private:
     SimMode mode_ = SimMode::DRIVE;
     double path_time_ = 0;  // Current time in path execution
     bool path_executing_ = false;
+    int current_waypoint_index_ = 0;  // Current waypoint during execution
+
+    // Action block execution
+    void check_and_execute_action_blocks();
+    void execute_action_step(const ActionBlock::ActionStep& step);
+    std::set<int> get_visible_tags() const;
+    std::map<int, double> get_tag_distances() const;
 
     // GUI Action Menu
     ActionMenuState action_menu_;

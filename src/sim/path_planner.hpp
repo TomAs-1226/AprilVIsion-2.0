@@ -50,7 +50,7 @@ enum class ConstraintType {
 };
 
 /**
- * @brief Action trigger condition
+ * @brief Action trigger condition type
  */
 enum class TriggerCondition {
     AT_WAYPOINT,        // When reaching a waypoint (by index)
@@ -59,7 +59,136 @@ enum class TriggerCondition {
     DISTANCE_TO_TAG,    // When within distance of tag
     TAG_ALIGNED,        // When aligned with tag (facing it)
     GAME_PIECE_DETECTED,// When intake detects game piece
+    VELOCITY_BELOW,     // When robot velocity is below threshold
     CUSTOM              // Custom condition function
+};
+
+/**
+ * @brief Logic operator for combining conditions
+ */
+enum class ConditionLogic {
+    AND,    // All conditions must be true
+    OR      // Any condition must be true
+};
+
+/**
+ * @brief Single condition in a block (for visual block coding style)
+ *
+ * Represents one condition that can be combined with others.
+ * Example conditions:
+ * - "At waypoint 2"
+ * - "See tag 5"
+ * - "Within 1.5m of tag 7"
+ */
+struct Condition {
+    TriggerCondition type;
+
+    // Parameters (use based on type)
+    int waypoint_index = -1;    // For AT_WAYPOINT
+    double time = 0;            // For AT_TIME
+    int tag_id = -1;            // For tag-based triggers
+    double distance = 0;        // For DISTANCE_TO_TAG
+    double threshold = 0;       // For VELOCITY_BELOW
+    std::string custom_check;   // For CUSTOM
+
+    // Comparison operator for DISTANCE_TO_TAG
+    enum class Compare { LESS_THAN, GREATER_THAN, EQUAL };
+    Compare compare = Compare::LESS_THAN;
+
+    // State tracking (for edge detection - trigger once)
+    mutable bool was_true = false;
+    bool trigger_on_edge = true;  // Only trigger on false->true transition
+
+    /**
+     * @brief Get human-readable description of this condition
+     */
+    std::string describe() const {
+        switch (type) {
+            case TriggerCondition::AT_WAYPOINT:
+                return "At Waypoint " + std::to_string(waypoint_index);
+            case TriggerCondition::AT_TIME:
+                return "At Time " + std::to_string(time) + "s";
+            case TriggerCondition::TAG_VISIBLE:
+                return "Tag " + std::to_string(tag_id) + " Visible";
+            case TriggerCondition::DISTANCE_TO_TAG:
+                return "Within " + std::to_string(distance) + "m of Tag " + std::to_string(tag_id);
+            case TriggerCondition::TAG_ALIGNED:
+                return "Aligned with Tag " + std::to_string(tag_id);
+            case TriggerCondition::VELOCITY_BELOW:
+                return "Speed < " + std::to_string(threshold) + " m/s";
+            default:
+                return "Custom Condition";
+        }
+    }
+};
+
+/**
+ * @brief Action block with combined conditions (visual block coding style)
+ *
+ * This represents a complete "block" in the visual auto builder:
+ * - Multiple conditions combined with AND/OR logic
+ * - One or more actions to execute when conditions are met
+ * - Execution options (parallel, wait, timeout)
+ *
+ * Example block:
+ *   WHEN: [At Waypoint 2] AND [Tag 5 Visible] AND [Distance < 1.5m]
+ *   DO:   [Spin Up Shooter] then [Shoot]
+ */
+struct ActionBlock {
+    std::string name;
+    std::string description;
+
+    // Conditions (combined with logic operator)
+    std::vector<Condition> conditions;
+    ConditionLogic logic = ConditionLogic::AND;
+
+    // Actions to execute (in sequence)
+    struct ActionStep {
+        RobotAction action;
+        std::map<std::string, double> parameters;
+        std::string custom_command;
+        double delay_before = 0;    // Wait before executing
+        bool wait_for_completion = false;
+    };
+    std::vector<ActionStep> actions;
+
+    // Execution options
+    bool enabled = true;
+    bool one_shot = true;           // Only trigger once per path execution
+    bool parallel_with_path = true; // Run alongside path following
+    double timeout = 10.0;          // Max time to wait for conditions
+
+    // Runtime state
+    mutable bool has_triggered = false;
+    mutable double trigger_time = -1;
+
+    /**
+     * @brief Reset runtime state (call at start of path execution)
+     */
+    void reset() const {
+        has_triggered = false;
+        trigger_time = -1;
+        for (auto& cond : conditions) {
+            cond.was_true = false;
+        }
+    }
+
+    /**
+     * @brief Get block description for GUI
+     */
+    std::string describe() const {
+        std::string desc = "WHEN: ";
+        for (size_t i = 0; i < conditions.size(); i++) {
+            if (i > 0) desc += (logic == ConditionLogic::AND ? " AND " : " OR ");
+            desc += "[" + conditions[i].describe() + "]";
+        }
+        desc += "\nDO: ";
+        for (size_t i = 0; i < actions.size(); i++) {
+            if (i > 0) desc += " → ";
+            desc += "[" + action_to_string(actions[i].action) + "]";
+        }
+        return desc;
+    }
 };
 
 /**
@@ -280,7 +409,10 @@ struct AutoPath {
     // Waypoints
     std::vector<PathWaypoint> waypoints;
 
-    // Event markers (actions during path following)
+    // Action blocks (visual block coding style - combines conditions + actions)
+    std::vector<ActionBlock> action_blocks;
+
+    // Event markers (actions during path following) - legacy, use action_blocks
     std::vector<EventMarker> event_markers;
 
     // Tag action bindings (actions when seeing specific tags)
@@ -371,6 +503,247 @@ struct SwerveConfig {
     double rotation_kI = 0.0;
     double rotation_kD = 0.0;
 };
+
+// ============================================================================
+// Subsystem Configuration System
+// ============================================================================
+
+/**
+ * @brief Type of robot subsystem
+ */
+enum class SubsystemType {
+    SHOOTER,        // Fixed shooter (can pre-spin, fire single/multiple)
+    INTAKE,         // Intake mechanism (in/out/stop, detect game piece)
+    ELEVATOR,       // Elevator/lift (set height, stow)
+    ARM,            // Arm mechanism (extend/retract, set angle)
+    CLIMBER,        // Climbing mechanism (deploy, climb)
+    TURRET,         // Rotating turret (track target, set angle) - if applicable
+    CUSTOM          // User-defined subsystem
+};
+
+/**
+ * @brief Single action for a subsystem
+ */
+struct SubsystemAction {
+    std::string name;           // e.g., "fire", "spinUp", "intake"
+    std::string description;    // Human-readable description
+    RobotAction action_type;    // Maps to RobotAction enum
+
+    // Parameters this action accepts
+    struct Parameter {
+        std::string name;
+        std::string type;       // "double", "int", "bool"
+        double default_value = 0;
+        double min_value = 0;
+        double max_value = 100;
+        std::string unit;       // e.g., "m", "deg", "rpm", "ms"
+    };
+    std::vector<Parameter> parameters;
+
+    // Timing
+    double typical_duration = 0.5;  // seconds
+    bool is_instant = false;        // Completes immediately
+    bool can_be_interrupted = true;
+
+    // Requirements
+    std::vector<std::string> required_sensors;
+    std::string required_state;     // e.g., "elevated" for shooter
+};
+
+/**
+ * @brief Configuration for a robot subsystem
+ */
+struct SubsystemConfig {
+    std::string name;               // e.g., "ShooterSubsystem"
+    SubsystemType type;
+    std::string description;
+
+    // Available actions for this subsystem
+    std::vector<SubsystemAction> actions;
+
+    // Hardware configuration
+    struct Motor {
+        std::string name;
+        int can_id = 0;
+        std::string type = "NEO";   // NEO, NEO550, Falcon, etc.
+        bool inverted = false;
+        double gear_ratio = 1.0;
+    };
+    std::vector<Motor> motors;
+
+    // Sensors
+    struct Sensor {
+        std::string name;
+        std::string type;           // "encoder", "limit_switch", "beam_break", "color"
+        int channel = 0;
+    };
+    std::vector<Sensor> sensors;
+
+    // Physical properties
+    double max_velocity = 0;        // units depend on type (rpm, m/s, deg/s)
+    double max_acceleration = 0;
+    double position_tolerance = 0.1;
+
+    // State machine (simplified)
+    std::vector<std::string> states; // e.g., "idle", "spinning", "ready", "firing"
+    std::string default_state = "idle";
+};
+
+/**
+ * @brief Runtime state of a simulated subsystem
+ */
+struct SimulatedSubsystemState {
+    std::string current_state = "idle";
+    double current_value = 0;       // Position, velocity, etc.
+    double target_value = 0;
+    bool is_busy = false;
+    double action_start_time = 0;
+    std::string current_action;
+    bool has_game_piece = false;    // For intake
+};
+
+/**
+ * @brief Preset subsystem configurations for common FRC mechanisms
+ */
+namespace SubsystemPresets {
+
+    /**
+     * @brief Create a fixed shooter subsystem configuration
+     */
+    inline SubsystemConfig create_shooter(const std::string& name = "ShooterSubsystem") {
+        SubsystemConfig config;
+        config.name = name;
+        config.type = SubsystemType::SHOOTER;
+        config.description = "Fixed-position shooter (no turret)";
+        config.max_velocity = 6000;  // RPM
+        config.states = {"idle", "spinning_up", "ready", "firing"};
+
+        // Spin up action
+        SubsystemAction spin_up;
+        spin_up.name = "spinUp";
+        spin_up.description = "Spin up shooter wheels to target RPM";
+        spin_up.action_type = RobotAction::SPIN_UP_SHOOTER;
+        spin_up.typical_duration = 1.5;
+        spin_up.parameters.push_back({"rpm", "double", 5000, 0, 6000, "rpm"});
+        config.actions.push_back(spin_up);
+
+        // Fire action
+        SubsystemAction fire;
+        fire.name = "fire";
+        fire.description = "Fire a game piece";
+        fire.action_type = RobotAction::SHOOT;
+        fire.typical_duration = 0.3;
+        fire.required_state = "ready";
+        config.actions.push_back(fire);
+
+        // Fire multiple
+        SubsystemAction fire_multi;
+        fire_multi.name = "fireMultiple";
+        fire_multi.description = "Fire multiple game pieces";
+        fire_multi.action_type = RobotAction::SHOOT;
+        fire_multi.typical_duration = 1.5;
+        fire_multi.parameters.push_back({"count", "int", 2, 1, 5, ""});
+        fire_multi.parameters.push_back({"delay_between", "double", 0.3, 0.1, 1.0, "s"});
+        config.actions.push_back(fire_multi);
+
+        // Stop
+        SubsystemAction stop;
+        stop.name = "stop";
+        stop.description = "Stop shooter wheels";
+        stop.action_type = RobotAction::SHOOTER_STOP;
+        stop.is_instant = true;
+        config.actions.push_back(stop);
+
+        return config;
+    }
+
+    /**
+     * @brief Create an intake subsystem configuration
+     */
+    inline SubsystemConfig create_intake(const std::string& name = "IntakeSubsystem") {
+        SubsystemConfig config;
+        config.name = name;
+        config.type = SubsystemType::INTAKE;
+        config.description = "Game piece intake mechanism";
+        config.states = {"idle", "intaking", "holding", "ejecting"};
+
+        // Intake in
+        SubsystemAction intake_in;
+        intake_in.name = "intakeIn";
+        intake_in.description = "Run intake to collect game piece";
+        intake_in.action_type = RobotAction::INTAKE_IN;
+        intake_in.typical_duration = 2.0;
+        intake_in.parameters.push_back({"speed", "double", 1.0, 0.1, 1.0, ""});
+        config.actions.push_back(intake_in);
+
+        // Intake out (eject)
+        SubsystemAction intake_out;
+        intake_out.name = "eject";
+        intake_out.description = "Eject game piece";
+        intake_out.action_type = RobotAction::INTAKE_OUT;
+        intake_out.typical_duration = 0.5;
+        config.actions.push_back(intake_out);
+
+        // Stop
+        SubsystemAction stop;
+        stop.name = "stop";
+        stop.description = "Stop intake";
+        stop.action_type = RobotAction::INTAKE_STOP;
+        stop.is_instant = true;
+        config.actions.push_back(stop);
+
+        return config;
+    }
+
+    /**
+     * @brief Create an elevator subsystem configuration
+     */
+    inline SubsystemConfig create_elevator(const std::string& name = "ElevatorSubsystem") {
+        SubsystemConfig config;
+        config.name = name;
+        config.type = SubsystemType::ELEVATOR;
+        config.description = "Elevator/lift mechanism";
+        config.max_velocity = 1.5;  // m/s
+        config.max_acceleration = 3.0;
+        config.position_tolerance = 0.02;  // meters
+        config.states = {"idle", "moving", "at_position"};
+
+        // Set height
+        SubsystemAction set_height;
+        set_height.name = "setHeight";
+        set_height.description = "Move elevator to specific height";
+        set_height.action_type = RobotAction::SET_ELEVATOR_HEIGHT;
+        set_height.typical_duration = 1.0;
+        set_height.parameters.push_back({"height", "double", 0.5, 0, 1.5, "m"});
+        config.actions.push_back(set_height);
+
+        // Stow
+        SubsystemAction stow;
+        stow.name = "stow";
+        stow.description = "Return elevator to stowed position";
+        stow.action_type = RobotAction::STOW;
+        stow.typical_duration = 0.8;
+        config.actions.push_back(stow);
+
+        // Preset positions
+        SubsystemAction preset_low;
+        preset_low.name = "goToLow";
+        preset_low.description = "Move to low scoring position";
+        preset_low.action_type = RobotAction::SET_ELEVATOR_HEIGHT;
+        preset_low.typical_duration = 0.6;
+        config.actions.push_back(preset_low);
+
+        SubsystemAction preset_high;
+        preset_high.name = "goToHigh";
+        preset_high.description = "Move to high scoring position";
+        preset_high.action_type = RobotAction::SET_ELEVATOR_HEIGHT;
+        preset_high.typical_duration = 1.2;
+        config.actions.push_back(preset_high);
+
+        return config;
+    }
+
+} // namespace SubsystemPresets
 
 /**
  * @brief Code generation output format
@@ -469,6 +842,70 @@ public:
      * @brief Add action to path (legacy support)
      */
     void add_action(AutoPath& path, const PathAction& action);
+
+    // ========================================================================
+    // Action Block System (Visual Block Coding)
+    // ========================================================================
+
+    /**
+     * @brief Add action block to path
+     */
+    void add_action_block(AutoPath& path, const ActionBlock& block);
+
+    /**
+     * @brief Create a simple action block (single condition + single action)
+     */
+    static ActionBlock create_simple_block(
+        const std::string& name,
+        TriggerCondition trigger_type,
+        RobotAction action,
+        int waypoint_index = -1,
+        int tag_id = -1,
+        double distance = 0);
+
+    /**
+     * @brief Create a combined action block (waypoint + tag condition)
+     */
+    static ActionBlock create_waypoint_tag_block(
+        const std::string& name,
+        int waypoint_index,
+        int tag_id,
+        double max_distance,
+        RobotAction action);
+
+    /**
+     * @brief Reset all action blocks for path execution
+     */
+    static void reset_action_blocks(AutoPath& path);
+
+    /**
+     * @brief Check action block conditions during execution
+     * @param block Action block to check
+     * @param current_waypoint Current waypoint index
+     * @param current_time Current time in trajectory
+     * @param visible_tags Set of currently visible tag IDs
+     * @param tag_distances Map of tag ID to distance
+     * @param robot_velocity Current robot velocity
+     * @return true if all/any conditions met (based on logic)
+     */
+    static bool check_block_conditions(
+        const ActionBlock& block,
+        int current_waypoint,
+        double current_time,
+        const std::set<int>& visible_tags,
+        const std::map<int, double>& tag_distances,
+        double robot_velocity);
+
+    /**
+     * @brief Get triggered action blocks for current state
+     */
+    static std::vector<const ActionBlock*> get_triggered_blocks(
+        const AutoPath& path,
+        int current_waypoint,
+        double current_time,
+        const std::set<int>& visible_tags,
+        const std::map<int, double>& tag_distances,
+        double robot_velocity);
 
     // ========================================================================
     // Trajectory Generation
@@ -592,6 +1029,45 @@ public:
      */
     std::vector<RobotAction> get_actions_for_tag(int tag_id) const;
 
+    // ========================================================================
+    // Subsystem Management
+    // ========================================================================
+
+    /**
+     * @brief Register a subsystem configuration
+     */
+    void register_subsystem(const SubsystemConfig& config);
+
+    /**
+     * @brief Get registered subsystem by name
+     */
+    const SubsystemConfig* get_subsystem(const std::string& name) const;
+
+    /**
+     * @brief Get all registered subsystems
+     */
+    const std::map<std::string, SubsystemConfig>& get_subsystems() const { return subsystems_; }
+
+    /**
+     * @brief Get all available actions from registered subsystems
+     */
+    std::vector<std::pair<std::string, SubsystemAction>> get_all_subsystem_actions() const;
+
+    /**
+     * @brief Register default subsystems (shooter, intake, elevator)
+     */
+    void register_default_subsystems();
+
+    /**
+     * @brief Simulate a subsystem action
+     * @return Duration of the action in seconds
+     */
+    static double simulate_subsystem_action(
+        const SubsystemConfig& subsystem,
+        const SubsystemAction& action,
+        SimulatedSubsystemState& state,
+        const std::map<std::string, double>& parameters);
+
 private:
     // Trajectory generation helpers
     void compute_bezier_points(AutoPath& path);
@@ -626,6 +1102,9 @@ private:
     SwerveConfig swerve_config_;
     FieldLayout field_;
     Alliance alliance_ = Alliance::BLUE;
+
+    // Registered subsystems
+    std::map<std::string, SubsystemConfig> subsystems_;
 
     // Field dimensions for mirroring
     static constexpr double FIELD_LENGTH = 16.54;  // meters

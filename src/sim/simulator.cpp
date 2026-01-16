@@ -97,6 +97,9 @@ bool Simulator::initialize(const std::string& config_path) {
     SwerveConfig swerve_cfg;
     path_planner_.set_swerve_config(swerve_cfg);
 
+    // Register default subsystems (shooter, intake, elevator)
+    path_planner_.register_default_subsystems();
+
     // Initialize vision pipeline
     if (!initialize_vision_pipeline()) {
         return false;
@@ -488,11 +491,17 @@ void Simulator::print_keybinds() {
     std::cout << "  Z        - Remove last waypoint" << std::endl;
     std::cout << "  G        - Generate WPILib 2026 code" << std::endl;
     std::cout << "----------------------------------------" << std::endl;
-    std::cout << "TAG ACTIONS:" << std::endl;
-    std::cout << "  Right-click on tag - Show action menu" << std::endl;
-    std::cout << "    - Auto-align to tag" << std::endl;
-    std::cout << "    - Add event marker" << std::endl;
-    std::cout << "    - Shoot/Intake/Elevator actions" << std::endl;
+    std::cout << "ACTION BLOCKS (Visual Coding):" << std::endl;
+    std::cout << "  B        - Add action block at current waypoint" << std::endl;
+    std::cout << "  L        - List all action blocks" << std::endl;
+    std::cout << "  Right-click tag - Add tag-triggered action" << std::endl;
+    std::cout << "  Blocks combine conditions like:" << std::endl;
+    std::cout << "    [At Waypoint 2] AND [Tag 5 Visible]" << std::endl;
+    std::cout << "    -> [Spin Up] then [Shoot]" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "SUBSYSTEMS:" << std::endl;
+    std::cout << "  Registered: Shooter, Intake, Elevator" << std::endl;
+    std::cout << "  Actions: Fire, SpinUp, IntakeIn/Out, SetHeight" << std::endl;
     std::cout << "----------------------------------------" << std::endl;
     std::cout << "FIELD:" << std::endl;
     std::cout << "  F        - Cycle field (2024->2025->2026)" << std::endl;
@@ -640,12 +649,18 @@ void Simulator::execute_path() {
     // Generate trajectory
     path_planner_.generate_trajectory(current_path_);
 
+    // Reset execution state
     path_time_ = 0;
+    current_waypoint_index_ = 0;
     path_executing_ = true;
     mode_ = SimMode::PATH_EXECUTE;
 
+    // Reset action blocks for fresh execution
+    PathPlanner::reset_action_blocks(current_path_);
+
     std::cout << "[Path] Executing path with " << current_path_.waypoints.size()
               << " waypoints, total time: " << current_path_.total_time << "s" << std::endl;
+    std::cout << "[Path] Action blocks: " << current_path_.action_blocks.size() << std::endl;
 }
 
 void Simulator::stop_path_execution() {
@@ -838,18 +853,61 @@ void Simulator::execute_tag_action(int tag_id, RobotAction action) {
 }
 
 void Simulator::add_event_marker_for_action(int tag_id, RobotAction action) {
-    EventMarker marker;
-    marker.name = action_to_command_name(action) + "_Tag" + std::to_string(tag_id);
-    marker.trigger = TriggerCondition::DISTANCE_TO_TAG;
-    marker.tag_id = tag_id;
-    marker.distance = 1.5;  // Trigger when within 1.5m of tag
-    marker.action = action;
-    marker.wait_for_completion = false;
+    // Determine the waypoint index to bind this action to
+    int waypoint_idx = current_path_.waypoints.empty() ? 0 :
+                       static_cast<int>(current_path_.waypoints.size()) - 1;
 
-    path_planner_.add_event_marker(current_path_, marker);
+    // Create an ActionBlock with combined conditions:
+    // - At or after waypoint X
+    // - AND tag is visible AND within 2m
+    ActionBlock block;
+    block.name = action_to_command_name(action) + "_Tag" + std::to_string(tag_id);
+    block.description = "At WP" + std::to_string(waypoint_idx) +
+                       " + Tag " + std::to_string(tag_id) + " visible";
+    block.logic = ConditionLogic::AND;
 
-    std::cout << "[Path] Added event marker: " << marker.name << " (trigger at "
-              << marker.distance << "m from tag " << tag_id << ")" << std::endl;
+    // Condition 1: At waypoint (if we have waypoints)
+    if (!current_path_.waypoints.empty()) {
+        Condition wp_cond;
+        wp_cond.type = TriggerCondition::AT_WAYPOINT;
+        wp_cond.waypoint_index = waypoint_idx;
+        wp_cond.trigger_on_edge = false;  // Don't need edge detection for waypoint
+        block.conditions.push_back(wp_cond);
+    }
+
+    // Condition 2: Tag visible
+    Condition vis_cond;
+    vis_cond.type = TriggerCondition::TAG_VISIBLE;
+    vis_cond.tag_id = tag_id;
+    vis_cond.trigger_on_edge = true;  // Trigger once when tag becomes visible
+    block.conditions.push_back(vis_cond);
+
+    // Condition 3: Within 2m of tag
+    Condition dist_cond;
+    dist_cond.type = TriggerCondition::DISTANCE_TO_TAG;
+    dist_cond.tag_id = tag_id;
+    dist_cond.distance = 2.0;  // meters
+    dist_cond.compare = Condition::Compare::LESS_THAN;
+    dist_cond.trigger_on_edge = false;
+    block.conditions.push_back(dist_cond);
+
+    // Action to execute
+    ActionBlock::ActionStep step;
+    step.action = action;
+    step.parameters["tag_id"] = static_cast<double>(tag_id);
+    block.actions.push_back(step);
+
+    // Add to path
+    current_path_.action_blocks.push_back(block);
+
+    std::cout << "\n[ActionBlock] Created combined trigger block:" << std::endl;
+    std::cout << "  Name: " << block.name << std::endl;
+    std::cout << "  Conditions:" << std::endl;
+    for (const auto& cond : block.conditions) {
+        std::cout << "    - " << cond.describe() << std::endl;
+    }
+    std::cout << "  Action: " << action_to_string(action) << std::endl;
+    std::cout << "  Total blocks: " << current_path_.action_blocks.size() << std::endl;
 }
 
 void Simulator::draw_action_menu(cv::Mat& frame) {
@@ -919,6 +977,20 @@ void Simulator::handle_path_execution(double dt) {
     Pose2D target = path_planner_.sample_path(current_path_, path_time_);
     double target_vel = path_planner_.sample_velocity(current_path_, path_time_);
 
+    // Update current waypoint index based on trajectory progress
+    if (!current_path_.waypoints.empty()) {
+        // Estimate waypoint based on time fraction
+        double progress = path_time_ / current_path_.total_time;
+        int new_waypoint = static_cast<int>(progress * (current_path_.waypoints.size() - 1));
+        if (new_waypoint > current_waypoint_index_) {
+            current_waypoint_index_ = new_waypoint;
+            std::cout << "[Path] Reached waypoint " << current_waypoint_index_ << std::endl;
+        }
+    }
+
+    // Check and execute action blocks
+    check_and_execute_action_blocks();
+
     // Simple path following: drive towards target
     Pose2D robot = dynamics_.state().true_pose;
     double dx = target.x - robot.x;
@@ -944,6 +1016,138 @@ void Simulator::handle_path_execution(double dt) {
     dynamics_.apply_velocity_command(vx_robot, vy_robot, omega);
 }
 
+// ============================================================================
+// Action Block Execution
+// ============================================================================
+
+std::set<int> Simulator::get_visible_tags() const {
+    std::set<int> visible;
+    for (const auto& det : last_detections_.tags) {
+        visible.insert(det.id);
+    }
+    return visible;
+}
+
+std::map<int, double> Simulator::get_tag_distances() const {
+    std::map<int, double> distances;
+    Pose2D robot = dynamics_.state().true_pose;
+
+    for (const auto& det : last_detections_.tags) {
+        // Calculate distance from robot to tag
+        if (field_.has_tag(det.id)) {
+            const auto& tag = field_.get_tag(det.id);
+            double dx = tag.center_field.x - robot.x;
+            double dy = tag.center_field.y - robot.y;
+            distances[det.id] = std::sqrt(dx * dx + dy * dy);
+        }
+    }
+    return distances;
+}
+
+void Simulator::check_and_execute_action_blocks() {
+    if (current_path_.action_blocks.empty()) return;
+
+    // Get current state
+    auto visible_tags = get_visible_tags();
+    auto tag_distances = get_tag_distances();
+    double robot_velocity = std::sqrt(
+        dynamics_.state().vx * dynamics_.state().vx +
+        dynamics_.state().vy * dynamics_.state().vy);
+
+    // Check for triggered blocks
+    auto triggered = PathPlanner::get_triggered_blocks(
+        current_path_,
+        current_waypoint_index_,
+        path_time_,
+        visible_tags,
+        tag_distances,
+        robot_velocity);
+
+    // Execute triggered blocks
+    for (const auto* block : triggered) {
+        std::cout << "[ActionBlock] Triggered: " << block->name << std::endl;
+        for (const auto& step : block->actions) {
+            execute_action_step(step);
+        }
+    }
+}
+
+void Simulator::execute_action_step(const ActionBlock::ActionStep& step) {
+    std::cout << "[ActionBlock] Executing: " << action_to_string(step.action) << std::endl;
+
+    switch (step.action) {
+        case RobotAction::AUTO_ALIGN_TO_TAG:
+            // Enable auto-align mode
+            if (!step.parameters.empty()) {
+                auto it = step.parameters.find("tag_id");
+                if (it != step.parameters.end()) {
+                    int tag_id = static_cast<int>(it->second);
+                    auto_align_.set_target_tag(tag_id);
+                }
+            }
+            auto_align_.enable(true);
+            break;
+
+        case RobotAction::FACE_TAG:
+            // Rotate to face a specific tag
+            if (!step.parameters.empty()) {
+                auto it = step.parameters.find("tag_id");
+                if (it != step.parameters.end()) {
+                    int tag_id = static_cast<int>(it->second);
+                    if (field_.has_tag(tag_id)) {
+                        const auto& tag = field_.get_tag(tag_id);
+                        Pose2D robot = dynamics_.state().true_pose;
+                        double target_theta = std::atan2(
+                            tag.center_field.y - robot.y,
+                            tag.center_field.x - robot.x);
+                        // Apply rotation (simplified)
+                        std::cout << "[ActionBlock] Facing tag " << tag_id
+                                  << " at angle " << (target_theta * 180 / M_PI) << " deg" << std::endl;
+                    }
+                }
+            }
+            break;
+
+        case RobotAction::INTAKE_IN:
+        case RobotAction::INTAKE_OUT:
+        case RobotAction::INTAKE_STOP:
+            std::cout << "[ActionBlock] Intake action (simulated)" << std::endl;
+            break;
+
+        case RobotAction::SPIN_UP_SHOOTER:
+        case RobotAction::SHOOT:
+        case RobotAction::SHOOTER_STOP:
+            std::cout << "[ActionBlock] Shooter action (simulated)" << std::endl;
+            break;
+
+        case RobotAction::SET_ELEVATOR_HEIGHT:
+            if (!step.parameters.empty()) {
+                auto it = step.parameters.find("height");
+                if (it != step.parameters.end()) {
+                    std::cout << "[ActionBlock] Set elevator to " << it->second << "m" << std::endl;
+                }
+            }
+            break;
+
+        case RobotAction::STOW:
+            std::cout << "[ActionBlock] Stowing mechanisms" << std::endl;
+            break;
+
+        case RobotAction::WAIT:
+            if (!step.parameters.empty()) {
+                auto it = step.parameters.find("time");
+                if (it != step.parameters.end()) {
+                    std::cout << "[ActionBlock] Wait " << it->second << "s (simulated)" << std::endl;
+                }
+            }
+            break;
+
+        default:
+            std::cout << "[ActionBlock] Unknown action" << std::endl;
+            break;
+    }
+}
+
 int Simulator::run() {
     std::cout << "[Sim] Running " << game_year_to_string(current_game_year_)
               << "... Press ESC to quit.\n" << std::endl;
@@ -957,13 +1161,15 @@ int Simulator::run() {
         process_input();
         if (shutdown_requested_.load()) break;
 
-        // Handle path execution
+        // Handle path execution or manual control
         if (mode_ == SimMode::PATH_EXECUTE) {
             handle_path_execution(dt);
         } else {
-            update_dynamics(dt);
             handle_auto_align(dt);
         }
+
+        // Always update dynamics (path execution sets velocity commands)
+        update_dynamics(dt);
 
         capture_and_render();
         run_detection();
@@ -1080,6 +1286,69 @@ void Simulator::handle_key(int key) {
             input_.detect_on_composite = !input_.detect_on_composite;
             break;
 
+        // Action blocks
+        case 'b': {
+            // Add action block at current waypoint (in path edit mode)
+            if (mode_ == SimMode::PATH_EDIT && !current_path_.waypoints.empty()) {
+                int wp_idx = static_cast<int>(current_path_.waypoints.size()) - 1;
+
+                // Create a sample action block that triggers at this waypoint
+                // User can right-click a tag to add tag conditions
+                ActionBlock block;
+                block.name = "Block_WP" + std::to_string(wp_idx);
+                block.description = "Action at waypoint " + std::to_string(wp_idx);
+
+                // Add waypoint condition
+                Condition wp_cond;
+                wp_cond.type = TriggerCondition::AT_WAYPOINT;
+                wp_cond.waypoint_index = wp_idx;
+                block.conditions.push_back(wp_cond);
+
+                // Prompt user to select action via console
+                std::cout << "\n[ActionBlock] Creating block at waypoint " << wp_idx << std::endl;
+                std::cout << "Select action (1-6):" << std::endl;
+                std::cout << "  1. Spin Up Shooter" << std::endl;
+                std::cout << "  2. Shoot" << std::endl;
+                std::cout << "  3. Intake In" << std::endl;
+                std::cout << "  4. Intake Out" << std::endl;
+                std::cout << "  5. Set Elevator High" << std::endl;
+                std::cout << "  6. Stow" << std::endl;
+
+                // Default to shoot for now (GUI will allow selection)
+                ActionBlock::ActionStep step;
+                step.action = RobotAction::SHOOT;
+                block.actions.push_back(step);
+
+                current_path_.action_blocks.push_back(block);
+                std::cout << "[ActionBlock] Added '" << block.name << "' -> "
+                          << action_to_string(step.action) << std::endl;
+            } else {
+                std::cout << "[ActionBlock] Enter path edit mode (P) and add waypoints first" << std::endl;
+            }
+            break;
+        }
+
+        case 'l': {
+            // List all action blocks
+            std::cout << "\n========== ACTION BLOCKS ==========\n" << std::endl;
+            if (current_path_.action_blocks.empty()) {
+                std::cout << "No action blocks defined." << std::endl;
+                std::cout << "Use 'B' in path edit mode to add blocks." << std::endl;
+                std::cout << "Or right-click a tag to add tag-triggered actions." << std::endl;
+            } else {
+                for (size_t i = 0; i < current_path_.action_blocks.size(); i++) {
+                    const auto& block = current_path_.action_blocks[i];
+                    std::cout << "[" << i << "] " << block.name << std::endl;
+                    std::cout << "    " << block.describe() << std::endl;
+                    std::cout << "    Status: " << (block.enabled ? "Enabled" : "Disabled");
+                    if (block.has_triggered) std::cout << " (Triggered)";
+                    std::cout << std::endl << std::endl;
+                }
+            }
+            std::cout << "===================================\n" << std::endl;
+            break;
+        }
+
         case 27: // ESC
             shutdown_requested_.store(true);
             break;
@@ -1087,17 +1356,21 @@ void Simulator::handle_key(int key) {
 }
 
 void Simulator::update_dynamics(double dt) {
+    // Only disable external command mode if not in auto-align or path execution
     if (!auto_align_.is_enabled() && mode_ != SimMode::PATH_EXECUTE) {
         dynamics_.set_external_command_mode(false);
     }
 
-    auto now = Clock::now();
-    double elapsed_ms = std::chrono::duration<double, std::milli>(now - key_hold_time_).count();
-    if (elapsed_ms > 150.0) {
-        input_.forward = input_.backward = false;
-        input_.left = input_.right = false;
-        input_.rotate_ccw = input_.rotate_cw = false;
-        input_.turbo = false;
+    // Clear stale input if no recent key presses (for manual driving only)
+    if (mode_ == SimMode::DRIVE) {
+        auto now = Clock::now();
+        double elapsed_ms = std::chrono::duration<double, std::milli>(now - key_hold_time_).count();
+        if (elapsed_ms > 150.0) {
+            input_.forward = input_.backward = false;
+            input_.left = input_.right = false;
+            input_.rotate_ccw = input_.rotate_cw = false;
+            input_.turbo = false;
+        }
     }
 
     dynamics_.update(input_, dt);

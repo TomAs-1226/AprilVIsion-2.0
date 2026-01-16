@@ -70,6 +70,195 @@ void PathPlanner::add_action(AutoPath& path, const PathAction& action) {
     path.actions.push_back(action);
 }
 
+// ============================================================================
+// Action Block System Implementation
+// ============================================================================
+
+void PathPlanner::add_action_block(AutoPath& path, const ActionBlock& block) {
+    path.action_blocks.push_back(block);
+}
+
+ActionBlock PathPlanner::create_simple_block(
+    const std::string& name,
+    TriggerCondition trigger_type,
+    RobotAction action,
+    int waypoint_index,
+    int tag_id,
+    double distance)
+{
+    ActionBlock block;
+    block.name = name;
+
+    // Create the condition
+    Condition cond;
+    cond.type = trigger_type;
+    cond.waypoint_index = waypoint_index;
+    cond.tag_id = tag_id;
+    cond.distance = distance;
+    block.conditions.push_back(cond);
+
+    // Create the action
+    ActionBlock::ActionStep step;
+    step.action = action;
+    block.actions.push_back(step);
+
+    return block;
+}
+
+ActionBlock PathPlanner::create_waypoint_tag_block(
+    const std::string& name,
+    int waypoint_index,
+    int tag_id,
+    double max_distance,
+    RobotAction action)
+{
+    ActionBlock block;
+    block.name = name;
+    block.description = "At waypoint " + std::to_string(waypoint_index) +
+                       " when tag " + std::to_string(tag_id) +
+                       " is within " + std::to_string(max_distance) + "m";
+    block.logic = ConditionLogic::AND;
+
+    // Condition 1: At waypoint
+    Condition wp_cond;
+    wp_cond.type = TriggerCondition::AT_WAYPOINT;
+    wp_cond.waypoint_index = waypoint_index;
+    block.conditions.push_back(wp_cond);
+
+    // Condition 2: Tag within distance
+    Condition tag_cond;
+    tag_cond.type = TriggerCondition::DISTANCE_TO_TAG;
+    tag_cond.tag_id = tag_id;
+    tag_cond.distance = max_distance;
+    tag_cond.compare = Condition::Compare::LESS_THAN;
+    block.conditions.push_back(tag_cond);
+
+    // Action
+    ActionBlock::ActionStep step;
+    step.action = action;
+    block.actions.push_back(step);
+
+    return block;
+}
+
+void PathPlanner::reset_action_blocks(AutoPath& path) {
+    for (auto& block : path.action_blocks) {
+        block.reset();
+    }
+}
+
+bool PathPlanner::check_block_conditions(
+    const ActionBlock& block,
+    int current_waypoint,
+    double current_time,
+    const std::set<int>& visible_tags,
+    const std::map<int, double>& tag_distances,
+    double robot_velocity)
+{
+    if (!block.enabled) return false;
+    if (block.one_shot && block.has_triggered) return false;
+
+    bool result = (block.logic == ConditionLogic::AND);  // AND starts true, OR starts false
+
+    for (const auto& cond : block.conditions) {
+        bool cond_met = false;
+
+        switch (cond.type) {
+            case TriggerCondition::AT_WAYPOINT:
+                cond_met = (current_waypoint >= cond.waypoint_index);
+                break;
+
+            case TriggerCondition::AT_TIME:
+                cond_met = (current_time >= cond.time);
+                break;
+
+            case TriggerCondition::TAG_VISIBLE:
+                cond_met = (visible_tags.count(cond.tag_id) > 0);
+                break;
+
+            case TriggerCondition::DISTANCE_TO_TAG: {
+                auto it = tag_distances.find(cond.tag_id);
+                if (it != tag_distances.end()) {
+                    double dist = it->second;
+                    switch (cond.compare) {
+                        case Condition::Compare::LESS_THAN:
+                            cond_met = (dist < cond.distance);
+                            break;
+                        case Condition::Compare::GREATER_THAN:
+                            cond_met = (dist > cond.distance);
+                            break;
+                        case Condition::Compare::EQUAL:
+                            cond_met = (std::abs(dist - cond.distance) < 0.1);
+                            break;
+                    }
+                }
+                break;
+            }
+
+            case TriggerCondition::TAG_ALIGNED:
+                // Simplified: tag is visible and close
+                cond_met = (visible_tags.count(cond.tag_id) > 0);
+                if (cond_met) {
+                    auto it = tag_distances.find(cond.tag_id);
+                    cond_met = (it != tag_distances.end() && it->second < 2.0);
+                }
+                break;
+
+            case TriggerCondition::VELOCITY_BELOW:
+                cond_met = (robot_velocity < cond.threshold);
+                break;
+
+            case TriggerCondition::GAME_PIECE_DETECTED:
+                // Would need sensor input - assume false for now
+                cond_met = false;
+                break;
+
+            case TriggerCondition::CUSTOM:
+                // Custom conditions not evaluated here
+                cond_met = false;
+                break;
+        }
+
+        // Handle edge detection (trigger on false->true transition)
+        if (cond.trigger_on_edge) {
+            bool should_trigger = cond_met && !cond.was_true;
+            cond.was_true = cond_met;
+            cond_met = should_trigger;
+        }
+
+        // Apply logic
+        if (block.logic == ConditionLogic::AND) {
+            result = result && cond_met;
+        } else {
+            result = result || cond_met;
+        }
+    }
+
+    return result;
+}
+
+std::vector<const ActionBlock*> PathPlanner::get_triggered_blocks(
+    const AutoPath& path,
+    int current_waypoint,
+    double current_time,
+    const std::set<int>& visible_tags,
+    const std::map<int, double>& tag_distances,
+    double robot_velocity)
+{
+    std::vector<const ActionBlock*> triggered;
+
+    for (const auto& block : path.action_blocks) {
+        if (check_block_conditions(block, current_waypoint, current_time,
+                                   visible_tags, tag_distances, robot_velocity)) {
+            triggered.push_back(&block);
+            block.has_triggered = true;
+            block.trigger_time = current_time;
+        }
+    }
+
+    return triggered;
+}
+
 std::vector<RobotAction> PathPlanner::get_available_actions() {
     return {
         RobotAction::INTAKE_IN,
@@ -103,6 +292,94 @@ std::vector<RobotAction> PathPlanner::get_actions_for_tag(int tag_id) const {
         RobotAction::SET_ELEVATOR_HEIGHT,
         RobotAction::STOW
     };
+}
+
+// ============================================================================
+// Subsystem Management Implementation
+// ============================================================================
+
+void PathPlanner::register_subsystem(const SubsystemConfig& config) {
+    subsystems_[config.name] = config;
+    std::cout << "[PathPlanner] Registered subsystem: " << config.name
+              << " with " << config.actions.size() << " actions" << std::endl;
+}
+
+const SubsystemConfig* PathPlanner::get_subsystem(const std::string& name) const {
+    auto it = subsystems_.find(name);
+    return (it != subsystems_.end()) ? &it->second : nullptr;
+}
+
+std::vector<std::pair<std::string, SubsystemAction>> PathPlanner::get_all_subsystem_actions() const {
+    std::vector<std::pair<std::string, SubsystemAction>> all_actions;
+    for (const auto& [name, subsystem] : subsystems_) {
+        for (const auto& action : subsystem.actions) {
+            all_actions.push_back({name, action});
+        }
+    }
+    return all_actions;
+}
+
+void PathPlanner::register_default_subsystems() {
+    // Register standard FRC subsystems
+    register_subsystem(SubsystemPresets::create_shooter());
+    register_subsystem(SubsystemPresets::create_intake());
+    register_subsystem(SubsystemPresets::create_elevator());
+    std::cout << "[PathPlanner] Registered default subsystems" << std::endl;
+}
+
+double PathPlanner::simulate_subsystem_action(
+    const SubsystemConfig& subsystem,
+    const SubsystemAction& action,
+    SimulatedSubsystemState& state,
+    const std::map<std::string, double>& parameters)
+{
+    // Update state based on action
+    state.current_action = action.name;
+    state.is_busy = !action.is_instant;
+
+    // Handle different subsystem types
+    switch (subsystem.type) {
+        case SubsystemType::SHOOTER:
+            if (action.action_type == RobotAction::SPIN_UP_SHOOTER) {
+                state.current_state = "spinning_up";
+                auto it = parameters.find("rpm");
+                state.target_value = (it != parameters.end()) ? it->second : 5000;
+            } else if (action.action_type == RobotAction::SHOOT) {
+                state.current_state = "firing";
+                state.has_game_piece = false;
+            } else if (action.action_type == RobotAction::SHOOTER_STOP) {
+                state.current_state = "idle";
+                state.target_value = 0;
+            }
+            break;
+
+        case SubsystemType::INTAKE:
+            if (action.action_type == RobotAction::INTAKE_IN) {
+                state.current_state = "intaking";
+            } else if (action.action_type == RobotAction::INTAKE_OUT) {
+                state.current_state = "ejecting";
+                state.has_game_piece = false;
+            } else if (action.action_type == RobotAction::INTAKE_STOP) {
+                state.current_state = "idle";
+            }
+            break;
+
+        case SubsystemType::ELEVATOR:
+            if (action.action_type == RobotAction::SET_ELEVATOR_HEIGHT) {
+                state.current_state = "moving";
+                auto it = parameters.find("height");
+                state.target_value = (it != parameters.end()) ? it->second : 0.5;
+            } else if (action.action_type == RobotAction::STOW) {
+                state.current_state = "moving";
+                state.target_value = 0;
+            }
+            break;
+
+        default:
+            break;
+    }
+
+    return action.typical_duration;
 }
 
 Pose2D PathPlanner::mirror_pose(const Pose2D& pose) const {
