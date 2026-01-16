@@ -79,28 +79,31 @@ struct DynamicsParams {
 
 /**
  * @brief Auto-align controller parameters
+ *
+ * Tuned for fast, responsive alignment with vision feedback.
+ * These base gains are multiplied by the controller for aggressive response.
  */
 struct AutoAlignParams {
-    // PID gains for position
-    double pos_kp = 2.0;
-    double pos_ki = 0.1;
-    double pos_kd = 0.3;
+    // PID gains for position (base values - controller applies multipliers)
+    double pos_kp = 3.0;            // Increased from 2.0
+    double pos_ki = 0.05;           // Reduced for less windup
+    double pos_kd = 0.5;            // Increased for damping
 
     // PID gains for heading
-    double heading_kp = 4.0;
-    double heading_ki = 0.1;
-    double heading_kd = 0.2;
+    double heading_kp = 6.0;        // Increased from 4.0 for snappy rotation
+    double heading_ki = 0.05;       // Reduced for less windup
+    double heading_kd = 0.4;        // Increased for damping
 
     // Limits
-    double max_speed = 2.0;         // m/s during align
-    double max_rotation = 3.0;      // rad/s during align
+    double max_speed = 3.0;         // m/s during align (increased from 2.0)
+    double max_rotation = 5.0;      // rad/s during align (increased from 3.0)
 
     // Tolerances
-    double pos_tolerance = 0.05;    // meters
-    double heading_tolerance = 0.02; // radians
+    double pos_tolerance = 0.03;    // meters (tightened from 0.05)
+    double heading_tolerance = 0.015; // radians (tightened from 0.02)
 
     // Target standoff distance from tag
-    double standoff_distance = 1.0; // meters
+    double standoff_distance = 0.8; // meters (closer for precision)
 };
 
 /**

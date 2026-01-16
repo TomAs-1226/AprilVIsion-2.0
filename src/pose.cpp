@@ -128,10 +128,31 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
         result.valid = true;
 
     } else {
-        // Multiple tags - solve combined PnP with RANSAC
+        // Multiple tags - enhanced multi-tag pose estimation
+        // Uses weighted corners based on tag quality and iterative refinement
+
+        // Calculate weights for each corner based on tag quality
+        std::vector<double> corner_weights;
+        for (size_t i = 0; i < detections.size(); i++) {
+            if (!field_.has_tag(detections[i].id)) continue;
+
+            // Weight based on decision margin and tag area (larger = closer = more accurate)
+            double margin_weight = std::min(1.0, detections[i].decision_margin / 100.0);
+            double area = detections[i].corners.area();
+            double area_weight = std::min(1.0, area / 5000.0);  // Normalize to ~5000 px^2
+            double weight = 0.5 * margin_weight + 0.5 * area_weight;
+            weight = std::max(0.1, weight);  // Minimum weight
+
+            // Each tag has 4 corners
+            for (int j = 0; j < 4; j++) {
+                corner_weights.push_back(weight);
+            }
+        }
+
         cv::Vec3d rvec, tvec;
         cv::Mat inliers;
 
+        // First pass: RANSAC with tighter threshold for outlier rejection
         bool success = cv::solvePnPRansac(
             object_points,
             image_points,
@@ -139,11 +160,11 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
             intrinsics.dist_coeffs,
             rvec, tvec,
             false,
-            100,    // iterations
-            8.0,    // reprojection threshold
-            0.99,   // confidence
+            150,    // More iterations for better consensus
+            4.0,    // Tighter reprojection threshold (was 8.0)
+            0.995,  // Higher confidence
             inliers,
-            cv::SOLVEPNP_SQPNP  // More robust for multiple points
+            cv::SOLVEPNP_SQPNP
         );
 
         if (!success) {
@@ -163,14 +184,57 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
             return result;
         }
 
+        // Iterative refinement pass using inliers only
+        if (!inliers.empty() && inliers.rows >= 8) {  // Need at least 2 tags worth
+            std::vector<cv::Point3d> inlier_obj_pts;
+            std::vector<cv::Point2d> inlier_img_pts;
+
+            for (int i = 0; i < inliers.rows; i++) {
+                int idx = inliers.at<int>(i);
+                if (idx < static_cast<int>(object_points.size())) {
+                    inlier_obj_pts.push_back(object_points[idx]);
+                    inlier_img_pts.push_back(image_points[idx]);
+                }
+            }
+
+            if (inlier_obj_pts.size() >= 8) {
+                // Refine with iterative LM on inliers only
+                cv::solvePnP(
+                    inlier_obj_pts,
+                    inlier_img_pts,
+                    intrinsics.camera_matrix,
+                    intrinsics.dist_coeffs,
+                    rvec, tvec,
+                    true,  // Use existing solution as initial guess
+                    cv::SOLVEPNP_ITERATIVE
+                );
+            }
+        }
+
         // This gives us field_to_camera (world points in field frame)
         // We want camera_to_field
         Pose3D field_to_camera = Pose3D::from_rvec_tvec(rvec, tvec);
         result.camera_to_field = field_to_camera.inverse();
 
-        // Calculate reprojection error
-        result.reprojection_error = calculate_reprojection_error(
-            image_points, object_points, rvec, tvec, intrinsics);
+        // Calculate weighted reprojection error
+        std::vector<cv::Point2d> projected;
+        cv::projectPoints(object_points, rvec, tvec,
+                         intrinsics.camera_matrix, intrinsics.dist_coeffs,
+                         projected);
+
+        double weighted_sum = 0;
+        double weight_total = 0;
+        for (size_t i = 0; i < image_points.size() && i < projected.size(); i++) {
+            double dx = image_points[i].x - projected[i].x;
+            double dy = image_points[i].y - projected[i].y;
+            double err_sq = dx * dx + dy * dy;
+
+            double w = (i < corner_weights.size()) ? corner_weights[i] : 1.0;
+            weighted_sum += w * err_sq;
+            weight_total += w;
+        }
+        result.reprojection_error = (weight_total > 0) ?
+            std::sqrt(weighted_sum / weight_total) : 0;
 
         // Count inliers
         if (!inliers.empty()) {
@@ -278,14 +342,31 @@ PoseQuality PoseEstimator::compute_quality(
     double avg_area = area_sum / detections.size();
     double estimated_distance = 1000.0 / std::sqrt(avg_area);  // Rough approximation
 
-    // Compute confidence (0-1)
-    double tag_factor = std::min(1.0, quality.tag_count / 4.0);
-    double margin_factor = std::min(1.0, quality.avg_margin / 100.0);
-    double error_factor = std::max(0.0, 1.0 - reproj_error / 10.0);
-    double distance_factor = std::max(0.0, 1.0 - estimated_distance / 5.0);
+    // Compute confidence (0-1) with improved multi-tag weighting
+    // More tags gives significantly higher confidence due to geometric constraints
+    double tag_factor;
+    if (quality.tag_count >= 4) {
+        tag_factor = 1.0;  // 4+ tags = maximum confidence from tags
+    } else if (quality.tag_count == 3) {
+        tag_factor = 0.9;  // 3 tags is very good
+    } else if (quality.tag_count == 2) {
+        tag_factor = 0.7;  // 2 tags provides good triangulation
+    } else {
+        tag_factor = 0.4;  // Single tag has ambiguity
+    }
 
-    quality.confidence = tag_factor * 0.3 + margin_factor * 0.2 +
-                        error_factor * 0.3 + distance_factor * 0.2;
+    double margin_factor = std::min(1.0, quality.avg_margin / 80.0);
+    double error_factor = std::max(0.0, 1.0 - reproj_error / 5.0);  // Tighter threshold
+    double distance_factor = std::max(0.0, 1.0 - estimated_distance / 4.0);
+
+    // Weighted combination favoring tag count and reprojection error
+    quality.confidence = tag_factor * 0.4 + margin_factor * 0.15 +
+                        error_factor * 0.35 + distance_factor * 0.1;
+
+    // Bonus for multiple tags with low error (very reliable)
+    if (quality.tag_count >= 2 && reproj_error < 2.0) {
+        quality.confidence = std::min(1.0, quality.confidence * 1.15);
+    }
 
     // Estimate standard deviations
     auto std_devs = estimate_std_devs(quality.tag_count, estimated_distance, reproj_error);

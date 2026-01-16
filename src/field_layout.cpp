@@ -47,43 +47,86 @@ FieldLayout load_field_layout(const std::string& path, double tag_size_m) {
             layout.tag_size_m = root["tag_size_m"].get<double>();
         }
 
+        // Load field dimensions if present
+        if (root.contains("field")) {
+            // Field dimensions can be used for visualization bounds
+            // double field_length = root["field"].value("length", 16.54);
+            // double field_width = root["field"].value("width", 8.21);
+        }
+
         auto corners_local = get_tag_corners_local(layout.tag_size_m);
 
         if (root.contains("tags")) {
             for (const auto& tag_json : root["tags"]) {
                 FieldTag tag;
-                tag.id = tag_json["id"].get<int>();
+
+                // Support both "id" and "ID" (WPILib uses uppercase)
+                if (tag_json.contains("id")) {
+                    tag.id = tag_json["id"].get<int>();
+                } else if (tag_json.contains("ID")) {
+                    tag.id = tag_json["ID"].get<int>();
+                } else {
+                    continue;  // Skip invalid tag
+                }
 
                 // Parse tag pose in field frame
+                // Support multiple formats:
+                // 1. Our format: pose: {x, y, z, qw, qx, qy, qz}
+                // 2. WPILib format: pose: {translation: {x, y, z}, rotation: {quaternion: {W, X, Y, Z}}}
                 if (tag_json.contains("pose")) {
                     const auto& pose = tag_json["pose"];
-                    tag.center_field.x = pose["x"].get<double>();
-                    tag.center_field.y = pose["y"].get<double>();
-                    tag.center_field.z = pose["z"].get<double>();
 
-                    // Rotation (quaternion or euler)
-                    if (pose.contains("qw")) {
-                        tag.pose_field.orientation.w = pose["qw"].get<double>();
-                        tag.pose_field.orientation.x = pose["qx"].get<double>();
-                        tag.pose_field.orientation.y = pose["qy"].get<double>();
-                        tag.pose_field.orientation.z = pose["qz"].get<double>();
+                    // Check for WPILib format (has translation/rotation)
+                    if (pose.contains("translation")) {
+                        const auto& trans = pose["translation"];
+                        tag.center_field.x = trans["x"].get<double>();
+                        tag.center_field.y = trans["y"].get<double>();
+                        tag.center_field.z = trans["z"].get<double>();
+
+                        if (pose.contains("rotation") && pose["rotation"].contains("quaternion")) {
+                            const auto& quat = pose["rotation"]["quaternion"];
+                            tag.pose_field.orientation.w = quat["W"].get<double>();
+                            tag.pose_field.orientation.x = quat["X"].get<double>();
+                            tag.pose_field.orientation.y = quat["Y"].get<double>();
+                            tag.pose_field.orientation.z = quat["Z"].get<double>();
+                        }
                     } else {
-                        // Euler angles (degrees)
-                        double roll = pose.value("roll", 0.0) * M_PI / 180.0;
-                        double pitch = pose.value("pitch", 0.0) * M_PI / 180.0;
-                        double yaw = pose.value("yaw", 0.0) * M_PI / 180.0;
+                        // Our simpler format
+                        tag.center_field.x = pose["x"].get<double>();
+                        tag.center_field.y = pose["y"].get<double>();
+                        tag.center_field.z = pose["z"].get<double>();
 
-                        double cy = std::cos(yaw * 0.5);
-                        double sy = std::sin(yaw * 0.5);
-                        double cp = std::cos(pitch * 0.5);
-                        double sp = std::sin(pitch * 0.5);
-                        double cr = std::cos(roll * 0.5);
-                        double sr = std::sin(roll * 0.5);
+                        // Rotation (quaternion or euler)
+                        if (pose.contains("qw")) {
+                            tag.pose_field.orientation.w = pose["qw"].get<double>();
+                            tag.pose_field.orientation.x = pose["qx"].get<double>();
+                            tag.pose_field.orientation.y = pose["qy"].get<double>();
+                            tag.pose_field.orientation.z = pose["qz"].get<double>();
+                        } else if (pose.contains("rotation") && pose["rotation"].contains("quaternion")) {
+                            // Nested quaternion format
+                            const auto& quat = pose["rotation"]["quaternion"];
+                            tag.pose_field.orientation.w = quat["W"].get<double>();
+                            tag.pose_field.orientation.x = quat["X"].get<double>();
+                            tag.pose_field.orientation.y = quat["Y"].get<double>();
+                            tag.pose_field.orientation.z = quat["Z"].get<double>();
+                        } else {
+                            // Euler angles (degrees)
+                            double roll = pose.value("roll", 0.0) * M_PI / 180.0;
+                            double pitch = pose.value("pitch", 0.0) * M_PI / 180.0;
+                            double yaw = pose.value("yaw", 0.0) * M_PI / 180.0;
 
-                        tag.pose_field.orientation.w = cr * cp * cy + sr * sp * sy;
-                        tag.pose_field.orientation.x = sr * cp * cy - cr * sp * sy;
-                        tag.pose_field.orientation.y = cr * sp * cy + sr * cp * sy;
-                        tag.pose_field.orientation.z = cr * cp * sy - sr * sp * cy;
+                            double cy = std::cos(yaw * 0.5);
+                            double sy = std::sin(yaw * 0.5);
+                            double cp = std::cos(pitch * 0.5);
+                            double sp = std::sin(pitch * 0.5);
+                            double cr = std::cos(roll * 0.5);
+                            double sr = std::sin(roll * 0.5);
+
+                            tag.pose_field.orientation.w = cr * cp * cy + sr * sp * sy;
+                            tag.pose_field.orientation.x = sr * cp * cy - cr * sp * sy;
+                            tag.pose_field.orientation.y = cr * sp * cy + sr * cp * sy;
+                            tag.pose_field.orientation.z = cr * cp * sy - sr * sp * cy;
+                        }
                     }
 
                     tag.pose_field.position = tag.center_field;

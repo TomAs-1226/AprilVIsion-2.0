@@ -249,6 +249,8 @@ if(BUILD_MAC_SIM)
         src/sim/robot_dynamics.cpp
         src/sim/field_renderer.cpp
         src/sim/auto_align.cpp
+        src/sim/game_scoring.cpp
+        src/sim/path_planner.cpp
     )
 
     set(SIM_HEADERS
@@ -257,6 +259,8 @@ if(BUILD_MAC_SIM)
         src/sim/robot_dynamics.hpp
         src/sim/field_renderer.hpp
         src/sim/auto_align.hpp
+        src/sim/game_scoring.hpp
+        src/sim/path_planner.hpp
     )
 
     add_executable(frc_vision_sim ${SIM_SOURCES})

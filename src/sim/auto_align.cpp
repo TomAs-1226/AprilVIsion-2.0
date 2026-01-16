@@ -75,18 +75,24 @@ void AutoAlignController::initialize(const AutoAlignParams& params, const FieldL
     params_ = params;
     field_ = field;
 
-    // Configure PID controllers
-    pos_x_pid_.set_gains(params.pos_kp, params.pos_ki, params.pos_kd);
-    pos_x_pid_.set_limits(-params.max_speed, params.max_speed);
-    pos_x_pid_.set_integral_limits(-1.0, 1.0);
+    // Configure PID controllers with aggressive gains for fast response
+    // Increased gains: 2x position, 1.5x heading for snappy response
+    double pos_kp_fast = params.pos_kp * 2.5;
+    double pos_kd_fast = params.pos_kd * 2.0;
+    double heading_kp_fast = params.heading_kp * 2.0;
+    double heading_kd_fast = params.heading_kd * 1.5;
 
-    pos_y_pid_.set_gains(params.pos_kp, params.pos_ki, params.pos_kd);
-    pos_y_pid_.set_limits(-params.max_speed, params.max_speed);
-    pos_y_pid_.set_integral_limits(-1.0, 1.0);
+    pos_x_pid_.set_gains(pos_kp_fast, params.pos_ki, pos_kd_fast);
+    pos_x_pid_.set_limits(-params.max_speed * 1.2, params.max_speed * 1.2);
+    pos_x_pid_.set_integral_limits(-0.5, 0.5);
 
-    heading_pid_.set_gains(params.heading_kp, params.heading_ki, params.heading_kd);
-    heading_pid_.set_limits(-params.max_rotation, params.max_rotation);
-    heading_pid_.set_integral_limits(-1.0, 1.0);
+    pos_y_pid_.set_gains(pos_kp_fast, params.pos_ki, pos_kd_fast);
+    pos_y_pid_.set_limits(-params.max_speed * 1.2, params.max_speed * 1.2);
+    pos_y_pid_.set_integral_limits(-0.5, 0.5);
+
+    heading_pid_.set_gains(heading_kp_fast, params.heading_ki, heading_kd_fast);
+    heading_pid_.set_limits(-params.max_rotation * 1.5, params.max_rotation * 1.5);
+    heading_pid_.set_integral_limits(-0.5, 0.5);
 }
 
 void AutoAlignController::set_enabled(bool enabled) {
@@ -175,21 +181,43 @@ bool AutoAlignController::update(const Pose2D& current_pose,
         return false;
     }
 
-    // Two-phase approach:
-    // Phase 1: If not facing the tag, rotate first
-    // Phase 2: Once facing approximately right, drive towards target while correcting heading
+    // Improved approach: Simultaneous translation and rotation with priority weighting
+    // Uses feedforward terms for faster response
 
-    if (std::abs(error_heading) > 0.5) {  // More than ~30 degrees off
-        // Phase 1: Just rotate to face the tag
-        vx_out = 0;
-        vy_out = 0;
-        omega_out = heading_pid_.calculate(0, -error_heading, dt);
-    } else {
-        // Phase 2: Drive and correct heading simultaneously
-        vx_out = pos_x_pid_.calculate(0, -error_forward, dt);
-        vy_out = pos_y_pid_.calculate(0, -error_left, dt);
-        omega_out = heading_pid_.calculate(0, -error_heading, dt);
-    }
+    // Calculate PID outputs
+    double pid_vx = pos_x_pid_.calculate(0, -error_forward, dt);
+    double pid_vy = pos_y_pid_.calculate(0, -error_left, dt);
+    double pid_omega = heading_pid_.calculate(0, -error_heading, dt);
+
+    // Add feedforward: proportional to error for faster initial response
+    double ff_gain = 1.5;  // Feedforward multiplier
+    double ff_vx = ff_gain * error_forward;
+    double ff_vy = ff_gain * error_left;
+    double ff_omega = ff_gain * 2.0 * error_heading;  // More aggressive rotation FF
+
+    // Clamp feedforward
+    double max_ff_vel = params_.max_speed * 0.8;
+    double max_ff_omega = params_.max_rotation * 0.8;
+    ff_vx = std::clamp(ff_vx, -max_ff_vel, max_ff_vel);
+    ff_vy = std::clamp(ff_vy, -max_ff_vel, max_ff_vel);
+    ff_omega = std::clamp(ff_omega, -max_ff_omega, max_ff_omega);
+
+    // Blended approach based on heading error
+    // When far off, prioritize rotation; when close, allow full translation
+    double heading_priority = std::min(1.0, std::abs(error_heading) / 0.8);  // 0-1 based on heading error
+    double translation_scale = 1.0 - heading_priority * 0.7;  // Reduce translation when far off heading
+
+    // Combine PID + feedforward with priority scaling
+    vx_out = (pid_vx + ff_vx) * translation_scale;
+    vy_out = (pid_vy + ff_vy) * translation_scale;
+    omega_out = pid_omega + ff_omega;
+
+    // Apply final limits
+    double max_speed = params_.max_speed * 1.2;
+    double max_rot = params_.max_rotation * 1.5;
+    vx_out = std::clamp(vx_out, -max_speed, max_speed);
+    vy_out = std::clamp(vy_out, -max_speed, max_speed);
+    omega_out = std::clamp(omega_out, -max_rot, max_rot);
 
     return true;
 }

@@ -1,0 +1,292 @@
+{
+  "name": "FRC 2026 REBUILT",
+  "tags": [
+    {
+      "ID": 1,
+      "pose": {
+        "translation": { "x": 11.88, "y": 7.42, "z": 0.889 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "excavation_site"
+    },
+    {
+      "ID": 2,
+      "pose": {
+        "translation": { "x": 11.92, "y": 4.64, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 0.707, "X": 0.0, "Y": 0.0, "Z": 0.707 } }
+      },
+      "element": "tower_red"
+    },
+    {
+      "ID": 3,
+      "pose": {
+        "translation": { "x": 11.31, "y": 4.39, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "tower_red"
+    },
+    {
+      "ID": 4,
+      "pose": {
+        "translation": { "x": 11.31, "y": 4.03, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "tower_red"
+    },
+    {
+      "ID": 5,
+      "pose": {
+        "translation": { "x": 11.92, "y": 3.43, "z": 1.124 },
+        "rotation": { "quaternion": { "W": -0.707, "X": 0.0, "Y": 0.0, "Z": 0.707 } }
+      },
+      "element": "tower_red"
+    },
+    {
+      "ID": 6,
+      "pose": {
+        "translation": { "x": 11.88, "y": 0.64, "z": 0.889 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "excavation_site"
+    },
+    {
+      "ID": 7,
+      "pose": {
+        "translation": { "x": 11.95, "y": 0.64, "z": 0.889 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "excavation_site"
+    },
+    {
+      "ID": 8,
+      "pose": {
+        "translation": { "x": 12.27, "y": 3.43, "z": 1.124 },
+        "rotation": { "quaternion": { "W": -0.707, "X": 0.0, "Y": 0.0, "Z": 0.707 } }
+      },
+      "element": "tower_red"
+    },
+    {
+      "ID": 9,
+      "pose": {
+        "translation": { "x": 12.52, "y": 3.68, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "tower_red"
+    },
+    {
+      "ID": 10,
+      "pose": {
+        "translation": { "x": 12.52, "y": 4.03, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "tower_red"
+    },
+    {
+      "ID": 11,
+      "pose": {
+        "translation": { "x": 12.27, "y": 4.64, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 0.707, "X": 0.0, "Y": 0.0, "Z": 0.707 } }
+      },
+      "element": "tower_red"
+    },
+    {
+      "ID": 12,
+      "pose": {
+        "translation": { "x": 11.95, "y": 7.42, "z": 0.889 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "excavation_site"
+    },
+    {
+      "ID": 13,
+      "pose": {
+        "translation": { "x": 16.53, "y": 7.40, "z": 0.552 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "fuel_depot_red"
+    },
+    {
+      "ID": 14,
+      "pose": {
+        "translation": { "x": 16.53, "y": 6.97, "z": 0.552 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "fuel_depot_red"
+    },
+    {
+      "ID": 15,
+      "pose": {
+        "translation": { "x": 16.53, "y": 4.32, "z": 0.552 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "fuel_depot_red"
+    },
+    {
+      "ID": 16,
+      "pose": {
+        "translation": { "x": 16.53, "y": 3.89, "z": 0.552 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "fuel_depot_red"
+    },
+    {
+      "ID": 17,
+      "pose": {
+        "translation": { "x": 4.66, "y": 0.64, "z": 0.889 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "excavation_site"
+    },
+    {
+      "ID": 18,
+      "pose": {
+        "translation": { "x": 4.63, "y": 3.43, "z": 1.124 },
+        "rotation": { "quaternion": { "W": -0.707, "X": 0.0, "Y": 0.0, "Z": 0.707 } }
+      },
+      "element": "tower_blue"
+    },
+    {
+      "ID": 19,
+      "pose": {
+        "translation": { "x": 5.23, "y": 3.68, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "tower_blue"
+    },
+    {
+      "ID": 20,
+      "pose": {
+        "translation": { "x": 5.23, "y": 4.03, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "tower_blue"
+    },
+    {
+      "ID": 21,
+      "pose": {
+        "translation": { "x": 4.63, "y": 4.64, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 0.707, "X": 0.0, "Y": 0.0, "Z": 0.707 } }
+      },
+      "element": "tower_blue"
+    },
+    {
+      "ID": 22,
+      "pose": {
+        "translation": { "x": 4.66, "y": 7.42, "z": 0.889 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "excavation_site"
+    },
+    {
+      "ID": 23,
+      "pose": {
+        "translation": { "x": 4.59, "y": 7.42, "z": 0.889 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "excavation_site"
+    },
+    {
+      "ID": 24,
+      "pose": {
+        "translation": { "x": 4.27, "y": 4.64, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 0.707, "X": 0.0, "Y": 0.0, "Z": 0.707 } }
+      },
+      "element": "tower_blue"
+    },
+    {
+      "ID": 25,
+      "pose": {
+        "translation": { "x": 4.02, "y": 4.39, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "tower_blue"
+    },
+    {
+      "ID": 26,
+      "pose": {
+        "translation": { "x": 4.02, "y": 4.03, "z": 1.124 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "tower_blue"
+    },
+    {
+      "ID": 27,
+      "pose": {
+        "translation": { "x": 4.27, "y": 3.43, "z": 1.124 },
+        "rotation": { "quaternion": { "W": -0.707, "X": 0.0, "Y": 0.0, "Z": 0.707 } }
+      },
+      "element": "tower_blue"
+    },
+    {
+      "ID": 28,
+      "pose": {
+        "translation": { "x": 4.59, "y": 0.64, "z": 0.889 },
+        "rotation": { "quaternion": { "W": 0.0, "X": 0.0, "Y": 0.0, "Z": 1.0 } }
+      },
+      "element": "excavation_site"
+    },
+    {
+      "ID": 29,
+      "pose": {
+        "translation": { "x": 0.01, "y": 0.67, "z": 0.552 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "fuel_depot_blue"
+    },
+    {
+      "ID": 30,
+      "pose": {
+        "translation": { "x": 0.01, "y": 1.10, "z": 0.552 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "fuel_depot_blue"
+    },
+    {
+      "ID": 31,
+      "pose": {
+        "translation": { "x": 0.01, "y": 3.75, "z": 0.552 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "fuel_depot_blue"
+    },
+    {
+      "ID": 32,
+      "pose": {
+        "translation": { "x": 0.01, "y": 4.18, "z": 0.552 },
+        "rotation": { "quaternion": { "W": 1.0, "X": 0.0, "Y": 0.0, "Z": 0.0 } }
+      },
+      "element": "fuel_depot_blue"
+    }
+  ],
+  "field": {
+    "length": 16.541,
+    "width": 8.069
+  },
+  "game_elements": {
+    "excavation_sites": {
+      "description": "Archaeological excavation zones for artifact collection",
+      "tags": [1, 6, 7, 12, 17, 22, 23, 28]
+    },
+    "tower": {
+      "description": "Central towers for climbing and artifact placement",
+      "red_tags": [2, 3, 4, 5, 8, 9, 10, 11],
+      "blue_tags": [18, 19, 20, 21, 24, 25, 26, 27]
+    },
+    "fuel_depots": {
+      "description": "Fuel scoring stations",
+      "red_tags": [13, 14, 15, 16],
+      "blue_tags": [29, 30, 31, 32]
+    }
+  },
+  "scoring": {
+    "artifact_low": 2,
+    "artifact_mid": 4,
+    "artifact_high": 6,
+    "fuel_auto": 2,
+    "fuel_teleop": 1,
+    "tower_climb_low": 4,
+    "tower_climb_mid": 8,
+    "tower_climb_high": 12,
+    "obstacle_crossed": 2
+  }
+}
