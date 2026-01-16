@@ -491,13 +491,21 @@ void Simulator::print_keybinds() {
     std::cout << "  Z        - Remove last waypoint" << std::endl;
     std::cout << "  G        - Generate WPILib 2026 code" << std::endl;
     std::cout << "----------------------------------------" << std::endl;
-    std::cout << "ACTION BLOCKS (Visual Coding):" << std::endl;
-    std::cout << "  B        - Add action block at current waypoint" << std::endl;
-    std::cout << "  L        - List all action blocks" << std::endl;
+    std::cout << "WAYPOINT EDITING:" << std::endl;
+    std::cout << "  Click WP - Select waypoint" << std::endl;
+    std::cout << "  Drag WP  - Adjust heading (click twice)" << std::endl;
+    std::cout << "  [ / ]    - Rotate selected heading CCW/CW" << std::endl;
+    std::cout << "  DEL/BS   - Delete selected waypoint" << std::endl;
+    std::cout << "  Right-click WP - Add actions to waypoint" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "ACTION BLOCKS (Visual Block Coding):" << std::endl;
+    std::cout << "  B        - Add action block at waypoint" << std::endl;
+    std::cout << "  T/L      - List all action blocks" << std::endl;
+    std::cout << "  Click Block - Toggle enabled/disabled" << std::endl;
+    std::cout << "  0-9      - Toggle block by index" << std::endl;
     std::cout << "  Right-click tag - Add tag-triggered action" << std::endl;
-    std::cout << "  Blocks combine conditions like:" << std::endl;
-    std::cout << "    [At Waypoint 2] AND [Tag 5 Visible]" << std::endl;
-    std::cout << "    -> [Spin Up] then [Shoot]" << std::endl;
+    std::cout << "  Visual blocks combine conditions:" << std::endl;
+    std::cout << "    [At WP 2] AND [Tag 5 Visible] -> [Shoot]" << std::endl;
     std::cout << "----------------------------------------" << std::endl;
     std::cout << "SUBSYSTEMS:" << std::endl;
     std::cout << "  Registered: Shooter, Intake, Elevator" << std::endl;
@@ -508,7 +516,7 @@ void Simulator::print_keybinds() {
     std::cout << "----------------------------------------" << std::endl;
     std::cout << "DISPLAY:" << std::endl;
     std::cout << "  1-5      - Toggle overlays" << std::endl;
-    std::cout << "  ESC      - Quit" << std::endl;
+    std::cout << "  ESC      - Deselect / Quit" << std::endl;
     std::cout << "========================================\n" << std::endl;
 }
 
@@ -540,8 +548,35 @@ void Simulator::handle_mouse(int event, int x, int y, int flags) {
         }
     }
 
-    // Handle right-click for tag action menu
+    // Handle mouse movement for hover effects and heading drag
+    if (event == cv::EVENT_MOUSEMOVE) {
+        // Update hover states
+        waypoint_edit_.hover_waypoint = get_waypoint_at_screen_pos(x, y);
+        waypoint_edit_.hover_action_block = get_action_block_at_screen_pos(x, y);
+
+        // Handle heading drag
+        if (waypoint_edit_.dragging_heading && waypoint_edit_.selected_waypoint >= 0) {
+            handle_waypoint_drag(x, y);
+        }
+        return;
+    }
+
+    // Handle mouse button release - stop heading drag
+    if (event == cv::EVENT_LBUTTONUP) {
+        waypoint_edit_.dragging_heading = false;
+        return;
+    }
+
+    // Handle right-click for tag/waypoint action menus
     if (event == cv::EVENT_RBUTTONDOWN) {
+        // Check waypoint first
+        int wp_idx = get_waypoint_at_screen_pos(x, y);
+        if (wp_idx >= 0) {
+            show_waypoint_action_menu(wp_idx, x, y);
+            return;
+        }
+
+        // Then check tag
         int tag_id = get_tag_at_screen_pos(x, y);
         if (tag_id >= 0) {
             show_tag_action_menu(tag_id, x, y);
@@ -549,22 +584,53 @@ void Simulator::handle_mouse(int event, int x, int y, int flags) {
         }
     }
 
-    // Handle path editing mode
-    if (mode_ == SimMode::PATH_EDIT && event == cv::EVENT_LBUTTONDOWN) {
-        // Check if clicking on a tag first
-        int tag_id = get_tag_at_screen_pos(x, y);
-        if (tag_id >= 0) {
-            // Show menu for tag instead of adding waypoint
-            show_tag_action_menu(tag_id, x, y);
+    // Handle left-click
+    if (event == cv::EVENT_LBUTTONDOWN) {
+        // Check if clicking on an action block (to toggle it)
+        int block_idx = get_action_block_at_screen_pos(x, y);
+        if (block_idx >= 0) {
+            toggle_action_block(block_idx);
             return;
         }
 
-        // Convert screen coords to field coords
-        auto [fx, fy] = screen_to_field(x, y);
+        // Check if clicking on a waypoint (to select it or start heading drag)
+        int wp_idx = get_waypoint_at_screen_pos(x, y);
+        if (wp_idx >= 0) {
+            if (waypoint_edit_.selected_waypoint == wp_idx) {
+                // Already selected - start heading drag
+                waypoint_edit_.dragging_heading = true;
+                std::cout << "[Path] Drag to change heading for waypoint " << wp_idx << std::endl;
+            } else {
+                // Select this waypoint
+                waypoint_edit_.selected_waypoint = wp_idx;
+                std::cout << "[Path] Selected waypoint " << wp_idx << std::endl;
+            }
+            return;
+        }
 
-        // Validate bounds
-        if (fx >= 0 && fx <= field_length_ && fy >= 0 && fy <= field_width_) {
-            add_waypoint_at_click(fx, fy);
+        // In path edit mode, click to add waypoint
+        if (mode_ == SimMode::PATH_EDIT) {
+            // Check if clicking on a tag first
+            int tag_id = get_tag_at_screen_pos(x, y);
+            if (tag_id >= 0) {
+                // Show menu for tag instead of adding waypoint
+                show_tag_action_menu(tag_id, x, y);
+                return;
+            }
+
+            // Deselect waypoint when clicking elsewhere
+            waypoint_edit_.selected_waypoint = -1;
+
+            // Convert screen coords to field coords
+            auto [fx, fy] = screen_to_field(x, y);
+
+            // Validate bounds
+            if (fx >= 0 && fx <= field_length_ && fy >= 0 && fy <= field_width_) {
+                add_waypoint_at_click(fx, fy);
+            }
+        } else {
+            // Not in path edit mode - just deselect
+            waypoint_edit_.selected_waypoint = -1;
         }
     }
 }
@@ -959,6 +1025,424 @@ void Simulator::draw_action_menu(cv::Mat& frame) {
     }
 }
 
+// ============================================================================
+// Waypoint Interaction System
+// ============================================================================
+
+int Simulator::get_waypoint_at_screen_pos(int x, int y) const {
+    if (current_path_.waypoints.empty()) return -1;
+
+    auto [fx, fy] = screen_to_field(x, y);
+
+    for (size_t i = 0; i < current_path_.waypoints.size(); i++) {
+        const auto& wp = current_path_.waypoints[i];
+        double dist = std::sqrt(std::pow(fx - wp.pose.x, 2) + std::pow(fy - wp.pose.y, 2));
+        if (dist < 0.3) {  // 0.3m click radius
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+void Simulator::show_waypoint_action_menu(int waypoint_idx, int screen_x, int screen_y) {
+    if (waypoint_idx < 0 || waypoint_idx >= static_cast<int>(current_path_.waypoints.size())) return;
+
+    action_menu_.visible = true;
+    action_menu_.x = screen_x;
+    action_menu_.y = screen_y;
+    action_menu_.selected_waypoint_id = waypoint_idx;
+    action_menu_.selected_tag_id = -1;
+    action_menu_.menu_type = ActionMenuState::MenuType::WAYPOINT;
+    action_menu_.hover_index = -1;
+
+    const auto& wp = current_path_.waypoints[waypoint_idx];
+    action_menu_.items.clear();
+
+    // Header
+    MenuItem header;
+    header.label = "Waypoint " + std::to_string(waypoint_idx) + " (" + wp.name + ")";
+    header.enabled = false;
+    action_menu_.items.push_back(header);
+
+    // Heading info
+    MenuItem heading_info;
+    heading_info.label = "Heading: " + std::to_string(static_cast<int>(wp.pose.theta * 180 / M_PI)) + " deg";
+    heading_info.enabled = false;
+    action_menu_.items.push_back(heading_info);
+
+    // Separator
+    MenuItem sep;
+    sep.label = "---";
+    sep.enabled = false;
+    action_menu_.items.push_back(sep);
+
+    // Action items
+    std::vector<std::pair<std::string, RobotAction>> actions = {
+        {"Add: Spin Up Shooter", RobotAction::SPIN_UP_SHOOTER},
+        {"Add: Shoot", RobotAction::SHOOT},
+        {"Add: Intake In", RobotAction::INTAKE_IN},
+        {"Add: Intake Out", RobotAction::INTAKE_OUT},
+        {"Add: Set Elevator High", RobotAction::SET_ELEVATOR_HEIGHT},
+        {"Add: Stow", RobotAction::STOW},
+        {"Add: Wait 0.5s", RobotAction::WAIT}
+    };
+
+    for (const auto& [label, action] : actions) {
+        MenuItem item;
+        item.label = label;
+        item.action = action;
+        item.enabled = true;
+        item.callback = [this, waypoint_idx, action]() {
+            add_action_to_waypoint(waypoint_idx, action);
+        };
+        action_menu_.items.push_back(item);
+    }
+
+    // Separator
+    action_menu_.items.push_back(sep);
+
+    // Heading controls - get current heading at callback time
+    MenuItem rotate_left;
+    rotate_left.label = "Rotate Heading -45 deg";
+    rotate_left.enabled = true;
+    rotate_left.callback = [this, waypoint_idx]() {
+        if (waypoint_idx >= 0 && waypoint_idx < static_cast<int>(current_path_.waypoints.size())) {
+            double current = current_path_.waypoints[waypoint_idx].pose.theta;
+            update_waypoint_heading(waypoint_idx, current - M_PI / 4);
+        }
+    };
+    action_menu_.items.push_back(rotate_left);
+
+    MenuItem rotate_right;
+    rotate_right.label = "Rotate Heading +45 deg";
+    rotate_right.enabled = true;
+    rotate_right.callback = [this, waypoint_idx]() {
+        if (waypoint_idx >= 0 && waypoint_idx < static_cast<int>(current_path_.waypoints.size())) {
+            double current = current_path_.waypoints[waypoint_idx].pose.theta;
+            update_waypoint_heading(waypoint_idx, current + M_PI / 4);
+        }
+    };
+    action_menu_.items.push_back(rotate_right);
+
+    // Delete waypoint
+    MenuItem del;
+    del.label = "Delete Waypoint";
+    del.enabled = true;
+    del.callback = [this, waypoint_idx]() {
+        if (waypoint_idx >= 0 && waypoint_idx < static_cast<int>(current_path_.waypoints.size())) {
+            current_path_.waypoints.erase(current_path_.waypoints.begin() + waypoint_idx);
+            std::cout << "[Path] Deleted waypoint " << waypoint_idx << std::endl;
+        }
+    };
+    action_menu_.items.push_back(del);
+
+    mode_ = SimMode::ACTION_MENU;
+    std::cout << "[Menu] Showing actions for Waypoint " << waypoint_idx << std::endl;
+}
+
+void Simulator::execute_waypoint_action(int waypoint_idx, RobotAction action) {
+    std::cout << "[Action] Adding " << action_to_string(action) << " at Waypoint " << waypoint_idx << std::endl;
+    add_action_to_waypoint(waypoint_idx, action);
+}
+
+void Simulator::add_action_to_waypoint(int waypoint_idx, RobotAction action) {
+    // Create an action block that triggers at this waypoint
+    ActionBlock block;
+    block.name = action_to_command_name(action) + "_WP" + std::to_string(waypoint_idx);
+    block.description = action_to_string(action) + " at waypoint " + std::to_string(waypoint_idx);
+    block.logic = ConditionLogic::AND;
+
+    // Add waypoint condition
+    Condition wp_cond;
+    wp_cond.type = TriggerCondition::AT_WAYPOINT;
+    wp_cond.waypoint_index = waypoint_idx;
+    wp_cond.trigger_on_edge = true;
+    block.conditions.push_back(wp_cond);
+
+    // Add action
+    ActionBlock::ActionStep step;
+    step.action = action;
+
+    // Set default parameters based on action type
+    if (action == RobotAction::SET_ELEVATOR_HEIGHT) {
+        step.parameters["height"] = 1.0;  // 1 meter high
+    } else if (action == RobotAction::WAIT) {
+        step.parameters["time"] = 0.5;  // 0.5 seconds
+    }
+
+    block.actions.push_back(step);
+
+    current_path_.action_blocks.push_back(block);
+
+    std::cout << "[ActionBlock] Created: " << block.name << std::endl;
+    std::cout << "  Conditions: " << block.conditions[0].describe() << std::endl;
+    std::cout << "  Action: " << action_to_string(action) << std::endl;
+    std::cout << "  Total blocks: " << current_path_.action_blocks.size() << std::endl;
+}
+
+void Simulator::update_waypoint_heading(int waypoint_idx, double heading) {
+    if (waypoint_idx < 0 || waypoint_idx >= static_cast<int>(current_path_.waypoints.size())) return;
+
+    // Normalize heading to [-PI, PI]
+    while (heading > M_PI) heading -= 2 * M_PI;
+    while (heading < -M_PI) heading += 2 * M_PI;
+
+    current_path_.waypoints[waypoint_idx].pose.theta = heading;
+    std::cout << "[Path] Waypoint " << waypoint_idx << " heading set to "
+              << (heading * 180 / M_PI) << " deg" << std::endl;
+}
+
+void Simulator::handle_waypoint_drag(int x, int y) {
+    if (waypoint_edit_.selected_waypoint < 0 ||
+        waypoint_edit_.selected_waypoint >= static_cast<int>(current_path_.waypoints.size())) {
+        return;
+    }
+
+    auto [fx, fy] = screen_to_field(x, y);
+    auto& wp = current_path_.waypoints[waypoint_edit_.selected_waypoint];
+
+    // Calculate new heading based on drag position relative to waypoint
+    double dx = fx - wp.pose.x;
+    double dy = fy - wp.pose.y;
+    double new_heading = std::atan2(dy, dx);
+
+    wp.pose.theta = new_heading;
+}
+
+// ============================================================================
+// Action Block Visualization
+// ============================================================================
+
+int Simulator::get_action_block_at_screen_pos(int x, int y) const {
+    // Action blocks are drawn near their associated waypoints
+    // Check each block's visual position
+    for (size_t i = 0; i < current_path_.action_blocks.size(); i++) {
+        const auto& block = current_path_.action_blocks[i];
+
+        // Find the associated waypoint
+        int wp_idx = -1;
+        for (const auto& cond : block.conditions) {
+            if (cond.type == TriggerCondition::AT_WAYPOINT) {
+                wp_idx = cond.waypoint_index;
+                break;
+            }
+        }
+
+        if (wp_idx >= 0 && wp_idx < static_cast<int>(current_path_.waypoints.size())) {
+            const auto& wp = current_path_.waypoints[wp_idx];
+            auto pt = field_to_screen(wp.pose.x, wp.pose.y);
+
+            // Block is drawn offset from waypoint
+            double block_x = pt.x + 20 + (i % 3) * 25;
+            double block_y = pt.y - 30 - (i / 3) * 25;
+
+            // Check if click is within block icon (20x20 pixels)
+            if (x >= block_x - 10 && x <= block_x + 10 &&
+                y >= block_y - 10 && y <= block_y + 10) {
+                return static_cast<int>(i);
+            }
+        }
+    }
+    return -1;
+}
+
+void Simulator::toggle_action_block(int block_idx) {
+    if (block_idx < 0 || block_idx >= static_cast<int>(current_path_.action_blocks.size())) return;
+
+    auto& block = current_path_.action_blocks[block_idx];
+    block.enabled = !block.enabled;
+
+    std::cout << "[ActionBlock] " << block.name << " is now "
+              << (block.enabled ? "ENABLED" : "DISABLED") << std::endl;
+}
+
+void Simulator::draw_action_blocks(cv::Mat& frame) {
+    if (current_path_.action_blocks.empty()) return;
+
+    // Group blocks by their associated waypoint
+    std::map<int, std::vector<size_t>> blocks_by_waypoint;
+
+    for (size_t i = 0; i < current_path_.action_blocks.size(); i++) {
+        const auto& block = current_path_.action_blocks[i];
+        int wp_idx = -1;
+        int tag_id = -1;
+
+        for (const auto& cond : block.conditions) {
+            if (cond.type == TriggerCondition::AT_WAYPOINT) {
+                wp_idx = cond.waypoint_index;
+            } else if (cond.type == TriggerCondition::TAG_VISIBLE ||
+                       cond.type == TriggerCondition::DISTANCE_TO_TAG) {
+                tag_id = cond.tag_id;
+            }
+        }
+
+        if (wp_idx >= 0) {
+            blocks_by_waypoint[wp_idx].push_back(i);
+        } else if (tag_id >= 0 && field_.has_tag(tag_id)) {
+            // Draw near tag instead
+            const auto& tag = field_.get_tag(tag_id);
+            auto pt = field_to_screen(tag.center_field.x, tag.center_field.y);
+
+            // Draw action block indicator
+            cv::Scalar color = block.enabled ?
+                (block.has_triggered ? cv::Scalar(0, 200, 0) : cv::Scalar(255, 200, 0)) :
+                cv::Scalar(100, 100, 100);
+
+            int offset_x = static_cast<int>(10 + (i % 3) * 22);
+            int offset_y = static_cast<int>(-25 - (i / 3) * 22);
+
+            cv::Point block_pos(static_cast<int>(pt.x) + offset_x, static_cast<int>(pt.y) + offset_y);
+            cv::rectangle(frame, block_pos - cv::Point(10, 10), block_pos + cv::Point(10, 10), color, -1);
+            cv::rectangle(frame, block_pos - cv::Point(10, 10), block_pos + cv::Point(10, 10),
+                         cv::Scalar(255, 255, 255), 1);
+
+            // Draw action icon/letter
+            std::string icon = "A";  // Generic action
+            if (!block.actions.empty()) {
+                switch (block.actions[0].action) {
+                    case RobotAction::SHOOT: icon = "S"; break;
+                    case RobotAction::SPIN_UP_SHOOTER: icon = "^"; break;
+                    case RobotAction::INTAKE_IN: icon = "I"; break;
+                    case RobotAction::INTAKE_OUT: icon = "O"; break;
+                    case RobotAction::SET_ELEVATOR_HEIGHT: icon = "E"; break;
+                    case RobotAction::STOW: icon = "H"; break;
+                    case RobotAction::AUTO_ALIGN_TO_TAG: icon = "@"; break;
+                    default: icon = "?"; break;
+                }
+            }
+            cv::putText(frame, icon, block_pos - cv::Point(5, -5),
+                       cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 2);
+        }
+    }
+
+    // Draw blocks grouped by waypoint
+    for (const auto& [wp_idx, block_indices] : blocks_by_waypoint) {
+        if (wp_idx < 0 || wp_idx >= static_cast<int>(current_path_.waypoints.size())) continue;
+
+        const auto& wp = current_path_.waypoints[wp_idx];
+        auto pt = field_to_screen(wp.pose.x, wp.pose.y);
+
+        for (size_t j = 0; j < block_indices.size(); j++) {
+            size_t i = block_indices[j];
+            const auto& block = current_path_.action_blocks[i];
+
+            // Color based on state
+            cv::Scalar color;
+            if (!block.enabled) {
+                color = cv::Scalar(80, 80, 80);  // Gray - disabled
+            } else if (block.has_triggered) {
+                color = cv::Scalar(0, 200, 0);   // Green - triggered
+            } else {
+                color = cv::Scalar(255, 180, 0); // Cyan/yellow - active
+            }
+
+            int offset_x = static_cast<int>(20 + (j % 3) * 22);
+            int offset_y = static_cast<int>(-15 - (j / 3) * 22);
+
+            cv::Point block_pos(static_cast<int>(pt.x) + offset_x, static_cast<int>(pt.y) + offset_y);
+
+            // Draw block box
+            cv::rectangle(frame, block_pos - cv::Point(10, 10), block_pos + cv::Point(10, 10), color, -1);
+            cv::rectangle(frame, block_pos - cv::Point(10, 10), block_pos + cv::Point(10, 10),
+                         cv::Scalar(255, 255, 255), 1);
+
+            // Draw hover effect
+            if (waypoint_edit_.hover_action_block == static_cast<int>(i)) {
+                cv::rectangle(frame, block_pos - cv::Point(12, 12), block_pos + cv::Point(12, 12),
+                             cv::Scalar(0, 255, 255), 2);
+            }
+
+            // Draw action icon
+            std::string icon = "?";
+            if (!block.actions.empty()) {
+                switch (block.actions[0].action) {
+                    case RobotAction::SHOOT: icon = "S"; break;
+                    case RobotAction::SPIN_UP_SHOOTER: icon = "^"; break;
+                    case RobotAction::INTAKE_IN: icon = "I"; break;
+                    case RobotAction::INTAKE_OUT: icon = "O"; break;
+                    case RobotAction::SET_ELEVATOR_HEIGHT: icon = "E"; break;
+                    case RobotAction::STOW: icon = "H"; break;
+                    case RobotAction::AUTO_ALIGN_TO_TAG: icon = "@"; break;
+                    case RobotAction::WAIT: icon = "W"; break;
+                    default: icon = "A"; break;
+                }
+            }
+            cv::putText(frame, icon, block_pos - cv::Point(5, -5),
+                       cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 2);
+
+            // Draw connector line to waypoint
+            cv::line(frame, block_pos, cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+                    cv::Scalar(150, 150, 150), 1);
+        }
+    }
+
+    // Draw action block legend/info at bottom
+    int y_pos = frame.rows - 60;
+    cv::putText(frame, "Action Blocks: " + std::to_string(current_path_.action_blocks.size()) +
+                " (Click to toggle, T to list)",
+               cv::Point(10, y_pos), cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(200, 200, 200), 1);
+
+    // Draw legend
+    cv::rectangle(frame, cv::Point(10, y_pos + 10), cv::Point(25, y_pos + 25),
+                 cv::Scalar(255, 180, 0), -1);
+    cv::putText(frame, "Enabled", cv::Point(30, y_pos + 22),
+               cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(200, 200, 200), 1);
+
+    cv::rectangle(frame, cv::Point(100, y_pos + 10), cv::Point(115, y_pos + 25),
+                 cv::Scalar(0, 200, 0), -1);
+    cv::putText(frame, "Triggered", cv::Point(120, y_pos + 22),
+               cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(200, 200, 200), 1);
+
+    cv::rectangle(frame, cv::Point(200, y_pos + 10), cv::Point(215, y_pos + 25),
+                 cv::Scalar(80, 80, 80), -1);
+    cv::putText(frame, "Disabled", cv::Point(220, y_pos + 22),
+               cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(200, 200, 200), 1);
+}
+
+void Simulator::draw_waypoint_headings(cv::Mat& frame) {
+    if (current_path_.waypoints.empty()) return;
+
+    double scale = sim_config_.visualization.field_view_scale;
+    double arrow_length = 0.6 * scale;  // 0.6 meters in screen pixels
+
+    for (size_t i = 0; i < current_path_.waypoints.size(); i++) {
+        const auto& wp = current_path_.waypoints[i];
+        auto pt = field_to_screen(wp.pose.x, wp.pose.y);
+
+        // Calculate arrow endpoint
+        double cos_th = std::cos(wp.pose.theta);
+        double sin_th = std::sin(wp.pose.theta);
+        cv::Point arrow_end(
+            static_cast<int>(pt.x + arrow_length * cos_th),
+            static_cast<int>(pt.y - arrow_length * sin_th)  // Flip Y for screen coords
+        );
+
+        // Color based on selection state
+        cv::Scalar arrow_color;
+        if (waypoint_edit_.selected_waypoint == static_cast<int>(i)) {
+            arrow_color = cv::Scalar(0, 255, 255);  // Yellow - selected
+        } else if (waypoint_edit_.hover_waypoint == static_cast<int>(i)) {
+            arrow_color = cv::Scalar(0, 200, 255);  // Orange - hover
+        } else {
+            arrow_color = cv::Scalar(200, 200, 255);  // Light red - normal
+        }
+
+        // Draw heading arrow
+        cv::arrowedLine(frame,
+            cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+            arrow_end,
+            arrow_color, 2, cv::LINE_AA, 0, 0.3);
+
+        // Draw heading angle text for selected waypoint
+        if (waypoint_edit_.selected_waypoint == static_cast<int>(i)) {
+            std::string angle_str = std::to_string(static_cast<int>(wp.pose.theta * 180 / M_PI)) + " deg";
+            cv::putText(frame, angle_str,
+                       cv::Point(static_cast<int>(pt.x) + 15, static_cast<int>(pt.y) - 20),
+                       cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 255, 255), 1);
+        }
+    }
+}
+
 void Simulator::handle_path_execution(double dt) {
     if (!path_executing_ || current_path_.trajectory.empty()) {
         return;
@@ -1288,69 +1772,106 @@ void Simulator::handle_key(int key) {
 
         // Action blocks
         case 'b': {
-            // Add action block at current waypoint (in path edit mode)
-            if (mode_ == SimMode::PATH_EDIT && !current_path_.waypoints.empty()) {
-                int wp_idx = static_cast<int>(current_path_.waypoints.size()) - 1;
+            // Add action block at selected waypoint (or last waypoint)
+            int wp_idx = waypoint_edit_.selected_waypoint;
+            if (wp_idx < 0 && !current_path_.waypoints.empty()) {
+                wp_idx = static_cast<int>(current_path_.waypoints.size()) - 1;
+            }
 
-                // Create a sample action block that triggers at this waypoint
-                // User can right-click a tag to add tag conditions
-                ActionBlock block;
-                block.name = "Block_WP" + std::to_string(wp_idx);
-                block.description = "Action at waypoint " + std::to_string(wp_idx);
-
-                // Add waypoint condition
-                Condition wp_cond;
-                wp_cond.type = TriggerCondition::AT_WAYPOINT;
-                wp_cond.waypoint_index = wp_idx;
-                block.conditions.push_back(wp_cond);
-
-                // Prompt user to select action via console
-                std::cout << "\n[ActionBlock] Creating block at waypoint " << wp_idx << std::endl;
-                std::cout << "Select action (1-6):" << std::endl;
-                std::cout << "  1. Spin Up Shooter" << std::endl;
-                std::cout << "  2. Shoot" << std::endl;
-                std::cout << "  3. Intake In" << std::endl;
-                std::cout << "  4. Intake Out" << std::endl;
-                std::cout << "  5. Set Elevator High" << std::endl;
-                std::cout << "  6. Stow" << std::endl;
-
-                // Default to shoot for now (GUI will allow selection)
-                ActionBlock::ActionStep step;
-                step.action = RobotAction::SHOOT;
-                block.actions.push_back(step);
-
-                current_path_.action_blocks.push_back(block);
-                std::cout << "[ActionBlock] Added '" << block.name << "' -> "
-                          << action_to_string(step.action) << std::endl;
+            if (wp_idx >= 0 && wp_idx < static_cast<int>(current_path_.waypoints.size())) {
+                // Show action selection menu for this waypoint
+                auto pt = field_to_screen(current_path_.waypoints[wp_idx].pose.x,
+                                         current_path_.waypoints[wp_idx].pose.y);
+                show_waypoint_action_menu(wp_idx, static_cast<int>(pt.x), static_cast<int>(pt.y));
             } else {
-                std::cout << "[ActionBlock] Enter path edit mode (P) and add waypoints first" << std::endl;
+                std::cout << "[ActionBlock] Add waypoints first (P to enter path edit mode)" << std::endl;
             }
             break;
         }
 
-        case 'l': {
-            // List all action blocks
+        case 'l':
+        case 't': {
+            // List/toggle action blocks
             std::cout << "\n========== ACTION BLOCKS ==========\n" << std::endl;
             if (current_path_.action_blocks.empty()) {
                 std::cout << "No action blocks defined." << std::endl;
-                std::cout << "Use 'B' in path edit mode to add blocks." << std::endl;
-                std::cout << "Or right-click a tag to add tag-triggered actions." << std::endl;
+                std::cout << "Right-click waypoints or tags to add actions." << std::endl;
+                std::cout << "Or press B to add block at selected waypoint." << std::endl;
             } else {
                 for (size_t i = 0; i < current_path_.action_blocks.size(); i++) {
                     const auto& block = current_path_.action_blocks[i];
-                    std::cout << "[" << i << "] " << block.name << std::endl;
-                    std::cout << "    " << block.describe() << std::endl;
-                    std::cout << "    Status: " << (block.enabled ? "Enabled" : "Disabled");
+                    std::cout << "[" << i << "] " << block.name;
+                    std::cout << " - " << (block.enabled ? "ENABLED" : "disabled");
                     if (block.has_triggered) std::cout << " (Triggered)";
-                    std::cout << std::endl << std::endl;
+                    std::cout << std::endl;
+                    std::cout << "    " << block.describe() << std::endl << std::endl;
                 }
+                std::cout << "Click on block icons to toggle, or press 0-9 to toggle by index." << std::endl;
             }
             std::cout << "===================================\n" << std::endl;
             break;
         }
 
+        // Toggle action blocks by index (0-9)
+        case '0': case '6': case '7': case '8': case '9': {
+            // Only handle if not a display toggle (1-5 are for display)
+            int block_idx = key - '0';
+            if (block_idx >= 0 && block_idx < static_cast<int>(current_path_.action_blocks.size())) {
+                toggle_action_block(block_idx);
+            }
+            break;
+        }
+
+        // Waypoint heading controls
+        case '[': {
+            // Rotate selected waypoint heading CCW by 15 degrees
+            if (waypoint_edit_.selected_waypoint >= 0 &&
+                waypoint_edit_.selected_waypoint < static_cast<int>(current_path_.waypoints.size())) {
+                double current = current_path_.waypoints[waypoint_edit_.selected_waypoint].pose.theta;
+                update_waypoint_heading(waypoint_edit_.selected_waypoint, current + M_PI / 12);
+            } else {
+                std::cout << "[Path] Select a waypoint first (click on it)" << std::endl;
+            }
+            break;
+        }
+        case ']': {
+            // Rotate selected waypoint heading CW by 15 degrees
+            if (waypoint_edit_.selected_waypoint >= 0 &&
+                waypoint_edit_.selected_waypoint < static_cast<int>(current_path_.waypoints.size())) {
+                double current = current_path_.waypoints[waypoint_edit_.selected_waypoint].pose.theta;
+                update_waypoint_heading(waypoint_edit_.selected_waypoint, current - M_PI / 12);
+            } else {
+                std::cout << "[Path] Select a waypoint first (click on it)" << std::endl;
+            }
+            break;
+        }
+
+        // Delete selected waypoint
+        case 127:  // Backspace
+        case 8: {  // Delete
+            if (waypoint_edit_.selected_waypoint >= 0 &&
+                waypoint_edit_.selected_waypoint < static_cast<int>(current_path_.waypoints.size())) {
+                int idx = waypoint_edit_.selected_waypoint;
+                current_path_.waypoints.erase(current_path_.waypoints.begin() + idx);
+                std::cout << "[Path] Deleted waypoint " << idx << std::endl;
+                waypoint_edit_.selected_waypoint = -1;
+
+                // Re-number waypoints
+                for (size_t i = 0; i < current_path_.waypoints.size(); i++) {
+                    current_path_.waypoints[i].name = "WP" + std::to_string(i);
+                }
+            }
+            break;
+        }
+
         case 27: // ESC
-            shutdown_requested_.store(true);
+            // First deselect waypoint, then quit
+            if (waypoint_edit_.selected_waypoint >= 0) {
+                waypoint_edit_.selected_waypoint = -1;
+                std::cout << "[Path] Waypoint deselected" << std::endl;
+            } else {
+                shutdown_requested_.store(true);
+            }
             break;
     }
 }
@@ -1503,33 +2024,7 @@ void Simulator::update_visualization() {
 
     // Draw waypoints and path
     if (!current_path_.waypoints.empty()) {
-        // Draw waypoints
-        for (size_t i = 0; i < current_path_.waypoints.size(); i++) {
-            const auto& wp = current_path_.waypoints[i];
-            auto pt = field_to_screen(wp.pose.x, wp.pose.y);
-
-            // Draw waypoint circle
-            cv::Scalar color = (i == 0) ? cv::Scalar(0, 255, 0) :
-                              (i == current_path_.waypoints.size() - 1) ? cv::Scalar(0, 0, 255) :
-                              cv::Scalar(255, 165, 0);
-            cv::circle(field_view, cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
-                      8, color, -1);
-            cv::putText(field_view, wp.name,
-                       cv::Point(static_cast<int>(pt.x) + 10, static_cast<int>(pt.y)),
-                       cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(255, 255, 255), 1);
-
-            // Draw line to previous waypoint
-            if (i > 0) {
-                const auto& prev = current_path_.waypoints[i - 1];
-                auto prev_pt = field_to_screen(prev.pose.x, prev.pose.y);
-                cv::line(field_view,
-                        cv::Point(static_cast<int>(prev_pt.x), static_cast<int>(prev_pt.y)),
-                        cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
-                        cv::Scalar(255, 165, 0), 2);
-            }
-        }
-
-        // Draw trajectory if generated
+        // Draw trajectory first (underneath waypoints)
         if (!current_path_.trajectory.empty()) {
             for (size_t i = 1; i < current_path_.trajectory.size(); i++) {
                 auto p1 = field_to_screen(current_path_.trajectory[i-1].pose.x,
@@ -1542,7 +2037,55 @@ void Simulator::update_visualization() {
                         cv::Scalar(0, 255, 255), 1);
             }
         }
+
+        // Draw lines between waypoints
+        for (size_t i = 1; i < current_path_.waypoints.size(); i++) {
+            const auto& wp = current_path_.waypoints[i];
+            const auto& prev = current_path_.waypoints[i - 1];
+            auto pt = field_to_screen(wp.pose.x, wp.pose.y);
+            auto prev_pt = field_to_screen(prev.pose.x, prev.pose.y);
+            cv::line(field_view,
+                    cv::Point(static_cast<int>(prev_pt.x), static_cast<int>(prev_pt.y)),
+                    cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+                    cv::Scalar(255, 165, 0), 2);
+        }
+
+        // Draw waypoint headings (arrows showing robot facing direction)
+        draw_waypoint_headings(field_view);
+
+        // Draw waypoint circles on top
+        for (size_t i = 0; i < current_path_.waypoints.size(); i++) {
+            const auto& wp = current_path_.waypoints[i];
+            auto pt = field_to_screen(wp.pose.x, wp.pose.y);
+
+            // Color based on selection/state
+            cv::Scalar color;
+            if (waypoint_edit_.selected_waypoint == static_cast<int>(i)) {
+                color = cv::Scalar(0, 255, 255);  // Yellow - selected
+            } else if (waypoint_edit_.hover_waypoint == static_cast<int>(i)) {
+                color = cv::Scalar(0, 200, 255);  // Orange - hover
+            } else if (i == 0) {
+                color = cv::Scalar(0, 255, 0);    // Green - start
+            } else if (i == current_path_.waypoints.size() - 1) {
+                color = cv::Scalar(0, 0, 255);    // Red - end
+            } else {
+                color = cv::Scalar(255, 165, 0);  // Orange - intermediate
+            }
+
+            cv::circle(field_view, cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+                      10, color, -1);
+            cv::circle(field_view, cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)),
+                      10, cv::Scalar(255, 255, 255), 1);
+
+            // Waypoint number/name
+            cv::putText(field_view, std::to_string(i),
+                       cv::Point(static_cast<int>(pt.x) - 4, static_cast<int>(pt.y) + 4),
+                       cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
+        }
     }
+
+    // Draw action blocks (visual block coding display)
+    draw_action_blocks(field_view);
 
     // Draw path info
     if (mode_ == SimMode::PATH_EDIT) {

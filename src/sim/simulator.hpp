@@ -56,20 +56,34 @@ struct MenuItem {
 };
 
 /**
- * @brief GUI action menu state
+ * @brief GUI action menu state (for tags and waypoints)
  */
 struct ActionMenuState {
     bool visible = false;
     int x = 0, y = 0;           // Screen position
     int selected_tag_id = -1;    // Which tag was clicked
+    int selected_waypoint_id = -1; // Which waypoint was clicked
     std::vector<MenuItem> items;
     int hover_index = -1;        // Currently hovered item
     int selected_index = -1;     // Selected item
+
+    enum class MenuType { TAG, WAYPOINT, ACTION_BLOCK };
+    MenuType menu_type = MenuType::TAG;
 
     // Menu dimensions
     static constexpr int ITEM_HEIGHT = 30;
     static constexpr int MENU_WIDTH = 200;
     static constexpr int PADDING = 5;
+};
+
+/**
+ * @brief Waypoint editing state
+ */
+struct WaypointEditState {
+    int selected_waypoint = -1;     // Currently selected waypoint index
+    bool dragging_heading = false;  // Dragging waypoint heading arrow
+    int hover_waypoint = -1;        // Waypoint mouse is over
+    int hover_action_block = -1;    // Action block mouse is over
 };
 
 /**
@@ -142,6 +156,20 @@ private:
     void draw_action_menu(cv::Mat& frame);
     void add_event_marker_for_action(int tag_id, RobotAction action);
 
+    // Waypoint interaction
+    int get_waypoint_at_screen_pos(int x, int y) const;
+    void show_waypoint_action_menu(int waypoint_idx, int screen_x, int screen_y);
+    void execute_waypoint_action(int waypoint_idx, RobotAction action);
+    void add_action_to_waypoint(int waypoint_idx, RobotAction action);
+    void update_waypoint_heading(int waypoint_idx, double heading);
+    void handle_waypoint_drag(int x, int y);
+
+    // Action block visualization
+    int get_action_block_at_screen_pos(int x, int y) const;
+    void toggle_action_block(int block_idx);
+    void draw_action_blocks(cv::Mat& frame);
+    void draw_waypoint_headings(cv::Mat& frame);
+
     // Path planning
     void add_waypoint_at_click(double field_x, double field_y);
     void remove_last_waypoint();
@@ -202,6 +230,9 @@ private:
 
     // GUI Action Menu
     ActionMenuState action_menu_;
+
+    // Waypoint editing state
+    WaypointEditState waypoint_edit_;
 
     // Webcam
     cv::VideoCapture webcam_;
