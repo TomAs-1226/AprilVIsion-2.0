@@ -11,8 +11,19 @@
 namespace frc_vision {
 namespace sim {
 
-// Forward declaration
-struct SwerveModuleState;
+/**
+ * @brief Swerve module state
+ */
+struct SwerveModuleState {
+    double wheel_speed = 0;     // m/s (actual wheel speed)
+    double steer_angle = 0;     // radians (actual module angle)
+    double target_speed = 0;    // m/s (commanded)
+    double target_angle = 0;    // radians (commanded)
+
+    // Motor currents (for realistic acceleration)
+    double drive_current = 0;   // Amps
+    double steer_current = 0;   // Amps
+};
 
 /**
  * @brief Simulated robot state with ground truth and odometry
@@ -75,20 +86,6 @@ struct InputState {
     bool show_fused_pose = true;  // 3
     bool show_webcam = true;      // 4
     bool detect_on_composite = true; // 5 (vs synthetic only)
-};
-
-/**
- * @brief Swerve module state
- */
-struct SwerveModuleState {
-    double wheel_speed = 0;     // m/s (actual wheel speed)
-    double steer_angle = 0;     // radians (actual module angle)
-    double target_speed = 0;    // m/s (commanded)
-    double target_angle = 0;    // radians (commanded)
-
-    // Motor currents (for realistic acceleration)
-    double drive_current = 0;   // Amps
-    double steer_current = 0;   // Amps
 };
 
 /**

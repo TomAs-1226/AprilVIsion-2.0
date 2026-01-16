@@ -88,7 +88,7 @@ void RobotDynamics::update_simple(const InputState& input, double dt) {
     }
 
     // Apply acceleration limits
-    auto accel_towards = [this, dt](double current, double target, double accel, double decel) {
+    auto accel_towards = [dt](double current, double target, double accel, double decel) {
         double error = target - current;
         double max_change = (std::abs(target) > std::abs(current) ? accel : decel) * dt;
 
@@ -343,13 +343,8 @@ double RobotDynamics::compute_traction_limit(double normal_force, double cof) {
     return normal_force * cof;
 }
 
-void RobotDynamics::apply_traction_limits(double dt) {
+void RobotDynamics::apply_traction_limits(double /*dt*/) {
     const auto& swerve = params_.swerve;
-
-    // Weight per wheel (assuming even distribution)
-    double weight_per_wheel = swerve.robot_mass * 9.81 / 4.0;
-    double max_traction = compute_traction_limit(weight_per_wheel, swerve.wheel_cof);
-    double max_accel_per_wheel = max_traction / (swerve.robot_mass / 4.0);
 
     double max_slip = 0;
     bool any_slipping = false;
