@@ -472,7 +472,7 @@ bool Simulator::initialize_vision_pipeline() {
 
 void Simulator::print_keybinds() {
     std::cout << "\n========================================" << std::endl;
-    std::cout << "CONTROLS:" << std::endl;
+    std::cout << "FRC VISION AUTO CODER - CONTROLS" << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << "  WASD     - Move robot" << std::endl;
     std::cout << "  Q/E      - Rotate CCW/CW" << std::endl;
@@ -481,11 +481,18 @@ void Simulator::print_keybinds() {
     std::cout << "  R        - Reset robot pose" << std::endl;
     std::cout << "----------------------------------------" << std::endl;
     std::cout << "PATH PLANNER:" << std::endl;
-    std::cout << "  P        - Toggle path edit mode (click field to add waypoints)" << std::endl;
+    std::cout << "  P        - Toggle path edit mode" << std::endl;
+    std::cout << "  Click    - Add waypoint (in edit mode)" << std::endl;
     std::cout << "  X        - Execute path" << std::endl;
     std::cout << "  C        - Clear path" << std::endl;
     std::cout << "  Z        - Remove last waypoint" << std::endl;
-    std::cout << "  G        - Generate code (prints to console)" << std::endl;
+    std::cout << "  G        - Generate WPILib 2026 code" << std::endl;
+    std::cout << "----------------------------------------" << std::endl;
+    std::cout << "TAG ACTIONS:" << std::endl;
+    std::cout << "  Right-click on tag - Show action menu" << std::endl;
+    std::cout << "    - Auto-align to tag" << std::endl;
+    std::cout << "    - Add event marker" << std::endl;
+    std::cout << "    - Shoot/Intake/Elevator actions" << std::endl;
     std::cout << "----------------------------------------" << std::endl;
     std::cout << "FIELD:" << std::endl;
     std::cout << "  F        - Cycle field (2024->2025->2026)" << std::endl;
@@ -505,9 +512,44 @@ void Simulator::mouse_callback(int event, int x, int y, int flags, void* userdat
 void Simulator::handle_mouse(int event, int x, int y, int flags) {
     (void)flags;
 
-    if (mode_ != SimMode::PATH_EDIT) return;
+    // Handle action menu interactions first
+    if (action_menu_.visible) {
+        if (event == cv::EVENT_MOUSEMOVE) {
+            handle_menu_hover(x, y);
+            return;
+        } else if (event == cv::EVENT_LBUTTONDOWN) {
+            // Check if click is inside menu
+            int menu_height = static_cast<int>(action_menu_.items.size()) * ActionMenuState::ITEM_HEIGHT + 2 * ActionMenuState::PADDING;
+            if (x >= action_menu_.x && x <= action_menu_.x + ActionMenuState::MENU_WIDTH &&
+                y >= action_menu_.y && y <= action_menu_.y + menu_height) {
+                handle_menu_click(x, y);
+                return;
+            } else {
+                // Click outside menu - close it
+                hide_action_menu();
+            }
+        }
+    }
 
-    if (event == cv::EVENT_LBUTTONDOWN) {
+    // Handle right-click for tag action menu
+    if (event == cv::EVENT_RBUTTONDOWN) {
+        int tag_id = get_tag_at_screen_pos(x, y);
+        if (tag_id >= 0) {
+            show_tag_action_menu(tag_id, x, y);
+            return;
+        }
+    }
+
+    // Handle path editing mode
+    if (mode_ == SimMode::PATH_EDIT && event == cv::EVENT_LBUTTONDOWN) {
+        // Check if clicking on a tag first
+        int tag_id = get_tag_at_screen_pos(x, y);
+        if (tag_id >= 0) {
+            // Show menu for tag instead of adding waypoint
+            show_tag_action_menu(tag_id, x, y);
+            return;
+        }
+
         // Convert screen coords to field coords
         auto [fx, fy] = screen_to_field(x, y);
 
@@ -619,9 +661,244 @@ void Simulator::generate_path_code() {
         return;
     }
 
-    std::cout << "\n========== GENERATED JAVA CODE ==========\n" << std::endl;
-    std::cout << path_planner_.generate_code(current_path_, CodeFormat::WPILIB_JAVA) << std::endl;
-    std::cout << "=========================================\n" << std::endl;
+    // Generate all code with scaffolds
+    std::cout << "\n========== GENERATING WPILib 2026 CODE ==========\n" << std::endl;
+
+    auto result = path_planner_.generate_all_code(current_path_, CodeFormat::WPILIB_JAVA, true);
+
+    // Print each generated file
+    for (const auto& file : result.files) {
+        std::cout << "\n// ========== " << file.path << " ==========\n";
+        std::cout << "// " << file.description << "\n";
+        std::cout << file.content << std::endl;
+    }
+
+    // Print integration notes
+    std::cout << "\n========== INTEGRATION NOTES ==========\n" << std::endl;
+    for (const auto& note : result.integration_notes) {
+        std::cout << note << std::endl;
+    }
+
+    std::cout << "\n===================================================\n" << std::endl;
+}
+
+// ============================================================================
+// Tag Click and Action Menu System
+// ============================================================================
+
+int Simulator::get_tag_at_screen_pos(int x, int y) const {
+    // Convert screen position to field coordinates
+    auto [fx, fy] = screen_to_field(x, y);
+
+    // Check each tag in the field layout
+    for (const auto& tag : field_.get_all_tags()) {
+        double tag_x = tag.center_field.x;
+        double tag_y = tag.center_field.y;
+
+        // Check if click is within 0.3 meters of tag center
+        double dist = std::sqrt(std::pow(fx - tag_x, 2) + std::pow(fy - tag_y, 2));
+        if (dist < 0.3) {
+            return tag.id;
+        }
+    }
+
+    return -1;  // No tag at this position
+}
+
+void Simulator::show_tag_action_menu(int tag_id, int screen_x, int screen_y) {
+    action_menu_.visible = true;
+    action_menu_.x = screen_x;
+    action_menu_.y = screen_y;
+    action_menu_.selected_tag_id = tag_id;
+    action_menu_.hover_index = -1;
+    action_menu_.selected_index = -1;
+
+    // Get available actions for this tag
+    auto actions = path_planner_.get_actions_for_tag(tag_id);
+
+    // Build menu items
+    action_menu_.items.clear();
+
+    // Header item (not clickable)
+    MenuItem header;
+    header.label = "Tag " + std::to_string(tag_id) + " Actions:";
+    header.enabled = false;
+    action_menu_.items.push_back(header);
+
+    // Add action items
+    for (const auto& action : actions) {
+        MenuItem item;
+        item.label = action_to_string(action);
+        item.action = action;
+        item.enabled = true;
+        item.callback = [this, tag_id, action]() {
+            execute_tag_action(tag_id, action);
+        };
+        action_menu_.items.push_back(item);
+    }
+
+    // Add separator and special actions
+    MenuItem sep;
+    sep.label = "---";
+    sep.enabled = false;
+    action_menu_.items.push_back(sep);
+
+    MenuItem add_marker;
+    add_marker.label = "Add as Event Marker";
+    add_marker.action = RobotAction::CUSTOM_COMMAND;
+    add_marker.enabled = true;
+    add_marker.callback = [this, tag_id]() {
+        // Show sub-menu or default action
+        add_event_marker_for_action(tag_id, RobotAction::AUTO_ALIGN_TO_TAG);
+    };
+    action_menu_.items.push_back(add_marker);
+
+    MenuItem waypoint;
+    waypoint.label = "Add Waypoint Here";
+    waypoint.action = RobotAction::CUSTOM_COMMAND;
+    waypoint.enabled = true;
+    waypoint.callback = [this, tag_id]() {
+        if (field_.has_tag(tag_id)) {
+            const auto& tag = field_.get_tag(tag_id);
+            add_waypoint_at_click(tag.center_field.x, tag.center_field.y);
+            hide_action_menu();
+        }
+    };
+    action_menu_.items.push_back(waypoint);
+
+    mode_ = SimMode::ACTION_MENU;
+
+    std::cout << "[Menu] Showing actions for Tag " << tag_id << std::endl;
+}
+
+void Simulator::hide_action_menu() {
+    action_menu_.visible = false;
+    action_menu_.selected_tag_id = -1;
+    action_menu_.items.clear();
+    if (mode_ == SimMode::ACTION_MENU) {
+        mode_ = SimMode::DRIVE;
+    }
+}
+
+void Simulator::handle_menu_click(int x, int y) {
+    int relative_y = y - action_menu_.y - ActionMenuState::PADDING;
+    int index = relative_y / ActionMenuState::ITEM_HEIGHT;
+
+    if (index >= 0 && index < static_cast<int>(action_menu_.items.size())) {
+        const auto& item = action_menu_.items[index];
+        if (item.enabled && item.callback) {
+            item.callback();
+            hide_action_menu();
+        }
+    }
+    (void)x;
+}
+
+void Simulator::handle_menu_hover(int x, int y) {
+    int relative_y = y - action_menu_.y - ActionMenuState::PADDING;
+    int index = relative_y / ActionMenuState::ITEM_HEIGHT;
+
+    if (x >= action_menu_.x && x <= action_menu_.x + ActionMenuState::MENU_WIDTH &&
+        index >= 0 && index < static_cast<int>(action_menu_.items.size())) {
+        action_menu_.hover_index = index;
+    } else {
+        action_menu_.hover_index = -1;
+    }
+}
+
+void Simulator::execute_tag_action(int tag_id, RobotAction action) {
+    std::cout << "[Action] Executing " << action_to_string(action) << " for Tag " << tag_id << std::endl;
+
+    switch (action) {
+        case RobotAction::AUTO_ALIGN_TO_TAG:
+        case RobotAction::FACE_TAG:
+            // Start auto-align to this tag
+            auto_align_.set_target_tag(tag_id);
+            auto_align_.set_enabled(true);
+            input_.auto_align = true;
+            mode_ = SimMode::AUTO_ALIGN;
+            break;
+
+        case RobotAction::SHOOT:
+        case RobotAction::INTAKE_IN:
+        case RobotAction::SET_ELEVATOR_HEIGHT:
+            // Add as event marker to current path
+            add_event_marker_for_action(tag_id, action);
+            break;
+
+        case RobotAction::STOW:
+            // Just print - would need actual subsystem
+            std::cout << "[Action] Stow command - add to RobotContainer" << std::endl;
+            break;
+
+        default:
+            std::cout << "[Action] Action not implemented in simulator" << std::endl;
+            break;
+    }
+}
+
+void Simulator::add_event_marker_for_action(int tag_id, RobotAction action) {
+    EventMarker marker;
+    marker.name = action_to_command_name(action) + "_Tag" + std::to_string(tag_id);
+    marker.trigger = TriggerCondition::DISTANCE_TO_TAG;
+    marker.tag_id = tag_id;
+    marker.distance = 1.5;  // Trigger when within 1.5m of tag
+    marker.action = action;
+    marker.wait_for_completion = false;
+
+    path_planner_.add_event_marker(current_path_, marker);
+
+    std::cout << "[Path] Added event marker: " << marker.name << " (trigger at "
+              << marker.distance << "m from tag " << tag_id << ")" << std::endl;
+}
+
+void Simulator::draw_action_menu(cv::Mat& frame) {
+    if (!action_menu_.visible || action_menu_.items.empty()) return;
+
+    int menu_height = static_cast<int>(action_menu_.items.size()) * ActionMenuState::ITEM_HEIGHT + 2 * ActionMenuState::PADDING;
+
+    // Draw menu background with semi-transparent overlay
+    cv::Mat overlay = frame.clone();
+    cv::rectangle(overlay,
+                  cv::Point(action_menu_.x, action_menu_.y),
+                  cv::Point(action_menu_.x + ActionMenuState::MENU_WIDTH, action_menu_.y + menu_height),
+                  cv::Scalar(40, 40, 40), cv::FILLED);
+    cv::addWeighted(overlay, 0.9, frame, 0.1, 0, frame);
+
+    // Draw border
+    cv::rectangle(frame,
+                  cv::Point(action_menu_.x, action_menu_.y),
+                  cv::Point(action_menu_.x + ActionMenuState::MENU_WIDTH, action_menu_.y + menu_height),
+                  cv::Scalar(100, 100, 100), 1);
+
+    // Draw items
+    for (size_t i = 0; i < action_menu_.items.size(); i++) {
+        const auto& item = action_menu_.items[i];
+        int item_y = action_menu_.y + ActionMenuState::PADDING + static_cast<int>(i) * ActionMenuState::ITEM_HEIGHT;
+
+        // Highlight hovered item
+        if (static_cast<int>(i) == action_menu_.hover_index && item.enabled) {
+            cv::rectangle(frame,
+                          cv::Point(action_menu_.x + 2, item_y),
+                          cv::Point(action_menu_.x + ActionMenuState::MENU_WIDTH - 2, item_y + ActionMenuState::ITEM_HEIGHT - 2),
+                          cv::Scalar(80, 80, 80), cv::FILLED);
+        }
+
+        // Draw separator
+        if (item.label == "---") {
+            cv::line(frame,
+                     cv::Point(action_menu_.x + 10, item_y + ActionMenuState::ITEM_HEIGHT / 2),
+                     cv::Point(action_menu_.x + ActionMenuState::MENU_WIDTH - 10, item_y + ActionMenuState::ITEM_HEIGHT / 2),
+                     cv::Scalar(100, 100, 100), 1);
+            continue;
+        }
+
+        // Draw text
+        cv::Scalar text_color = item.enabled ? cv::Scalar(255, 255, 255) : cv::Scalar(150, 150, 150);
+        cv::putText(frame, item.label,
+                    cv::Point(action_menu_.x + 10, item_y + 20),
+                    cv::FONT_HERSHEY_SIMPLEX, 0.5, text_color, 1);
+    }
 }
 
 void Simulator::handle_path_execution(double dt) {
@@ -924,7 +1201,7 @@ void Simulator::update_visualization() {
     cv::Scalar mode_color(255, 255, 255);
     switch (mode_) {
         case SimMode::PATH_EDIT:
-            mode_str = "MODE: PATH EDIT (click field)";
+            mode_str = "MODE: PATH EDIT (click/right-click field)";
             mode_color = cv::Scalar(255, 165, 0);
             break;
         case SimMode::PATH_EXECUTE:
@@ -935,8 +1212,12 @@ void Simulator::update_visualization() {
             mode_str = "MODE: AUTO-ALIGN Tag " + std::to_string(auto_align_.target_tag_id());
             mode_color = cv::Scalar(0, 255, 0);
             break;
+        case SimMode::ACTION_MENU:
+            mode_str = "MODE: ACTION MENU (Tag " + std::to_string(action_menu_.selected_tag_id) + ")";
+            mode_color = cv::Scalar(255, 0, 255);
+            break;
         default:
-            mode_str = "MODE: DRIVE";
+            mode_str = "MODE: DRIVE (right-click tags for actions)";
             break;
     }
     cv::putText(display_frame_, mode_str, cv::Point(10, 100),
@@ -1005,6 +1286,16 @@ void Simulator::update_visualization() {
     topdown_renderer_.draw_stats(field_view, stats_.fps, stats_.detect_ms + stats_.pose_ms,
                                  stats_.tag_count, stats_.reproj_error, stats_.confidence,
                                  auto_align_.target_tag_id(), auto_align_.is_enabled());
+
+    // Draw action menu if visible
+    draw_action_menu(field_view);
+
+    // Add hint for right-click
+    if (mode_ != SimMode::ACTION_MENU) {
+        cv::putText(field_view, "Right-click tags for actions",
+                   cv::Point(field_view.cols - 200, 20),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(180, 180, 180), 1);
+    }
 
     cv::imshow(FIELD_WINDOW, field_view);
 }
