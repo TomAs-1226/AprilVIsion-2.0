@@ -1,15 +1,18 @@
 #pragma once
 /**
  * @file path_planner.hpp
- * @brief PathPlanner-style autonomous path planning and code generation
+ * @brief Production-grade Auto Coder for FRC 2026
  *
- * This module provides:
- * - Path definition with waypoints
+ * Features:
+ * - Path definition with waypoints and event markers
  * - Bezier curve trajectory generation
- * - Action triggers at waypoints and tags
- * - Code generation for WPILib swerve drive systems
+ * - Tag-triggered actions with GUI menus
+ * - WPILib 2026 Java/C++/Python code generation
+ * - Subsystem and command scaffolding generation
+ * - Alliance mirroring support
+ * - Heading profiles (interpolate, hold, face target)
  *
- * Compatible with standard FRC swerve drive implementations.
+ * Code generation is compliant with WPILib 2026 command-based structure.
  */
 
 #include "sim_types.hpp"
@@ -20,17 +23,20 @@
 #include <functional>
 #include <memory>
 #include <map>
+#include <set>
 
 namespace frc_vision {
 namespace sim {
 
 /**
- * @brief Waypoint rotation mode
+ * @brief Waypoint rotation mode / heading profile
  */
 enum class RotationMode {
     CONSTANT,       // Keep constant rotation throughout segment
-    LINEAR,         // Linear interpolation to next waypoint rotation
-    HOLONOMIC       // Rotate independently of translation
+    LINEAR,         // Linear interpolation start->end heading over time
+    HOLONOMIC,      // Rotate independently of translation
+    HOLD_HEADING,   // Hold heading at start value
+    FACE_TARGET     // Face a specific target point
 };
 
 /**
@@ -47,11 +53,165 @@ enum class ConstraintType {
  * @brief Action trigger condition
  */
 enum class TriggerCondition {
-    AT_WAYPOINT,        // When reaching a waypoint
+    AT_WAYPOINT,        // When reaching a waypoint (by index)
+    AT_TIME,            // At specific time in trajectory
     TAG_VISIBLE,        // When specific tag becomes visible
     DISTANCE_TO_TAG,    // When within distance of tag
-    TIME_ELAPSED,       // After time from path start
+    TAG_ALIGNED,        // When aligned with tag (facing it)
+    GAME_PIECE_DETECTED,// When intake detects game piece
     CUSTOM              // Custom condition function
+};
+
+/**
+ * @brief Available robot actions for auto builder
+ */
+enum class RobotAction {
+    // Intake actions
+    INTAKE_IN,
+    INTAKE_OUT,
+    INTAKE_STOP,
+
+    // Shooter actions
+    SPIN_UP_SHOOTER,
+    SHOOT,
+    SHOOTER_STOP,
+
+    // Elevator/arm actions
+    SET_ELEVATOR_HEIGHT,
+    STOW,
+    EXTEND_ARM,
+    RETRACT_ARM,
+
+    // Vision/alignment actions
+    AUTO_ALIGN_TO_TAG,
+    FACE_TAG,
+    TRACK_TAG,
+
+    // Climbing
+    DEPLOY_CLIMBER,
+    CLIMB,
+
+    // Generic
+    WAIT,
+    CUSTOM_COMMAND
+};
+
+/**
+ * @brief Get human-readable name for action
+ */
+inline std::string action_to_string(RobotAction action) {
+    switch (action) {
+        case RobotAction::INTAKE_IN: return "Intake In";
+        case RobotAction::INTAKE_OUT: return "Intake Out";
+        case RobotAction::INTAKE_STOP: return "Intake Stop";
+        case RobotAction::SPIN_UP_SHOOTER: return "Spin Up Shooter";
+        case RobotAction::SHOOT: return "Shoot";
+        case RobotAction::SHOOTER_STOP: return "Shooter Stop";
+        case RobotAction::SET_ELEVATOR_HEIGHT: return "Set Elevator Height";
+        case RobotAction::STOW: return "Stow";
+        case RobotAction::EXTEND_ARM: return "Extend Arm";
+        case RobotAction::RETRACT_ARM: return "Retract Arm";
+        case RobotAction::AUTO_ALIGN_TO_TAG: return "Auto-Align to Tag";
+        case RobotAction::FACE_TAG: return "Face Tag";
+        case RobotAction::TRACK_TAG: return "Track Tag";
+        case RobotAction::DEPLOY_CLIMBER: return "Deploy Climber";
+        case RobotAction::CLIMB: return "Climb";
+        case RobotAction::WAIT: return "Wait";
+        case RobotAction::CUSTOM_COMMAND: return "Custom Command";
+        default: return "Unknown";
+    }
+}
+
+/**
+ * @brief Get WPILib command class name for action
+ */
+inline std::string action_to_command_name(RobotAction action) {
+    switch (action) {
+        case RobotAction::INTAKE_IN: return "IntakeIn";
+        case RobotAction::INTAKE_OUT: return "IntakeOut";
+        case RobotAction::INTAKE_STOP: return "IntakeStop";
+        case RobotAction::SPIN_UP_SHOOTER: return "SpinUpShooter";
+        case RobotAction::SHOOT: return "Shoot";
+        case RobotAction::SHOOTER_STOP: return "ShooterStop";
+        case RobotAction::SET_ELEVATOR_HEIGHT: return "SetElevatorHeight";
+        case RobotAction::STOW: return "Stow";
+        case RobotAction::EXTEND_ARM: return "ExtendArm";
+        case RobotAction::RETRACT_ARM: return "RetractArm";
+        case RobotAction::AUTO_ALIGN_TO_TAG: return "AutoAlignToTarget";
+        case RobotAction::FACE_TAG: return "FaceTag";
+        case RobotAction::TRACK_TAG: return "TrackTag";
+        case RobotAction::DEPLOY_CLIMBER: return "DeployClimber";
+        case RobotAction::CLIMB: return "Climb";
+        case RobotAction::WAIT: return "WaitCommand";
+        case RobotAction::CUSTOM_COMMAND: return "CustomCommand";
+        default: return "UnknownCommand";
+    }
+}
+
+/**
+ * @brief Get required subsystem for action
+ */
+inline std::string action_to_subsystem(RobotAction action) {
+    switch (action) {
+        case RobotAction::INTAKE_IN:
+        case RobotAction::INTAKE_OUT:
+        case RobotAction::INTAKE_STOP:
+            return "IntakeSubsystem";
+        case RobotAction::SPIN_UP_SHOOTER:
+        case RobotAction::SHOOT:
+        case RobotAction::SHOOTER_STOP:
+            return "ShooterSubsystem";
+        case RobotAction::SET_ELEVATOR_HEIGHT:
+        case RobotAction::STOW:
+        case RobotAction::EXTEND_ARM:
+        case RobotAction::RETRACT_ARM:
+            return "ElevatorSubsystem";
+        case RobotAction::AUTO_ALIGN_TO_TAG:
+        case RobotAction::FACE_TAG:
+        case RobotAction::TRACK_TAG:
+            return "VisionSubsystem";
+        case RobotAction::DEPLOY_CLIMBER:
+        case RobotAction::CLIMB:
+            return "ClimberSubsystem";
+        default:
+            return "";
+    }
+}
+
+/**
+ * @brief Tag action binding (what to do when seeing/clicking a tag)
+ */
+struct TagActionBinding {
+    int tag_id;
+    RobotAction action;
+    std::map<std::string, double> parameters;
+    double trigger_distance = 2.0;  // meters
+    bool auto_trigger = false;      // Trigger when within distance during auto
+    std::string custom_command;     // For CUSTOM_COMMAND action
+};
+
+/**
+ * @brief Event marker for path following
+ */
+struct EventMarker {
+    std::string name;
+    TriggerCondition trigger;
+
+    // Trigger parameters (use appropriate one based on trigger type)
+    int waypoint_index = -1;    // For AT_WAYPOINT
+    double time = 0;            // For AT_TIME
+    int tag_id = -1;            // For tag-based triggers
+    double distance = 0;        // For DISTANCE_TO_TAG
+
+    // Action to execute
+    RobotAction action;
+    std::map<std::string, double> parameters;
+    std::string custom_command;
+
+    // Execution options
+    bool wait_for_completion = false;
+    double timeout = 5.0;
+    bool parallel = false;      // Run parallel with path following
 };
 
 /**
@@ -111,7 +271,7 @@ struct ConstraintZone {
 };
 
 /**
- * @brief Complete autonomous path
+ * @brief Complete autonomous path/routine
  */
 struct AutoPath {
     std::string name;
@@ -120,7 +280,13 @@ struct AutoPath {
     // Waypoints
     std::vector<PathWaypoint> waypoints;
 
-    // Actions
+    // Event markers (actions during path following)
+    std::vector<EventMarker> event_markers;
+
+    // Tag action bindings (actions when seeing specific tags)
+    std::vector<TagActionBinding> tag_bindings;
+
+    // Legacy actions (for backward compatibility)
     std::vector<PathAction> actions;
 
     // Global constraints
@@ -129,12 +295,18 @@ struct AutoPath {
     double max_angular_velocity = 4.0;  // rad/s
     double max_angular_accel = 6.0;     // rad/s^2
 
+    // Heading profile
+    RotationMode heading_mode = RotationMode::LINEAR;
+    Pose2D face_target;                 // For FACE_TARGET mode
+
     // Constraint zones
     std::vector<ConstraintZone> constraint_zones;
 
     // Path following settings
     bool reverse = false;
     bool reset_odometry = true;
+    bool stop_at_end = true;            // Stop drivetrain at end
+    bool mirror_for_red = true;         // Auto-mirror for red alliance
 
     // Generated trajectory (computed by PathPlanner)
     struct TrajectoryPoint {
@@ -149,6 +321,10 @@ struct AutoPath {
 
     double total_time = 0;
     double total_distance = 0;
+
+    // Track which subsystems/commands are needed
+    std::set<std::string> required_subsystems;
+    std::set<std::string> required_commands;
 };
 
 /**
@@ -207,11 +383,43 @@ enum class CodeFormat {
 };
 
 /**
- * @brief PathPlanner-style autonomous path planner and code generator
+ * @brief Generated file info for code output
+ */
+struct GeneratedFile {
+    std::string path;           // e.g., "frc/robot/auto/UserPath.java"
+    std::string content;        // File contents
+    std::string description;    // What this file is for
+};
+
+/**
+ * @brief Complete code generation result
+ */
+struct CodeGenerationResult {
+    std::vector<GeneratedFile> files;
+    std::vector<std::string> warnings;
+    std::vector<std::string> integration_notes;
+    bool success = true;
+};
+
+/**
+ * @brief Production-grade Auto Coder for FRC 2026
+ *
+ * Generates:
+ * - Path trajectory classes
+ * - Auto routine command groups
+ * - Event map for markers
+ * - Subsystem scaffolds (if needed)
+ * - Command scaffolds (if needed)
+ * - Field constants with mirroring
+ * - Drivetrain interface (if needed)
  */
 class PathPlanner {
 public:
     PathPlanner();
+
+    // ========================================================================
+    // Configuration
+    // ========================================================================
 
     /**
      * @brief Set swerve drive configuration
@@ -222,6 +430,15 @@ public:
      * @brief Set field layout for tag-based actions
      */
     void set_field_layout(const FieldLayout& field);
+
+    /**
+     * @brief Set alliance for mirroring
+     */
+    void set_alliance(Alliance alliance) { alliance_ = alliance; }
+
+    // ========================================================================
+    // Path Creation and Editing
+    // ========================================================================
 
     /**
      * @brief Create a new path
@@ -239,9 +456,23 @@ public:
     void add_waypoint(AutoPath& path, const PathWaypoint& waypoint);
 
     /**
-     * @brief Add action to path
+     * @brief Add event marker to path
+     */
+    void add_event_marker(AutoPath& path, const EventMarker& marker);
+
+    /**
+     * @brief Add tag action binding to path
+     */
+    void add_tag_binding(AutoPath& path, const TagActionBinding& binding);
+
+    /**
+     * @brief Add action to path (legacy support)
      */
     void add_action(AutoPath& path, const PathAction& action);
+
+    // ========================================================================
+    // Trajectory Generation
+    // ========================================================================
 
     /**
      * @brief Generate trajectory for path (fills trajectory vector)
@@ -249,37 +480,6 @@ public:
      * @param dt Time step for trajectory points (default 0.02s = 50Hz)
      */
     void generate_trajectory(AutoPath& path, double dt = 0.02);
-
-    /**
-     * @brief Generate code for path
-     * @param path Path to generate code for
-     * @param format Output code format
-     * @return Generated code as string
-     */
-    std::string generate_code(const AutoPath& path, CodeFormat format) const;
-
-    /**
-     * @brief Generate complete autonomous command group
-     * @param paths List of path names to include
-     * @param format Output code format
-     * @return Generated code as string
-     */
-    std::string generate_auto_routine(const std::vector<std::string>& paths, CodeFormat format) const;
-
-    /**
-     * @brief Save path to JSON file
-     */
-    bool save_path(const AutoPath& path, const std::string& filename) const;
-
-    /**
-     * @brief Load path from JSON file
-     */
-    bool load_path(const std::string& filename, AutoPath& path);
-
-    /**
-     * @brief Get all paths
-     */
-    const std::map<std::string, AutoPath>& get_paths() const { return paths_; }
 
     /**
      * @brief Sample point on path at given time
@@ -296,22 +496,127 @@ public:
      */
     double sample_velocity(const AutoPath& path, double t) const;
 
+    /**
+     * @brief Mirror pose for red alliance
+     */
+    Pose2D mirror_pose(const Pose2D& pose) const;
+
+    // ========================================================================
+    // Code Generation
+    // ========================================================================
+
+    /**
+     * @brief Generate all code for a path (main entry point)
+     * @param path Path to generate code for
+     * @param format Output code format
+     * @param generate_scaffolds If true, generate missing subsystems/commands
+     * @return Complete generation result with all files
+     */
+    CodeGenerationResult generate_all_code(
+        const AutoPath& path,
+        CodeFormat format,
+        bool generate_scaffolds = true) const;
+
+    /**
+     * @brief Generate code for path (simple string output - legacy)
+     */
+    std::string generate_code(const AutoPath& path, CodeFormat format) const;
+
+    /**
+     * @brief Generate complete autonomous command group
+     */
+    std::string generate_auto_routine(const std::vector<std::string>& paths, CodeFormat format) const;
+
+    // ========================================================================
+    // Subsystem and Command Scaffolding
+    // ========================================================================
+
+    /**
+     * @brief Generate subsystem scaffold
+     */
+    GeneratedFile generate_subsystem_scaffold(const std::string& name, CodeFormat format) const;
+
+    /**
+     * @brief Generate command scaffold
+     */
+    GeneratedFile generate_command_scaffold(
+        const std::string& name,
+        const std::string& subsystem,
+        CodeFormat format) const;
+
+    /**
+     * @brief Generate field constants with mirroring helpers
+     */
+    GeneratedFile generate_field_constants(CodeFormat format) const;
+
+    /**
+     * @brief Generate drivetrain interface (if real drivetrain unknown)
+     */
+    GeneratedFile generate_drivetrain_interface(CodeFormat format) const;
+
+    /**
+     * @brief Generate event map for markers
+     */
+    GeneratedFile generate_event_map(const AutoPath& path, CodeFormat format) const;
+
+    // ========================================================================
+    // Path I/O
+    // ========================================================================
+
+    /**
+     * @brief Save path to JSON file
+     */
+    bool save_path(const AutoPath& path, const std::string& filename) const;
+
+    /**
+     * @brief Load path from JSON file
+     */
+    bool load_path(const std::string& filename, AutoPath& path);
+
+    /**
+     * @brief Get all paths
+     */
+    const std::map<std::string, AutoPath>& get_paths() const { return paths_; }
+
+    // ========================================================================
+    // Available Actions for GUI
+    // ========================================================================
+
+    /**
+     * @brief Get list of available actions for GUI menu
+     */
+    static std::vector<RobotAction> get_available_actions();
+
+    /**
+     * @brief Get actions relevant for a specific tag
+     */
+    std::vector<RobotAction> get_actions_for_tag(int tag_id) const;
+
 private:
     // Trajectory generation helpers
     void compute_bezier_points(AutoPath& path);
     double calculate_path_length(const AutoPath& path) const;
     void apply_constraints(AutoPath& path);
     void generate_time_profile(AutoPath& path);
+    void analyze_required_code(AutoPath& path) const;
 
-    // Code generation helpers
+    // Code generation helpers - Java
     std::string generate_java_path(const AutoPath& path) const;
-    std::string generate_cpp_path(const AutoPath& path) const;
-    std::string generate_python_path(const AutoPath& path) const;
-    std::string generate_pathplanner_json(const AutoPath& path) const;
-
+    std::string generate_java_trajectory_class(const AutoPath& path) const;
+    std::string generate_java_auto_routine(const AutoPath& path) const;
+    std::string generate_java_event_marker(const EventMarker& marker) const;
     std::string generate_java_action(const PathAction& action) const;
+
+    // Code generation helpers - C++
+    std::string generate_cpp_path(const AutoPath& path) const;
     std::string generate_cpp_action(const PathAction& action) const;
+
+    // Code generation helpers - Python
+    std::string generate_python_path(const AutoPath& path) const;
     std::string generate_python_action(const PathAction& action) const;
+
+    // Code generation helpers - PathPlanner JSON
+    std::string generate_pathplanner_json(const AutoPath& path) const;
 
     // Bezier curve math
     Pose2D bezier_point(const PathWaypoint& p0, const PathWaypoint& p1, double t) const;
@@ -320,6 +625,11 @@ private:
     std::map<std::string, AutoPath> paths_;
     SwerveConfig swerve_config_;
     FieldLayout field_;
+    Alliance alliance_ = Alliance::BLUE;
+
+    // Field dimensions for mirroring
+    static constexpr double FIELD_LENGTH = 16.54;  // meters
+    static constexpr double FIELD_WIDTH = 8.21;    // meters
 };
 
 // ============================================================================
