@@ -174,6 +174,13 @@ install_dependencies() {
 build_project() {
     log_info "Building FRC Vision Coprocessor..."
 
+    # IMPORTANT: Stop service first to avoid "text file busy" error
+    if systemctl is-active --quiet frc_vision 2>/dev/null; then
+        log_info "Stopping frc_vision service before build..."
+        sudo systemctl stop frc_vision
+        sleep 1
+    fi
+
     if $CLEAN_BUILD && [[ -d "$BUILD_DIR" ]]; then
         log_info "Cleaning build directory..."
         rm -rf "$BUILD_DIR"
