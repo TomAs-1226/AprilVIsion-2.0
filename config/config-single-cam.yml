@@ -1,0 +1,72 @@
+# FRC Vision Coprocessor - Single Camera Test Configuration
+# Use this for testing with a single webcam
+
+# ==============================================================================
+# Camera Configuration
+# ==============================================================================
+cameras:
+  - name: webcam
+    device: /dev/video0      # Will auto-fallback if device not found
+    width: 640
+    height: 480
+    fps: 30                  # 30 FPS for standard webcams
+    exposure: -1             # -1 = auto
+    gain: -1                 # -1 = auto
+    format: MJPG             # MJPG (preferred) or YUYV
+    intrinsics: cam0_intrinsics.yml
+    extrinsics:
+      x: 0.0                 # meters forward from robot center
+      y: 0.0                 # meters left from robot center
+      z: 0.50                # meters up from floor
+      roll: 0.0              # degrees
+      pitch: 0.0             # degrees (positive = looking down)
+      yaw: 0.0               # degrees (0 = facing forward)
+
+# ==============================================================================
+# AprilTag Detection Settings
+# ==============================================================================
+apriltag:
+  family: tag36h11           # FRC standard tag family
+  decimation: 2              # 1-4, higher = faster but less accurate
+  sigma: 0.0                 # Gaussian blur (0 = off)
+  nthreads: 4                # Detection threads
+  refine_edges: true         # Subpixel edge refinement
+  max_hamming: 1             # Max bit errors
+  min_margin: 20.0           # Minimum detection quality
+  max_tags_per_frame: 16
+
+# ==============================================================================
+# Tracking Settings
+# ==============================================================================
+tracking:
+  enable: true
+  dropout_ms: 150
+  filter_alpha: 0.3
+  roi_enable: false
+  velocity_decay: 0.9
+
+# ==============================================================================
+# Field Layout
+# ==============================================================================
+field:
+  name: FRC 2026
+  tag_size_m: 0.1651         # 6.5 inches in meters
+  layout_file: field_layout.json
+
+# ==============================================================================
+# Output Settings
+# ==============================================================================
+outputs:
+  nt_enable: false           # Disable NT for local testing
+  nt_server: "127.0.0.1"
+  nt_table_root: "/FRCVision"
+  publish_rate_hz: 30
+  web_port: 5800             # Dashboard: http://localhost:5800
+
+# ==============================================================================
+# Performance Tuning
+# ==============================================================================
+performance:
+  jpeg_quality: 70
+  enable_annotations: true
+  annotation_line_width: 2
