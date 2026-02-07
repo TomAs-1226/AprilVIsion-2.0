@@ -11,6 +11,9 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+# Option to use prebuilt WPILib (much faster!)
+option(USE_PREBUILT_WPILIB "Use prebuilt WPILib libraries instead of building from source" ON)
+
 # Optimization flags for ARM64
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=armv8-a+crc+crypto -mtune=cortex-a76 -DNDEBUG")
@@ -24,7 +27,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -pthread")
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
-find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc videoio imgcodecs)
+find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc videoio imgcodecs calib3d)
 find_package(Threads REQUIRED)
 
 # yaml-cpp
@@ -53,35 +56,82 @@ if(NOT apriltag_POPULATED)
 endif()
 
 # ============================================================================
-# WPILib ntcore - FetchContent for NetworkTables 4
+# WPILib ntcore
 # ============================================================================
-FetchContent_Declare(
-    allwpilib
-    GIT_REPOSITORY https://github.com/wpilibsuite/allwpilib.git
-    GIT_TAG v2026.2.1
-    GIT_SHALLOW TRUE
-)
+if(USE_PREBUILT_WPILIB)
+    # Use prebuilt libraries (fast!)
+    set(WPILIB_DIR "${CMAKE_SOURCE_DIR}/third_party/wpilib")
 
-FetchContent_GetProperties(allwpilib)
-if(NOT allwpilib_POPULATED)
-    FetchContent_Populate(allwpilib)
+    if(NOT EXISTS "${WPILIB_DIR}/lib")
+        message(STATUS "Prebuilt WPILib not found, downloading...")
+        execute_process(
+            COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/download_wpilib.sh"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            RESULT_VARIABLE DOWNLOAD_RESULT
+        )
+        if(NOT DOWNLOAD_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to download WPILib. Run: ./scripts/download_wpilib.sh")
+        endif()
+    endif()
 
-    # Only build ntcore and its dependencies
-    set(WITH_JAVA OFF CACHE BOOL "" FORCE)
-    set(WITH_CSCORE OFF CACHE BOOL "" FORCE)
-    set(WITH_WPIMATH OFF CACHE BOOL "" FORCE)
-    set(WITH_WPILIB OFF CACHE BOOL "" FORCE)
-    set(WITH_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(WITH_TESTS OFF CACHE BOOL "" FORCE)
-    set(WITH_GUI OFF CACHE BOOL "" FORCE)
-    set(WITH_SIMULATION_MODULES OFF CACHE BOOL "" FORCE)
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    # Find the libraries
+    find_library(NTCORE_LIB NAMES ntcore libntcore PATHS "${WPILIB_DIR}/lib" NO_DEFAULT_PATH)
+    find_library(WPIUTIL_LIB NAMES wpiutil libwpiutil PATHS "${WPILIB_DIR}/lib" NO_DEFAULT_PATH)
+    find_library(WPINET_LIB NAMES wpinet libwpinet PATHS "${WPILIB_DIR}/lib" NO_DEFAULT_PATH)
 
-    add_subdirectory(${allwpilib_SOURCE_DIR} ${allwpilib_BINARY_DIR} EXCLUDE_FROM_ALL)
+    if(NOT NTCORE_LIB OR NOT WPIUTIL_LIB OR NOT WPINET_LIB)
+        message(FATAL_ERROR "WPILib libraries not found in ${WPILIB_DIR}/lib. Run: ./scripts/download_wpilib.sh")
+    endif()
+
+    set(WPILIB_INCLUDE_DIRS "${WPILIB_DIR}/include")
+    set(WPILIB_LIBRARIES ${NTCORE_LIB} ${WPINET_LIB} ${WPIUTIL_LIB})
+
+    message(STATUS "Using prebuilt WPILib from ${WPILIB_DIR}")
+else()
+    # Build from source (slow but guaranteed to work)
+    message(STATUS "Building WPILib from source (this takes 15-30 minutes on ARM)...")
+
+    FetchContent_Declare(
+        allwpilib
+        GIT_REPOSITORY https://github.com/wpilibsuite/allwpilib.git
+        GIT_TAG v2026.2.1
+        GIT_SHALLOW TRUE
+    )
+
+    FetchContent_GetProperties(allwpilib)
+    if(NOT allwpilib_POPULATED)
+        FetchContent_Populate(allwpilib)
+
+        set(WITH_JAVA OFF CACHE BOOL "" FORCE)
+        set(WITH_CSCORE OFF CACHE BOOL "" FORCE)
+        set(WITH_WPIMATH OFF CACHE BOOL "" FORCE)
+        set(WITH_WPILIB OFF CACHE BOOL "" FORCE)
+        set(WITH_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(WITH_TESTS OFF CACHE BOOL "" FORCE)
+        set(WITH_GUI OFF CACHE BOOL "" FORCE)
+        set(WITH_SIMULATION_MODULES OFF CACHE BOOL "" FORCE)
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+        add_subdirectory(${allwpilib_SOURCE_DIR} ${allwpilib_BINARY_DIR} EXCLUDE_FROM_ALL)
+    endif()
+
+    set(WPILIB_INCLUDE_DIRS
+        "${allwpilib_SOURCE_DIR}/ntcore/src/main/native/include"
+        "${allwpilib_SOURCE_DIR}/ntcore/src/generated/main/native/include"
+        "${allwpilib_SOURCE_DIR}/wpiutil/src/main/native/include"
+        "${allwpilib_SOURCE_DIR}/wpiutil/src/main/native/thirdparty/fmtlib/include"
+        "${allwpilib_SOURCE_DIR}/wpiutil/src/main/native/thirdparty/llvm/include"
+        "${allwpilib_SOURCE_DIR}/wpiutil/src/main/native/thirdparty/json/include"
+        "${allwpilib_SOURCE_DIR}/wpiutil/src/main/native/thirdparty/expected/include"
+        "${allwpilib_SOURCE_DIR}/wpiutil/src/main/native/thirdparty/memory/include"
+        "${allwpilib_SOURCE_DIR}/wpinet/src/main/native/include"
+        "${allwpilib_SOURCE_DIR}/wpinet/src/main/native/thirdparty/libuv/include"
+    )
+    set(WPILIB_LIBRARIES ntcore wpinet wpiutil)
 endif()
 
 # ============================================================================
-# cpp-httplib - Header-only, vendored
+# cpp-httplib - Header-only
 # ============================================================================
 FetchContent_Declare(
     httplib
@@ -92,7 +142,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(httplib)
 
 # ============================================================================
-# nlohmann/json - Header-only for JSON parsing
+# nlohmann/json - Header-only
 # ============================================================================
 FetchContent_Declare(
     json
@@ -126,18 +176,18 @@ target_include_directories(frc_vision PRIVATE
     ${YAML_CPP_INCLUDE_DIRS}
     ${apriltag_SOURCE_DIR}
     ${httplib_SOURCE_DIR}
+    ${WPILIB_INCLUDE_DIRS}
 )
 
 target_link_libraries(frc_vision PRIVATE
     ${OpenCV_LIBS}
     ${YAML_CPP_LIBRARIES}
     apriltag
-    ntcore
-    wpiutil
-    wpinet
+    ${WPILIB_LIBRARIES}
     nlohmann_json::nlohmann_json
     Threads::Threads
     atomic
+    dl
 )
 
 # Copy web assets and config to build directory
