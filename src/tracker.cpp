@@ -6,6 +6,7 @@
 #include "tracker.hpp"
 #include <algorithm>
 #include <cmath>
+#include <unordered_set>
 
 namespace frc_vision {
 

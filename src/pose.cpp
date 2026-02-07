@@ -7,6 +7,7 @@
 #include <opencv2/calib3d.hpp>
 #include <iostream>
 #include <cmath>
+#include <set>
 
 namespace frc_vision {
 
