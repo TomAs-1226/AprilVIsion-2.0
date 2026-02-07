@@ -34,15 +34,16 @@ find_package(Threads REQUIRED)
 pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
 
 # ============================================================================
-# AprilTag library - FetchContent for deterministic builds
+# AprilTag library - Use URL download (faster than git clone)
 # ============================================================================
 include(FetchContent)
 
+set(FETCHCONTENT_QUIET OFF)
+
 FetchContent_Declare(
     apriltag
-    GIT_REPOSITORY https://github.com/AprilRobotics/apriltag.git
-    GIT_TAG v3.4.2
-    GIT_SHALLOW TRUE
+    URL https://github.com/AprilRobotics/apriltag/archive/refs/tags/v3.4.2.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
 FetchContent_GetProperties(apriltag)
@@ -131,24 +132,22 @@ else()
 endif()
 
 # ============================================================================
-# cpp-httplib - Header-only
+# cpp-httplib - Header-only (URL download is faster than git)
 # ============================================================================
 FetchContent_Declare(
     httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG v0.15.3
-    GIT_SHALLOW TRUE
+    URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.15.3.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(httplib)
 
 # ============================================================================
-# nlohmann/json - Header-only
+# nlohmann/json - Header-only (URL download is faster than git)
 # ============================================================================
 FetchContent_Declare(
     json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-    GIT_SHALLOW TRUE
+    URL https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(json)
 
