@@ -200,7 +200,8 @@ void NTPublisher::setup_publishers() {
 
     // Subscribers - robot sets these to request alignment
     align_pubs_->target_tag_id_sub = align_table->GetIntegerTopic("target_tag_id").Subscribe(-1);
-    align_pubs_->target_offset_sub = align_table->GetDoubleArrayTopic("target_offset").Subscribe({0.5, 0.0});
+    std::vector<double> default_offset = {0.5, 0.0};
+    align_pubs_->target_offset_sub = align_table->GetDoubleArrayTopic("target_offset").Subscribe(default_offset);
 
     // Publishers - vision publishes alignment data
     align_pubs_->target_visible = align_table->GetBooleanTopic("target_visible").Publish();
@@ -345,20 +346,23 @@ void NTPublisher::publish_loop() {
             // Camera pose
             if (det.multi_tag_pose_valid) {
                 auto& cam_pose = det.camera_to_field;
-                pub->pose_cam.Set({
+                std::vector<double> pose_cam_data = {
                     cam_pose.position.x, cam_pose.position.y, cam_pose.position.z,
                     cam_pose.orientation.w, cam_pose.orientation.x,
                     cam_pose.orientation.y, cam_pose.orientation.z
-                });
+                };
+                pub->pose_cam.Set(pose_cam_data);
 
-                pub->pose_robot.Set({
+                std::vector<double> pose_robot_data = {
                     det.robot_pose_field.x,
                     det.robot_pose_field.y,
                     det.robot_pose_field.theta
-                });
+                };
+                pub->pose_robot.Set(pose_robot_data);
             } else {
-                pub->pose_cam.Set({});
-                pub->pose_robot.Set({});
+                std::vector<double> empty_vec;
+                pub->pose_cam.Set(empty_vec);
+                pub->pose_robot.Set(empty_vec);
             }
 
             // Quality metrics
@@ -369,23 +373,26 @@ void NTPublisher::publish_loop() {
 
             // Compute quality and std devs
             auto quality = PoseEstimator::compute_quality(det.detections, det.multi_tag_reproj_error);
-            pub->std_devs.Set({quality.std_dev_x, quality.std_dev_y, quality.std_dev_theta});
+            std::vector<double> std_devs_data = {quality.std_dev_x, quality.std_dev_y, quality.std_dev_theta};
+            pub->std_devs.Set(std_devs_data);
             pub->confidence.Set(quality.confidence);
         }
 
         // Publish fused pose (filtered)
         fused_pubs_->timestamp.Set(
             std::chrono::duration<double>(SystemClock::now().time_since_epoch()).count());
-        fused_pubs_->pose.Set({
+        std::vector<double> fused_pose_data = {
             fused.pose_filtered.x,
             fused.pose_filtered.y,
             fused.pose_filtered.theta
-        });
-        fused_pubs_->std_devs.Set({
+        };
+        fused_pubs_->pose.Set(fused_pose_data);
+        std::vector<double> fused_std_devs_data = {
             fused.quality.std_dev_x,
             fused.quality.std_dev_y,
             fused.quality.std_dev_theta
-        });
+        };
+        fused_pubs_->std_devs.Set(fused_std_devs_data);
         fused_pubs_->tag_count.Set(fused.total_tags);
         fused_pubs_->cameras_contributing.Set(fused.cameras_contributing);
         fused_pubs_->confidence.Set(fused.quality.confidence);
@@ -394,16 +401,18 @@ void NTPublisher::publish_loop() {
         // Publish fused raw pose
         fused_raw_pubs_->timestamp.Set(
             std::chrono::duration<double>(SystemClock::now().time_since_epoch()).count());
-        fused_raw_pubs_->pose.Set({
+        std::vector<double> fused_raw_pose_data = {
             fused.pose_raw.x,
             fused.pose_raw.y,
             fused.pose_raw.theta
-        });
-        fused_raw_pubs_->std_devs.Set({
+        };
+        fused_raw_pubs_->pose.Set(fused_raw_pose_data);
+        std::vector<double> fused_raw_std_devs_data = {
             fused.quality.std_dev_x,
             fused.quality.std_dev_y,
             fused.quality.std_dev_theta
-        });
+        };
+        fused_raw_pubs_->std_devs.Set(fused_raw_std_devs_data);
         fused_raw_pubs_->tag_count.Set(fused.total_tags);
         fused_raw_pubs_->cameras_contributing.Set(fused.cameras_contributing);
         fused_raw_pubs_->confidence.Set(fused.quality.confidence);
@@ -432,21 +441,24 @@ void NTPublisher::publish_loop() {
 
         if (align_pubs_) {
             align_pubs_->target_visible.Set(align_result.target_visible);
-            align_pubs_->target_pose.Set({
+            std::vector<double> target_pose_data = {
                 align_result.target_pose.x,
                 align_result.target_pose.y,
                 align_result.target_pose.theta
-            });
-            align_pubs_->robot_pose.Set({
+            };
+            align_pubs_->target_pose.Set(target_pose_data);
+            std::vector<double> robot_pose_data = {
                 align_result.robot_pose.x,
                 align_result.robot_pose.y,
                 align_result.robot_pose.theta
-            });
-            align_pubs_->error.Set({
+            };
+            align_pubs_->robot_pose.Set(robot_pose_data);
+            std::vector<double> error_data = {
                 align_result.error.x,
                 align_result.error.y,
                 align_result.error.theta
-            });
+            };
+            align_pubs_->error.Set(error_data);
             align_pubs_->distance_m.Set(align_result.distance_m);
             align_pubs_->angle_error_rad.Set(align_result.error.theta);
             align_pubs_->ready.Set(align_result.ready);

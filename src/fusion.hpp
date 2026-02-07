@@ -8,7 +8,9 @@
  */
 
 #include "types.hpp"
+#include "detector.hpp"
 #include "tracker.hpp"
+#include "pose.hpp"
 #include <vector>
 #include <mutex>
 

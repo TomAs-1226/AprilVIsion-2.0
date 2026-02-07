@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <opencv2/core.hpp>
+#include <opencv2/calib3d.hpp>
 
 namespace frc_vision {
 
