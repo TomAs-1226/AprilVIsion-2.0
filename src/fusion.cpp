@@ -329,6 +329,25 @@ void VisionPipeline::annotate_frame(cv::Mat& image, const FrameDetections& detec
     const cv::Scalar COLOR_CENTER = cv::Scalar(0, 0, 255);    // Red
     const cv::Scalar COLOR_TEXT = cv::Scalar(255, 255, 255);  // White
     const cv::Scalar COLOR_POSE = cv::Scalar(255, 0, 255);    // Magenta
+    const cv::Scalar COLOR_NO_DETECT = cv::Scalar(0, 165, 255);  // Orange
+
+    // Always show camera ID and detection count (helps verify stream is working)
+    std::string cam_str = "CAM" + std::to_string(detections.camera_id);
+    cv::putText(image, cam_str, cv::Point(10, image.rows - 15),
+               cv::FONT_HERSHEY_SIMPLEX, 0.7, COLOR_TEXT, 2);
+
+    // Show detection count
+    int num_dets = static_cast<int>(detections.detections.size());
+    std::string det_str = "Tags: " + std::to_string(num_dets);
+    cv::Scalar det_color = num_dets > 0 ? COLOR_CORNER : COLOR_NO_DETECT;
+    cv::putText(image, det_str, cv::Point(image.cols - 100, image.rows - 15),
+               cv::FONT_HERSHEY_SIMPLEX, 0.6, det_color, 2);
+
+    // If no detections, show helpful message
+    if (num_dets == 0) {
+        cv::putText(image, "No AprilTags detected", cv::Point(10, 25),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_NO_DETECT, 2);
+    }
 
     for (const auto& det : detections.detections) {
         // Draw corners
@@ -360,24 +379,27 @@ void VisionPipeline::annotate_frame(cv::Mat& image, const FrameDetections& detec
 
     // Draw robot pose if valid
     if (detections.multi_tag_pose_valid) {
+        // Draw background rectangle for better visibility
+        cv::rectangle(image, cv::Point(5, 5), cv::Point(350, 55), cv::Scalar(0, 0, 0), -1);
+
         std::string pose_str = "Robot: (" +
             std::to_string(detections.robot_pose_field.x).substr(0, 5) + ", " +
             std::to_string(detections.robot_pose_field.y).substr(0, 5) + ", " +
-            std::to_string(detections.robot_pose_field.theta * 180.0 / M_PI).substr(0, 5) + "°)";
+            std::to_string(detections.robot_pose_field.theta * 180.0 / M_PI).substr(0, 5) + " deg)";
         cv::putText(image, pose_str, cv::Point(10, 25),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_POSE, 1);
+                   cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_POSE, 2);
 
-        std::string tags_str = "Tags: " + std::to_string(detections.tags_used_for_pose) +
-            " Err: " + std::to_string(detections.multi_tag_reproj_error).substr(0, 4) + "px";
-        cv::putText(image, tags_str, cv::Point(10, 45),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_POSE, 1);
+        std::string tags_str = "Using " + std::to_string(detections.tags_used_for_pose) +
+            " tags | Err: " + std::to_string(detections.multi_tag_reproj_error).substr(0, 4) + "px";
+        cv::putText(image, tags_str, cv::Point(10, 48),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_CORNER, 1);
     }
 
-    // Draw latency
+    // Draw latency and FPS info in top right
     double latency = detections.timestamps.total_pipeline_ms();
-    std::string latency_str = "Lat: " + std::to_string(static_cast<int>(latency)) + "ms";
-    cv::putText(image, latency_str, cv::Point(image.cols - 100, 25),
-               cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_TEXT, 1);
+    std::string latency_str = std::to_string(static_cast<int>(latency)) + "ms";
+    cv::putText(image, latency_str, cv::Point(image.cols - 60, 25),
+               cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_TEXT, 2);
 }
 
 FusedPose VisionPipeline::get_fused_pose() {
