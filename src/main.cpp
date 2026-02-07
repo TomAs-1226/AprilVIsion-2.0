@@ -358,24 +358,44 @@ int main(int argc, char* argv[]) {
 
             auto last_fps_time = SteadyClock::now();
             int fps_count = 0;
+            int empty_count = 0;
             std::vector<int> jpeg_params = {cv::IMWRITE_JPEG_QUALITY, config.performance.jpeg_quality};
+
+            std::cout << "[Processing " << i << "] Starting processing thread for camera " << i << std::endl;
 
             while (!g_shutdown.load()) {
                 // Get latest frame
                 auto frame_opt = cam->frame_buffer().pop_latest();
                 if (!frame_opt) {
+                    empty_count++;
+                    // Log occasionally to help debug
+                    if (empty_count == 100 || empty_count == 1000 || empty_count % 10000 == 0) {
+                        std::cout << "[Processing " << i << "] Waiting for frames... (empty reads: "
+                                  << empty_count << ", cam connected: " << cam->is_connected()
+                                  << ", captured: " << cam->frames_captured() << ")" << std::endl;
+                    }
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     continue;
                 }
 
                 Frame& frame = *frame_opt;
+                empty_count = 0;
 
                 // Process frame
                 auto processed = pipeline.process_frame(frame, intr, cam_to_robot);
 
                 // Encode JPEG for web streaming
                 std::vector<uint8_t> jpeg;
+                if (processed.annotated_image.empty()) {
+                    std::cerr << "[Processing " << i << "] Warning: annotated_image is empty!" << std::endl;
+                    continue;
+                }
+
                 cv::imencode(".jpg", processed.annotated_image, jpeg, jpeg_params);
+                if (jpeg.empty()) {
+                    std::cerr << "[Processing " << i << "] Warning: JPEG encoding failed!" << std::endl;
+                    continue;
+                }
                 processed.jpeg = std::move(jpeg);
 
                 // Push to web server
@@ -386,8 +406,15 @@ int main(int argc, char* argv[]) {
                 nt_publisher.publish_camera(i, processed.detections);
 
                 // Update stats
-                processing_frames[i].fetch_add(1);
+                uint64_t frame_count = processing_frames[i].fetch_add(1) + 1;
                 fps_count++;
+
+                // Log first few frames to verify pipeline working
+                if (frame_count <= 3 || frame_count % 500 == 0) {
+                    std::cout << "[Processing " << i << "] Frame " << frame_count
+                              << " processed, JPEG size: " << processed.jpeg.size() << " bytes"
+                              << ", detections: " << processed.detections.detections.size() << std::endl;
+                }
 
                 auto now = SteadyClock::now();
                 auto elapsed = std::chrono::duration<double>(now - last_fps_time).count();

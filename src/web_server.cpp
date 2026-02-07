@@ -559,8 +559,17 @@ void WebServer::stop() {
 }
 
 void WebServer::push_frame(int camera_id, const std::vector<uint8_t>& jpeg) {
+    static std::vector<uint64_t> push_counts(8, 0);  // Track per camera
+
     if (camera_id >= 0 && camera_id < static_cast<int>(impl_->latest_frames.size())) {
         impl_->latest_frames[camera_id]->set(jpeg);
+        push_counts[camera_id]++;
+
+        // Log first few pushes to verify frames are reaching web server
+        if (push_counts[camera_id] <= 3 || push_counts[camera_id] % 500 == 0) {
+            std::cout << "[WebServer] Camera " << camera_id << " frame " << push_counts[camera_id]
+                      << " received, size: " << jpeg.size() << " bytes" << std::endl;
+        }
     }
 }
 

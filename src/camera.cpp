@@ -67,31 +67,51 @@ bool Camera::open_camera() {
         cv::CAP_ANY
     };
 
-    for (int backend : backends) {
-        // Parse device - could be /dev/videoX or just index
-        int device_index = -1;
-        std::string device_path = config_.device;
+    // Parse device - could be /dev/videoX or just index
+    int device_index = -1;
+    std::string device_path = config_.device;
 
-        if (device_path.find("/dev/video") == 0) {
-            device_index = std::stoi(device_path.substr(10));
-        } else {
-            try {
-                device_index = std::stoi(device_path);
-            } catch (...) {
-                device_index = id_;
-            }
+    if (device_path.find("/dev/video") == 0) {
+        device_index = std::stoi(device_path.substr(10));
+    } else {
+        try {
+            device_index = std::stoi(device_path);
+        } catch (...) {
+            device_index = id_;
         }
+    }
 
+    // Try configured device first
+    for (int backend : backends) {
         cap_.open(device_index, backend);
 
         if (cap_.isOpened()) {
             std::cout << "[Camera " << id_ << "] Opened " << device_path
-                      << " with backend " << backend << std::endl;
+                      << " (index " << device_index << ") with backend " << backend << std::endl;
             return true;
         }
     }
 
-    std::cerr << "[Camera " << id_ << "] Failed to open " << config_.device << std::endl;
+    // If configured device failed, try fallback to any available camera
+    std::cout << "[Camera " << id_ << "] Configured device " << device_path
+              << " failed, trying fallback..." << std::endl;
+
+    // Try indices 0-7 to find an available camera
+    for (int fallback_idx = 0; fallback_idx < 8; fallback_idx++) {
+        if (fallback_idx == device_index) continue;  // Already tried
+
+        for (int backend : backends) {
+            cap_.open(fallback_idx, backend);
+
+            if (cap_.isOpened()) {
+                std::cout << "[Camera " << id_ << "] Fallback: Opened /dev/video"
+                          << fallback_idx << " with backend " << backend << std::endl;
+                return true;
+            }
+        }
+    }
+
+    std::cerr << "[Camera " << id_ << "] Failed to open any camera device" << std::endl;
     return false;
 }
 
@@ -158,6 +178,9 @@ void Camera::capture_loop() {
     cv::Mat frame;
     last_fps_time_ = SteadyClock::now();
     fps_frame_count_ = 0;
+    uint64_t local_frame_count = 0;
+
+    std::cout << "[Camera " << id_ << "] Capture loop starting..." << std::endl;
 
     while (!should_stop_.load()) {
         // Grab frame with minimal latency
@@ -207,6 +230,14 @@ void Camera::capture_loop() {
         // Push to ring buffer (may drop older frames if consumer is slow)
         frame_buffer_.push(std::move(f));
         frames_captured_.fetch_add(1);
+        local_frame_count++;
+
+        // Log first few frames to verify capture is working
+        if (local_frame_count <= 3 || local_frame_count == 100 || local_frame_count % 1000 == 0) {
+            std::cout << "[Camera " << id_ << "] Frame " << local_frame_count
+                      << " captured (" << frame.cols << "x" << frame.rows << ")"
+                      << ", buffer size: " << frame_buffer_.size() << std::endl;
+        }
 
         // Update FPS calculation
         fps_frame_count_++;
