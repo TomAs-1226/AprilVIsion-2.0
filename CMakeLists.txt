@@ -58,7 +58,7 @@ endif()
 FetchContent_Declare(
     allwpilib
     GIT_REPOSITORY https://github.com/wpilibsuite/allwpilib.git
-    GIT_TAG v2025.1.1
+    GIT_TAG v2026.2.1
     GIT_SHALLOW TRUE
 )
 
