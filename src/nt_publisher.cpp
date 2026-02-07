@@ -45,6 +45,7 @@ struct NTPublisher::CameraPublishers {
 
 struct NTPublisher::FusedPublishers {
     nt::DoublePublisher timestamp;
+    nt::DoublePublisher latency_ms;       // Processing latency for odometry sync
     nt::DoubleArrayPublisher pose;        // [x, y, theta]
     nt::DoubleArrayPublisher std_devs;    // [x, y, theta]
 
@@ -52,6 +53,7 @@ struct NTPublisher::FusedPublishers {
     nt::IntegerPublisher cameras_contributing;
     nt::DoublePublisher confidence;
     nt::BooleanPublisher valid;
+    nt::IntegerPublisher heartbeat;       // Incrementing counter for connection check
 };
 
 struct NTPublisher::StatusPublishers {
@@ -160,23 +162,27 @@ void NTPublisher::setup_publishers() {
     auto fused_table = table->GetSubTable("fused");
     fused_pubs_ = std::make_unique<FusedPublishers>();
     fused_pubs_->timestamp = fused_table->GetDoubleTopic("timestamp").Publish();
+    fused_pubs_->latency_ms = fused_table->GetDoubleTopic("latency_ms").Publish();
     fused_pubs_->pose = fused_table->GetDoubleArrayTopic("pose").Publish();
     fused_pubs_->std_devs = fused_table->GetDoubleArrayTopic("std_devs").Publish();
     fused_pubs_->tag_count = fused_table->GetIntegerTopic("tag_count").Publish();
     fused_pubs_->cameras_contributing = fused_table->GetIntegerTopic("cameras_contributing").Publish();
     fused_pubs_->confidence = fused_table->GetDoubleTopic("confidence").Publish();
     fused_pubs_->valid = fused_table->GetBooleanTopic("valid").Publish();
+    fused_pubs_->heartbeat = fused_table->GetIntegerTopic("heartbeat").Publish();
 
     // Fused raw publishers
     auto fused_raw_table = table->GetSubTable("fused_raw");
     fused_raw_pubs_ = std::make_unique<FusedPublishers>();
     fused_raw_pubs_->timestamp = fused_raw_table->GetDoubleTopic("timestamp").Publish();
+    fused_raw_pubs_->latency_ms = fused_raw_table->GetDoubleTopic("latency_ms").Publish();
     fused_raw_pubs_->pose = fused_raw_table->GetDoubleArrayTopic("pose").Publish();
     fused_raw_pubs_->std_devs = fused_raw_table->GetDoubleArrayTopic("std_devs").Publish();
     fused_raw_pubs_->tag_count = fused_raw_table->GetIntegerTopic("tag_count").Publish();
     fused_raw_pubs_->cameras_contributing = fused_raw_table->GetIntegerTopic("cameras_contributing").Publish();
     fused_raw_pubs_->confidence = fused_raw_table->GetDoubleTopic("confidence").Publish();
     fused_raw_pubs_->valid = fused_raw_table->GetBooleanTopic("valid").Publish();
+    fused_raw_pubs_->heartbeat = fused_raw_table->GetIntegerTopic("heartbeat").Publish();
 
     // Status publishers
     auto status_table = table->GetSubTable("status");
@@ -379,8 +385,15 @@ void NTPublisher::publish_loop() {
         }
 
         // Publish fused pose (filtered)
+        auto now = SystemClock::now();
         fused_pubs_->timestamp.Set(
-            std::chrono::duration<double>(SystemClock::now().time_since_epoch()).count());
+            std::chrono::duration<double>(now.time_since_epoch()).count());
+
+        // Compute total latency from capture to now (for odometry sync)
+        double latency_ms = std::chrono::duration<double, std::milli>(
+            SteadyClock::now() - fused.timestamps.capture).count();
+        fused_pubs_->latency_ms.Set(latency_ms);
+
         std::vector<double> fused_pose_data = {
             fused.pose_filtered.x,
             fused.pose_filtered.y,
@@ -397,10 +410,12 @@ void NTPublisher::publish_loop() {
         fused_pubs_->cameras_contributing.Set(fused.cameras_contributing);
         fused_pubs_->confidence.Set(fused.quality.confidence);
         fused_pubs_->valid.Set(fused.valid);
+        fused_pubs_->heartbeat.Set(heartbeat_counter_++);
 
         // Publish fused raw pose
         fused_raw_pubs_->timestamp.Set(
-            std::chrono::duration<double>(SystemClock::now().time_since_epoch()).count());
+            std::chrono::duration<double>(now.time_since_epoch()).count());
+        fused_raw_pubs_->latency_ms.Set(latency_ms);
         std::vector<double> fused_raw_pose_data = {
             fused.pose_raw.x,
             fused.pose_raw.y,
@@ -417,6 +432,7 @@ void NTPublisher::publish_loop() {
         fused_raw_pubs_->cameras_contributing.Set(fused.cameras_contributing);
         fused_raw_pubs_->confidence.Set(fused.quality.confidence);
         fused_raw_pubs_->valid.Set(fused.valid);
+        fused_raw_pubs_->heartbeat.Set(heartbeat_counter_);
 
         // Publish status
         status_pubs_->uptime.Set(status.uptime_seconds);

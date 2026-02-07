@@ -34,8 +34,10 @@ public class VisionSubsystem extends SubsystemBase {
     private final DoubleArraySubscriber stdDevsSub;
     private final BooleanSubscriber validSub;
     private final DoubleSubscriber timestampSub;
+    private final DoubleSubscriber latencyMsSub;      // For odometry sync
     private final DoubleSubscriber confidenceSub;
     private final IntegerSubscriber tagCountSub;
+    private final IntegerSubscriber heartbeatSub;     // Connection check
 
     // Auto-align publishers (robot -> vision)
     private final IntegerPublisher targetTagIdPub;
@@ -61,7 +63,7 @@ public class VisionSubsystem extends SubsystemBase {
 
     // State tracking
     private boolean lastValidState = false;
-    private double lastUpdateTime = 0;
+    private long lastHeartbeat = 0;
     private int updateCount = 0;
 
     // Configuration
@@ -81,8 +83,10 @@ public class VisionSubsystem extends SubsystemBase {
         stdDevsSub = fusedTable.getDoubleArrayTopic("std_devs").subscribe(new double[]{0.1, 0.1, 0.1});
         validSub = fusedTable.getBooleanTopic("valid").subscribe(false);
         timestampSub = fusedTable.getDoubleTopic("timestamp").subscribe(0.0);
+        latencyMsSub = fusedTable.getDoubleTopic("latency_ms").subscribe(0.0);
         confidenceSub = fusedTable.getDoubleTopic("confidence").subscribe(0.0);
         tagCountSub = fusedTable.getIntegerTopic("tag_count").subscribe(0);
+        heartbeatSub = fusedTable.getIntegerTopic("heartbeat").subscribe(0);
 
         // Auto-align topics
         NetworkTable alignTable = visionTable.getSubTable("auto_align");
@@ -128,6 +132,7 @@ public class VisionSubsystem extends SubsystemBase {
 
     /**
      * Updates the pose estimator with vision measurements.
+     * Uses latency compensation for accurate odometry fusion.
      */
     private void updatePoseEstimator() {
         if (poseEstimator == null) return;
@@ -135,22 +140,32 @@ public class VisionSubsystem extends SubsystemBase {
         boolean valid = validSub.get();
         double[] pose = poseSub.get();
         double[] stdDevs = stdDevsSub.get();
-        double timestamp = timestampSub.get();
+        double latencyMs = latencyMsSub.get();
         double confidence = confidenceSub.get();
+        long heartbeat = heartbeatSub.get();
 
         // Check data validity
         if (!valid || pose.length < 3 || stdDevs.length < 3) {
             return;
         }
 
-        // Check for stale data
-        double currentTime = Timer.getFPGATimestamp();
-        if (timestamp <= lastUpdateTime || (currentTime - timestamp) > STALE_DATA_THRESHOLD) {
+        // Check for stale data using heartbeat (if heartbeat hasn't changed, data is stale)
+        if (heartbeat <= lastHeartbeat) {
+            return;
+        }
+        lastHeartbeat = heartbeat;
+
+        // Check confidence threshold
+        if (confidence < 0.3) {
             return;
         }
 
-        // Check confidence threshold
-        if (confidence < 0.5) {
+        // Calculate the FPGA timestamp when the image was captured
+        // Current FPGA time minus the processing latency
+        double captureTime = Timer.getFPGATimestamp() - (latencyMs / 1000.0);
+
+        // Don't use measurements from the future or too far in the past
+        if (captureTime < 0 || latencyMs > 500) {
             return;
         }
 
@@ -161,22 +176,25 @@ public class VisionSubsystem extends SubsystemBase {
             new Rotation2d(pose[2])
         );
 
-        // Scale standard deviations based on confidence
-        double scale = 1.0 / Math.max(confidence, 0.1);
+        // Scale standard deviations based on confidence and tag count
+        int tagCount = (int) tagCountSub.get();
+        double tagScale = tagCount > 1 ? 0.5 : 1.0;  // Multi-tag is more accurate
+        double confScale = 1.0 / Math.max(confidence, 0.1);
+        double scale = tagScale * confScale;
+
         var scaledStdDevs = VecBuilder.fill(
             stdDevs[0] * scale,
             stdDevs[1] * scale,
             stdDevs[2] * scale
         );
 
-        // Add vision measurement to pose estimator
+        // Add vision measurement to pose estimator with latency-compensated timestamp
         poseEstimator.addVisionMeasurement(
             visionPose,
-            timestamp,
+            captureTime,
             scaledStdDevs
         );
 
-        lastUpdateTime = timestamp;
         updateCount++;
     }
 
@@ -187,8 +205,10 @@ public class VisionSubsystem extends SubsystemBase {
         SmartDashboard.putBoolean("Vision/Valid", validSub.get());
         SmartDashboard.putNumber("Vision/Confidence", confidenceSub.get());
         SmartDashboard.putNumber("Vision/TagCount", tagCountSub.get());
+        SmartDashboard.putNumber("Vision/LatencyMs", latencyMsSub.get());
         SmartDashboard.putNumber("Vision/UpdateCount", updateCount);
         SmartDashboard.putNumber("Vision/Uptime", uptimeSub.get());
+        SmartDashboard.putNumber("Vision/Heartbeat", heartbeatSub.get());
 
         // Camera status
         SmartDashboard.putBoolean("Vision/Cam0", cam0ConnectedSub.get());

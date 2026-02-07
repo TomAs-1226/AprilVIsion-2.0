@@ -182,6 +182,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> should_stop_{false};
     int publish_rate_hz_ = 50;
+    int64_t heartbeat_counter_ = 0;
 };
 
 } // namespace frc_vision
