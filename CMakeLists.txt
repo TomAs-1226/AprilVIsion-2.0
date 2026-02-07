@@ -34,7 +34,7 @@ find_package(Threads REQUIRED)
 pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
 
 # ============================================================================
-# AprilTag library - Use URL download (faster than git clone)
+# AprilTag library
 # ============================================================================
 include(FetchContent)
 
@@ -42,19 +42,15 @@ set(FETCHCONTENT_QUIET OFF)
 
 FetchContent_Declare(
     apriltag
-    URL https://github.com/AprilRobotics/apriltag/archive/refs/tags/v3.4.2.zip
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    GIT_REPOSITORY "https://github.com/AprilRobotics/apriltag.git"
+    GIT_TAG        "v3.4.2"
+    GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
 )
 
-FetchContent_GetProperties(apriltag)
-if(NOT apriltag_POPULATED)
-    FetchContent_Populate(apriltag)
-
-    # Build apriltag as static library
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${apriltag_SOURCE_DIR} ${apriltag_BINARY_DIR} EXCLUDE_FROM_ALL)
-endif()
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(apriltag)
 
 # ============================================================================
 # WPILib ntcore
@@ -132,22 +128,26 @@ else()
 endif()
 
 # ============================================================================
-# cpp-httplib - Header-only (URL download is faster than git)
+# cpp-httplib - Header-only
 # ============================================================================
 FetchContent_Declare(
     httplib
-    URL https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.15.3.zip
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    GIT_REPOSITORY "https://github.com/yhirose/cpp-httplib.git"
+    GIT_TAG        "v0.15.3"
+    GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
 )
 FetchContent_MakeAvailable(httplib)
 
 # ============================================================================
-# nlohmann/json - Header-only (URL download is faster than git)
+# nlohmann/json - Header-only
 # ============================================================================
 FetchContent_Declare(
     json
-    URL https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.zip
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    GIT_REPOSITORY "https://github.com/nlohmann/json.git"
+    GIT_TAG        "v3.11.3"
+    GIT_SHALLOW    TRUE
+    GIT_PROGRESS   TRUE
 )
 FetchContent_MakeAvailable(json)
 
