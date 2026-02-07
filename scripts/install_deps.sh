@@ -43,6 +43,13 @@ apt-get install -y \
 echo "[4/6] Installing yaml-cpp..."
 apt-get install -y libyaml-cpp-dev
 
+# Install protobuf (required by WPILib/ntcore)
+echo "[4.5/6] Installing protobuf..."
+apt-get install -y \
+    protobuf-compiler \
+    libprotobuf-dev \
+    libprotoc-dev
+
 # Install V4L2 utilities (for camera debugging)
 echo "[5/6] Installing camera utilities..."
 apt-get install -y \
