@@ -158,6 +158,7 @@ set(SOURCES
     src/main.cpp
     src/config.cpp
     src/camera.cpp
+    src/calibration.cpp
     src/detector.cpp
     src/tracker.cpp
     src/pose.cpp

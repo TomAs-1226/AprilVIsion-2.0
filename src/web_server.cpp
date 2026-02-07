@@ -5,6 +5,7 @@
 
 #include "web_server.hpp"
 #include "config.hpp"
+#include "calibration.hpp"
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -518,6 +519,214 @@ bool WebServer::initialize(int port, const std::string& web_root,
     impl_->server.Get("/health", [](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content("{\"status\": \"ok\"}", "application/json");
+    });
+
+    // ==========================================================================
+    // Calibration Endpoints
+    // ==========================================================================
+
+    // Static calibrator instance for calibration session
+    static std::unique_ptr<CameraCalibrator> calibrator;
+    static cv::Size calibration_image_size;
+
+    // Start calibration session
+    impl_->server.Post("/api/calibration/start", [](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+
+        try {
+            CalibrationBoardConfig config;
+
+            // Parse optional config from request body
+            if (!req.body.empty()) {
+                auto j = json::parse(req.body);
+                if (j.contains("squares_x")) config.squares_x = j["squares_x"];
+                if (j.contains("squares_y")) config.squares_y = j["squares_y"];
+                if (j.contains("square_length")) config.square_length = j["square_length"];
+                if (j.contains("marker_length")) config.marker_length = j["marker_length"];
+            }
+
+            calibrator = std::make_unique<CameraCalibrator>();
+            calibrator->initialize(config);
+
+            json response;
+            response["status"] = "started";
+            response["config"]["squares_x"] = config.squares_x;
+            response["config"]["squares_y"] = config.squares_y;
+            response["config"]["square_length"] = config.square_length;
+            response["config"]["marker_length"] = config.marker_length;
+            response["min_frames"] = CameraCalibrator::min_frames();
+            response["recommended_frames"] = CameraCalibrator::recommended_frames();
+
+            res.set_content(response.dump(), "application/json");
+
+        } catch (const std::exception& e) {
+            res.status = 500;
+            res.set_content("{\"error\": \"" + std::string(e.what()) + "\"}", "application/json");
+        }
+    });
+
+    // Capture calibration frame from camera
+    impl_->server.Post("/api/calibration/capture", [this](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+
+        if (!calibrator) {
+            res.status = 400;
+            res.set_content("{\"error\": \"Calibration not started\"}", "application/json");
+            return;
+        }
+
+        int camera_id = 0;
+        if (!req.body.empty()) {
+            try {
+                auto j = json::parse(req.body);
+                if (j.contains("camera_id")) camera_id = j["camera_id"];
+            } catch (...) {}
+        }
+
+        // Get latest frame from camera
+        if (camera_id >= static_cast<int>(impl_->latest_frames.size())) {
+            res.status = 400;
+            res.set_content("{\"error\": \"Invalid camera ID\"}", "application/json");
+            return;
+        }
+
+        // We need raw frame, not JPEG - capture directly
+        cv::VideoCapture cap;
+        cap.open(camera_id, cv::CAP_V4L2);
+        if (!cap.isOpened()) {
+            cap.open(camera_id, cv::CAP_ANY);
+        }
+
+        if (!cap.isOpened()) {
+            res.status = 500;
+            res.set_content("{\"error\": \"Cannot open camera\"}", "application/json");
+            return;
+        }
+
+        cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+
+        cv::Mat frame;
+        cap.read(frame);
+        cap.release();
+
+        if (frame.empty()) {
+            res.status = 500;
+            res.set_content("{\"error\": \"Failed to capture frame\"}", "application/json");
+            return;
+        }
+
+        calibration_image_size = frame.size();
+        bool success = calibrator->capture_frame(frame);
+
+        json response;
+        response["success"] = success;
+        response["frames_captured"] = calibrator->captured_frame_count();
+        response["frames_needed"] = CameraCalibrator::min_frames();
+
+        res.set_content(response.dump(), "application/json");
+    });
+
+    // Get calibration status
+    impl_->server.Get("/api/calibration/status", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+
+        if (!calibrator) {
+            res.set_content("{\"active\": false}", "application/json");
+            return;
+        }
+
+        json response;
+        response["active"] = true;
+        response["frames_captured"] = calibrator->captured_frame_count();
+        response["min_frames"] = CameraCalibrator::min_frames();
+        response["recommended_frames"] = CameraCalibrator::recommended_frames();
+        response["ready"] = calibrator->captured_frame_count() >= CameraCalibrator::min_frames();
+
+        res.set_content(response.dump(), "application/json");
+    });
+
+    // Compute calibration
+    impl_->server.Post("/api/calibration/compute", [](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+
+        if (!calibrator) {
+            res.status = 400;
+            res.set_content("{\"error\": \"Calibration not started\"}", "application/json");
+            return;
+        }
+
+        if (calibrator->captured_frame_count() < CameraCalibrator::min_frames()) {
+            res.status = 400;
+            json err;
+            err["error"] = "Not enough frames";
+            err["frames_captured"] = calibrator->captured_frame_count();
+            err["frames_needed"] = CameraCalibrator::min_frames();
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
+
+        auto result = calibrator->compute_calibration(calibration_image_size);
+
+        json response;
+        response["success"] = result.success;
+        response["rms_error"] = result.rms_error;
+        response["frames_used"] = result.frames_used;
+
+        if (result.success) {
+            response["intrinsics"]["fx"] = result.intrinsics.fx;
+            response["intrinsics"]["fy"] = result.intrinsics.fy;
+            response["intrinsics"]["cx"] = result.intrinsics.cx;
+            response["intrinsics"]["cy"] = result.intrinsics.cy;
+            response["intrinsics"]["width"] = result.intrinsics.width;
+            response["intrinsics"]["height"] = result.intrinsics.height;
+
+            // Save to file
+            std::string save_path = "config/cam0_intrinsics.yml";
+            if (!req.body.empty()) {
+                try {
+                    auto j = json::parse(req.body);
+                    if (j.contains("save_path")) save_path = j["save_path"].get<std::string>();
+                } catch (...) {}
+            }
+
+            if (calibrator->save_calibration(save_path, result)) {
+                response["saved_to"] = save_path;
+            }
+        } else {
+            response["error"] = result.error_message;
+        }
+
+        res.set_content(response.dump(), "application/json");
+    });
+
+    // Generate calibration board image
+    impl_->server.Get("/api/calibration/board", [](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+
+        CalibrationBoardConfig config;
+
+        // Parse query params
+        if (req.has_param("squares_x")) config.squares_x = std::stoi(req.get_param_value("squares_x"));
+        if (req.has_param("squares_y")) config.squares_y = std::stoi(req.get_param_value("squares_y"));
+
+        cv::Mat board = CameraCalibrator::generate_board_image(config, 100);
+
+        std::vector<uint8_t> png;
+        cv::imencode(".png", board, png);
+
+        res.set_content(std::string(reinterpret_cast<char*>(png.data()), png.size()), "image/png");
+    });
+
+    // Reset calibration
+    impl_->server.Post("/api/calibration/reset", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+
+        if (calibrator) {
+            calibrator->clear();
+        }
+
+        res.set_content("{\"status\": \"reset\"}", "application/json");
     });
 
     // CORS preflight

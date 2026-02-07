@@ -314,8 +314,24 @@ struct CameraIntrinsics {
     int width = 0;
     int height = 0;
 
+    // Individual parameters for convenience
+    double fx = 0;  // Focal length X
+    double fy = 0;  // Focal length Y
+    double cx = 0;  // Principal point X
+    double cy = 0;  // Principal point Y
+
     bool valid() const {
         return !camera_matrix.empty() && camera_matrix.rows == 3;
+    }
+
+    // Extract fx, fy, cx, cy from camera matrix
+    void update_from_matrix() {
+        if (valid()) {
+            fx = camera_matrix.at<double>(0, 0);
+            fy = camera_matrix.at<double>(1, 1);
+            cx = camera_matrix.at<double>(0, 2);
+            cy = camera_matrix.at<double>(1, 2);
+        }
     }
 };
 

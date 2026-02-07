@@ -4,69 +4,55 @@
 # ==============================================================================
 # Camera Configuration
 # ==============================================================================
+# NOTE: Only configure cameras you actually have connected!
+# Each camera needs a unique /dev/videoX device
 cameras:
   - name: front
     device: /dev/video0
     width: 640
     height: 480
-    fps: 60
-    exposure: -1        # -1 = auto, or manual value (100-10000)
-    gain: -1            # -1 = auto
-    format: MJPG        # MJPG (preferred) or YUYV
+    fps: 30                 # Match your camera's actual FPS capability
+    exposure: 100           # Low exposure reduces motion blur (100-500 recommended)
+    gain: -1                # -1 = auto
+    format: MJPG            # MJPG (preferred) or YUYV
     intrinsics: cam0_intrinsics.yml
     extrinsics:
-      x: 0.25           # meters forward from robot center
-      y: 0.0            # meters left from robot center
-      z: 0.50           # meters up from floor
-      roll: 0.0         # degrees
-      pitch: 0.0        # degrees (positive = looking down)
-      yaw: 0.0          # degrees (0 = facing forward)
+      x: 0.25               # meters forward from robot center
+      y: 0.0                # meters left from robot center
+      z: 0.50               # meters up from floor
+      roll: 0.0             # degrees
+      pitch: 0.0            # degrees (positive = looking down)
+      yaw: 0.0              # degrees (0 = facing forward)
 
-  - name: left
-    device: /dev/video2
-    width: 640
-    height: 480
-    fps: 60
-    exposure: -1
-    gain: -1
-    format: MJPG
-    intrinsics: cam1_intrinsics.yml
-    extrinsics:
-      x: 0.0
-      y: 0.20
-      z: 0.50
-      roll: 0.0
-      pitch: 0.0
-      yaw: 90.0         # Facing left
-
-  - name: right
-    device: /dev/video4
-    width: 640
-    height: 480
-    fps: 60
-    exposure: -1
-    gain: -1
-    format: MJPG
-    intrinsics: cam2_intrinsics.yml
-    extrinsics:
-      x: 0.0
-      y: -0.20
-      z: 0.50
-      roll: 0.0
-      pitch: 0.0
-      yaw: -90.0        # Facing right
+# Uncomment and modify if you have additional cameras:
+#  - name: left
+#    device: /dev/video2
+#    width: 640
+#    height: 480
+#    fps: 30
+#    exposure: 100
+#    gain: -1
+#    format: MJPG
+#    intrinsics: cam1_intrinsics.yml
+#    extrinsics:
+#      x: 0.0
+#      y: 0.20
+#      z: 0.50
+#      roll: 0.0
+#      pitch: 0.0
+#      yaw: 90.0            # Facing left
 
 # ==============================================================================
 # AprilTag Detection Settings
 # ==============================================================================
 apriltag:
-  family: tag36h11      # FRC standard tag family
-  decimation: 2         # 1-4, higher = faster but less accurate (2 recommended)
-  sigma: 0.0            # Gaussian blur (0 = off, try 0.8 if noisy)
-  nthreads: 4           # Detection threads (4 for RK3588S)
-  refine_edges: true    # Subpixel edge refinement (keep on)
-  max_hamming: 1        # Max bit errors (0-2, 1 recommended)
-  min_margin: 20.0      # Minimum detection quality (10-50, 20 recommended)
+  family: tag36h11          # FRC standard tag family
+  decimation: 2             # 1-4, higher = faster but less accurate (2 recommended)
+  sigma: 0.0                # Gaussian blur (0 = off, try 0.8 if noisy)
+  nthreads: 4               # Detection threads (4 for RK3588S)
+  refine_edges: true        # Subpixel edge refinement (KEEP ON for accuracy)
+  max_hamming: 1            # Max bit errors (0-2, 1 recommended)
+  min_margin: 15.0          # Minimum detection quality (lower = detect at longer range)
   max_tags_per_frame: 16
 
 # ==============================================================================
@@ -74,17 +60,17 @@ apriltag:
 # ==============================================================================
 tracking:
   enable: true
-  dropout_ms: 150       # Maintain track without detection (100-200ms)
-  filter_alpha: 0.3     # Smoothing factor (0.1-0.5, lower = smoother)
-  roi_enable: false     # Use predicted ROI for detection (experimental)
-  velocity_decay: 0.9   # Velocity decay per frame (0.85-0.95)
+  dropout_ms: 150           # Maintain track without detection (100-200ms)
+  filter_alpha: 0.3         # Smoothing factor (0.1-0.5, lower = smoother)
+  roi_enable: false         # Use predicted ROI for detection (experimental)
+  velocity_decay: 0.9       # Velocity decay per frame (0.85-0.95)
 
 # ==============================================================================
 # Field Layout
 # ==============================================================================
 field:
   name: FRC 2026
-  tag_size_m: 0.1651    # 6.5 inches in meters
+  tag_size_m: 0.1651        # 6.5 inches in meters
   layout_file: field_layout.json
 
 # ==============================================================================
@@ -93,37 +79,17 @@ field:
 outputs:
   # NetworkTables 4
   nt_enable: true
-
-  # roboRIO NetworkTables Server Address
-  # ------------------------------------
-  # IMPORTANT: Use raw IP addresses, NOT hostnames (avoid DNS lookup delays)
-  #
-  # Option 1: Standard FRC Network (team router)
-  #   nt_server: "10.TE.AM.2"     # e.g., 10.12.34.2 for team 1234
-  #
-  # Option 2: Direct Ethernet to roboRIO (recommended for lowest latency)
-  #   Connect Orange Pi directly to roboRIO's 2nd Ethernet port
-  #   Configure static IPs:
-  #     - roboRIO: 10.TE.AM.2 (or 172.22.11.2)
-  #     - Orange Pi: 10.TE.AM.11 (or 172.22.11.11)
-  #   nt_server: "10.TE.AM.2"
-  #
-  # Option 3: USB connection (tethered)
-  #   nt_server: "172.22.11.2"
-  #
-  # NEVER use: "roborio-TEAM-frc.local" (mDNS causes startup delays)
-  #
-  nt_server: "10.0.0.2"           # CHANGE THIS to your roboRIO IP
+  nt_server: "10.58.5.2"    # CHANGE THIS to your roboRIO IP (10.TE.AM.2)
   nt_table_root: "/FRCVision"
-  publish_rate_hz: 50             # NT publishing rate (50Hz = 20ms updates)
+  publish_rate_hz: 50       # NT publishing rate (50Hz = 20ms updates)
 
   # Web Dashboard
-  web_port: 5800                  # Dashboard: http://<orange-pi-ip>:5800
+  web_port: 5800            # Dashboard: http://<orange-pi-ip>:5800
 
 # ==============================================================================
 # Performance Tuning
 # ==============================================================================
 performance:
-  jpeg_quality: 70                # 1-100, lower = faster streaming
-  enable_annotations: true        # Draw overlays on streamed video
+  jpeg_quality: 70          # 1-100, lower = faster streaming
+  enable_annotations: true  # Draw overlays on streamed video
   annotation_line_width: 2
