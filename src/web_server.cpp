@@ -26,7 +26,7 @@ public:
     httplib::Server server;
 
     // Latest frames for MJPEG streaming (per camera)
-    std::vector<LatestValue<std::vector<uint8_t>>> latest_frames;
+    std::vector<std::unique_ptr<LatestValue<std::vector<uint8_t>>>> latest_frames;
 
     // Latest data for WebSocket-like SSE
     LatestValue<std::string> latest_detections_json;
@@ -62,7 +62,10 @@ bool WebServer::initialize(int port, const std::string& web_root,
     impl_->num_cameras = num_cameras;
     impl_->web_root = web_root;
     impl_->config_manager = config_manager;
-    impl_->latest_frames.resize(num_cameras);
+    impl_->latest_frames.reserve(num_cameras);
+    for (int i = 0; i < num_cameras; i++) {
+        impl_->latest_frames.push_back(std::make_unique<LatestValue<std::vector<uint8_t>>>());
+    }
 
     // ==========================================================================
     // Static file serving
@@ -91,7 +94,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                     uint64_t last_version = 0;
 
                     while (!should_stop_.load()) {
-                        auto frame_opt = impl_->latest_frames[i].get_if_changed(last_version);
+                        auto frame_opt = impl_->latest_frames[i]->get_if_changed(last_version);
 
                         if (frame_opt) {
                             const auto& [frame, version] = *frame_opt;
@@ -421,7 +424,7 @@ void WebServer::stop() {
 
 void WebServer::push_frame(int camera_id, const std::vector<uint8_t>& jpeg) {
     if (camera_id >= 0 && camera_id < static_cast<int>(impl_->latest_frames.size())) {
-        impl_->latest_frames[camera_id].set(jpeg);
+        impl_->latest_frames[camera_id]->set(jpeg);
     }
 }
 
