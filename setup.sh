@@ -138,7 +138,7 @@ install_dependencies() {
     # Check if we need to install packages
     PACKAGES_NEEDED=false
 
-    for pkg in cmake ninja-build g++ libopencv-dev libyaml-cpp-dev; do
+    for pkg in cmake ninja-build g++ libopencv-dev libyaml-cpp-dev unzip curl; do
         if ! dpkg -s "$pkg" &> /dev/null; then
             PACKAGES_NEEDED=true
             break
@@ -159,7 +159,8 @@ install_dependencies() {
             libyaml-cpp-dev \
             libssl-dev \
             v4l-utils \
-            curl
+            curl \
+            unzip
         log_success "Dependencies installed"
     else
         log_success "All dependencies already installed"
@@ -184,7 +185,7 @@ build_project() {
     log_info "Configuring with CMake..."
     cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
 
-    log_info "Building (this may take a few minutes on first build)..."
+    log_info "Building (downloads prebuilt WPILib on first run, ~30 seconds)..."
     ninja -j$(nproc)
 
     if [[ -f "${BUILD_DIR}/frc_vision" ]]; then
