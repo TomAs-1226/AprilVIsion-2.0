@@ -50,6 +50,12 @@ apt-get install -y \
     libprotobuf-dev \
     libprotoc-dev
 
+# Install libssh and ssl (required by WPILib/ntcore)
+echo "[4.6/6] Installing libssh and ssl..."
+apt-get install -y \
+    libssh-dev \
+    libssl-dev
+
 # Install V4L2 utilities (for camera debugging)
 echo "[5/6] Installing camera utilities..."
 apt-get install -y \
