@@ -8,6 +8,8 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/imgproc.hpp>
 #include <iostream>
 #include <fstream>
 #include <sstream>
