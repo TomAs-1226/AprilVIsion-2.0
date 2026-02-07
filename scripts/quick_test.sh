@@ -32,11 +32,8 @@ echo "Available cameras:"
 ls -la /dev/video* 2>/dev/null || echo "No video devices found!"
 echo ""
 
-# Use single camera config for testing
-CONFIG="${SCRIPT_DIR}/config/config-single-cam.yml"
-if [[ ! -f "$CONFIG" ]]; then
-    CONFIG="${SCRIPT_DIR}/config/config.yml"
-fi
+# Use main config (already configured for single camera)
+CONFIG="${SCRIPT_DIR}/config/config.yml"
 
 echo "Using config: $CONFIG"
 echo ""
