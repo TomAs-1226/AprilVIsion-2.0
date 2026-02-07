@@ -91,59 +91,48 @@ bool WebServer::initialize(int port, const std::string& web_root,
             res.set_header("Pragma", "no-cache");
             res.set_header("Expires", "0");
             res.set_header("Access-Control-Allow-Origin", "*");
-            res.set_header("Connection", "close");
+            res.set_header("Connection", "keep-alive");
 
-            // Stream frames using chunked transfer
-            res.set_chunked_content_provider(
-                "multipart/x-mixed-replace; boundary=frame",
+            res.set_content_provider(
+                "multipart/x-mixed-replace; boundary=--frame",
                 [this, i](size_t /*offset*/, httplib::DataSink& sink) {
                     uint64_t last_version = 0;
-                    int empty_count = 0;
                     int frames_sent = 0;
 
                     while (!should_stop_.load()) {
-                        auto frame_opt = impl_->latest_frames[i]->get_if_changed(last_version);
+                        // Try to get latest frame
+                        auto frame_opt = impl_->latest_frames[i]->get();
 
-                        if (frame_opt) {
-                            const auto& [frame, version] = *frame_opt;
-                            last_version = version;
-                            empty_count = 0;
+                        if (frame_opt && !frame_opt->empty()) {
+                            const auto& frame = *frame_opt;
 
-                            if (!frame.empty()) {
-                                std::string header = "--frame\r\n"
-                                    "Content-Type: image/jpeg\r\n"
-                                    "Content-Length: " + std::to_string(frame.size()) + "\r\n\r\n";
+                            // Build MJPEG frame
+                            std::string header = "--frame\r\n"
+                                "Content-Type: image/jpeg\r\n"
+                                "Content-Length: " + std::to_string(frame.size()) + "\r\n\r\n";
 
-                                if (!sink.write(header.data(), header.size())) {
-                                    std::cout << "[WebServer] MJPEG client disconnected (header write failed)" << std::endl;
-                                    return false;  // Client disconnected
-                                }
-                                if (!sink.write(reinterpret_cast<const char*>(frame.data()), frame.size())) {
-                                    std::cout << "[WebServer] MJPEG client disconnected (frame write failed)" << std::endl;
-                                    return false;
-                                }
-                                if (!sink.write("\r\n", 2)) {
-                                    return false;
-                                }
-
-                                frames_sent++;
-                                if (frames_sent == 1 || frames_sent % 100 == 0) {
-                                    std::cout << "[WebServer] MJPEG cam" << i << " sent " << frames_sent
-                                              << " frames" << std::endl;
-                                }
+                            if (!sink.write(header.data(), header.size())) {
+                                std::cout << "[WebServer] MJPEG cam" << i << " client disconnected after "
+                                          << frames_sent << " frames" << std::endl;
+                                return false;
                             }
-                        } else {
-                            empty_count++;
-                            if (empty_count > 1000) {
-                                // No frames for a while, check if we should give up
-                                empty_count = 0;
+                            if (!sink.write(reinterpret_cast<const char*>(frame.data()), frame.size())) {
+                                return false;
+                            }
+                            if (!sink.write("\r\n", 2)) {
+                                return false;
+                            }
+
+                            frames_sent++;
+                            if (frames_sent == 1) {
+                                std::cout << "[WebServer] MJPEG cam" << i << " streaming started" << std::endl;
                             }
                         }
 
-                        // Small sleep to avoid busy-waiting
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        // Rate limit to ~30fps
+                        std::this_thread::sleep_for(std::chrono::milliseconds(33));
                     }
-                    return false;  // Stop when shutdown requested
+                    return false;
                 });
         });
     }
