@@ -12,7 +12,7 @@ cameras:
     width: 640
     height: 480
     fps: 30                 # Match your camera's actual FPS capability
-    exposure: 100           # Low exposure reduces motion blur (100-500 recommended)
+    exposure: -1            # -1 = auto exposure (recommended for most cases)
     gain: -1                # -1 = auto
     format: MJPG            # MJPG (preferred) or YUYV
     intrinsics: cam0_intrinsics.yml
