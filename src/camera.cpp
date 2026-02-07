@@ -186,9 +186,9 @@ void Camera::capture_loop() {
 
         // Verify frame has actual data (not empty)
         if (frame.empty() || frame.cols == 0 || frame.rows == 0) {
-            frames_dropped_.fetch_add(1);
+            empty_frames_dropped_.fetch_add(1);
             // Log occasionally to avoid spam
-            if (frames_dropped_.load() % 100 == 1) {
+            if (empty_frames_dropped_.load() % 100 == 1) {
                 std::cerr << "[Camera " << id_ << "] Warning: Empty frame received" << std::endl;
             }
             continue;

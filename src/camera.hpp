@@ -119,6 +119,7 @@ private:
 
     std::atomic<double> fps_{0.0};
     std::atomic<uint64_t> frames_captured_{0};
+    std::atomic<uint64_t> empty_frames_dropped_{0};  // Empty frames from camera
     uint64_t frame_number_{0};
 
     // FPS calculation
