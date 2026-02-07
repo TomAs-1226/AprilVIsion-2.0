@@ -86,11 +86,10 @@ bool WebServer::initialize(int port, const std::string& web_root,
             res.set_header("Cache-Control", "no-cache, no-store, must-revalidate");
             res.set_header("Pragma", "no-cache");
             res.set_header("Expires", "0");
-            res.set_header("Connection", "close");
             res.set_header("Access-Control-Allow-Origin", "*");
 
-            // Stream frames using chunked provider
-            res.set_chunked_content_provider(
+            // Stream frames - use content_provider for continuous streaming
+            res.set_content_provider(
                 "multipart/x-mixed-replace; boundary=frame",
                 [this, i](size_t /*offset*/, httplib::DataSink& sink) {
                     uint64_t last_version = 0;
@@ -110,7 +109,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                                     "Content-Length: " + std::to_string(frame.size()) + "\r\n\r\n";
 
                                 if (!sink.write(header.data(), header.size())) {
-                                    return false;
+                                    return false;  // Client disconnected
                                 }
                                 if (!sink.write(reinterpret_cast<const char*>(frame.data()), frame.size())) {
                                     return false;
@@ -118,24 +117,16 @@ bool WebServer::initialize(int port, const std::string& web_root,
                                 if (!sink.write("\r\n", 2)) {
                                     return false;
                                 }
-                                // Explicit done to flush immediately
-                                sink.done();
+                                // DON'T call sink.done() - that ends the stream!
                             }
                         } else {
                             empty_count++;
-                            // If no frames for 5 seconds, send keep-alive
-                            if (empty_count > 500) {
-                                empty_count = 0;
-                                // Keep connection alive with empty boundary
-                                if (!sink.write("--frame\r\n\r\n", 11)) {
-                                    return false;
-                                }
-                            }
                         }
 
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        // Small sleep to avoid busy-waiting
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
-                    return false;
+                    return false;  // Stop when shutdown requested
                 });
         });
     }
