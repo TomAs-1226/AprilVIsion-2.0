@@ -132,12 +132,21 @@ void Camera::configure_camera() {
     // Set FPS
     cap_.set(cv::CAP_PROP_FPS, config_.fps);
 
-    // Set exposure (if specified)
+    // Set exposure
     if (config_.exposure > 0) {
+        // Manual exposure mode
         cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);  // Manual mode
         cap_.set(cv::CAP_PROP_EXPOSURE, config_.exposure);
+        std::cout << "[Camera " << id_ << "] Set manual exposure: " << config_.exposure << std::endl;
     } else {
-        cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 3);  // Auto mode
+        // Auto exposure - try multiple methods for compatibility
+        // Different cameras use different values for auto mode (0, 1, or 3)
+        cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 3);  // Try aperture priority first
+
+        // For some webcams, also need to explicitly enable auto
+        cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 0.75);  // Alternate auto mode
+
+        std::cout << "[Camera " << id_ << "] Set auto exposure" << std::endl;
     }
 
     // Set gain (if specified)
