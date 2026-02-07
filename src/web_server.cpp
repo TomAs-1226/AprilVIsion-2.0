@@ -168,6 +168,99 @@ bool WebServer::initialize(int port, const std::string& web_root,
     });
 
     // ==========================================================================
+    // Direct camera test endpoint (bypasses pipeline for debugging)
+    // ==========================================================================
+    impl_->server.Get("/test/cam0", [](const httplib::Request&, httplib::Response& res) {
+        cv::VideoCapture cap;
+        cap.open(0, cv::CAP_V4L2);
+
+        if (!cap.isOpened()) {
+            cap.open(0, cv::CAP_ANY);
+        }
+
+        if (!cap.isOpened()) {
+            res.status = 503;
+            res.set_content("{\"error\": \"Cannot open camera 0\"}", "application/json");
+            return;
+        }
+
+        cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+        cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
+
+        cv::Mat frame;
+        bool success = cap.read(frame);
+        cap.release();
+
+        if (!success || frame.empty()) {
+            res.status = 503;
+            res.set_content("{\"error\": \"Failed to capture frame\"}", "application/json");
+            return;
+        }
+
+        std::vector<uint8_t> jpeg;
+        cv::imencode(".jpg", frame, jpeg);
+
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_content(std::string(reinterpret_cast<char*>(jpeg.data()), jpeg.size()), "image/jpeg");
+    });
+
+    // Direct MJPEG stream test (bypasses pipeline)
+    impl_->server.Get("/test/stream", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Content-Type", "multipart/x-mixed-replace; boundary=frame");
+        res.set_header("Cache-Control", "no-cache");
+        res.set_header("Access-Control-Allow-Origin", "*");
+
+        res.set_content_provider(
+            "multipart/x-mixed-replace; boundary=frame",
+            [this](size_t /*offset*/, httplib::DataSink& sink) {
+                cv::VideoCapture cap;
+                cap.open(0, cv::CAP_V4L2);
+                if (!cap.isOpened()) cap.open(0, cv::CAP_ANY);
+
+                if (!cap.isOpened()) {
+                    return false;
+                }
+
+                cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+                cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+                cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
+
+                cv::Mat frame;
+                std::vector<uint8_t> jpeg;
+                int frame_count = 0;
+
+                while (!should_stop_.load() && frame_count < 1000) {
+                    if (!cap.read(frame) || frame.empty()) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        continue;
+                    }
+
+                    // Add frame counter overlay
+                    cv::putText(frame, "Frame: " + std::to_string(frame_count),
+                               cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 1.0,
+                               cv::Scalar(0, 255, 0), 2);
+
+                    cv::imencode(".jpg", frame, jpeg);
+
+                    std::string header = "--frame\r\n"
+                        "Content-Type: image/jpeg\r\n"
+                        "Content-Length: " + std::to_string(jpeg.size()) + "\r\n\r\n";
+
+                    if (!sink.write(header.data(), header.size())) break;
+                    if (!sink.write(reinterpret_cast<char*>(jpeg.data()), jpeg.size())) break;
+                    if (!sink.write("\r\n", 2)) break;
+
+                    frame_count++;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(33)); // ~30fps
+                }
+
+                cap.release();
+                return false;
+            });
+    });
+
+    // ==========================================================================
     // Server-Sent Events for real-time data
     // ==========================================================================
     impl_->server.Get("/events", [this](const httplib::Request&, httplib::Response& res) {
