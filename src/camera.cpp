@@ -184,6 +184,16 @@ void Camera::capture_loop() {
             continue;
         }
 
+        // Verify frame has actual data (not empty)
+        if (frame.empty() || frame.cols == 0 || frame.rows == 0) {
+            frames_dropped_.fetch_add(1);
+            // Log occasionally to avoid spam
+            if (frames_dropped_.load() % 100 == 1) {
+                std::cerr << "[Camera " << id_ << "] Warning: Empty frame received" << std::endl;
+            }
+            continue;
+        }
+
         // Create frame object
         Frame f;
         f.camera_id = id_;

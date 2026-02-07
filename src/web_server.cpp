@@ -83,15 +83,18 @@ bool WebServer::initialize(int port, const std::string& web_root,
 
         impl_->server.Get(path.c_str(), [this, i](const httplib::Request&, httplib::Response& res) {
             res.set_header("Content-Type", "multipart/x-mixed-replace; boundary=frame");
-            res.set_header("Cache-Control", "no-cache");
-            res.set_header("Connection", "keep-alive");
+            res.set_header("Cache-Control", "no-cache, no-store, must-revalidate");
+            res.set_header("Pragma", "no-cache");
+            res.set_header("Expires", "0");
+            res.set_header("Connection", "close");
             res.set_header("Access-Control-Allow-Origin", "*");
 
-            // Stream frames
-            res.set_content_provider(
+            // Stream frames using chunked provider
+            res.set_chunked_content_provider(
                 "multipart/x-mixed-replace; boundary=frame",
                 [this, i](size_t /*offset*/, httplib::DataSink& sink) {
                     uint64_t last_version = 0;
+                    int empty_count = 0;
 
                     while (!should_stop_.load()) {
                         auto frame_opt = impl_->latest_frames[i]->get_if_changed(last_version);
@@ -99,6 +102,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                         if (frame_opt) {
                             const auto& [frame, version] = *frame_opt;
                             last_version = version;
+                            empty_count = 0;
 
                             if (!frame.empty()) {
                                 std::string header = "--frame\r\n"
@@ -114,6 +118,18 @@ bool WebServer::initialize(int port, const std::string& web_root,
                                 if (!sink.write("\r\n", 2)) {
                                     return false;
                                 }
+                                // Explicit done to flush immediately
+                                sink.done();
+                            }
+                        } else {
+                            empty_count++;
+                            // If no frames for 5 seconds, send keep-alive
+                            if (empty_count > 500) {
+                                empty_count = 0;
+                                // Keep connection alive with empty boundary
+                                if (!sink.write("--frame\r\n\r\n", 11)) {
+                                    return false;
+                                }
                             }
                         }
 
@@ -123,6 +139,42 @@ bool WebServer::initialize(int port, const std::string& web_root,
                 });
         });
     }
+
+    // ==========================================================================
+    // Single frame snapshot endpoints (for debugging)
+    // ==========================================================================
+    for (int i = 0; i < num_cameras; i++) {
+        std::string path = "/cam" + std::to_string(i) + ".jpg";
+
+        impl_->server.Get(path.c_str(), [this, i](const httplib::Request&, httplib::Response& res) {
+            res.set_header("Cache-Control", "no-cache");
+            res.set_header("Access-Control-Allow-Origin", "*");
+
+            auto frame_opt = impl_->latest_frames[i]->get();
+            if (frame_opt && !frame_opt->empty()) {
+                res.set_content(
+                    std::string(reinterpret_cast<const char*>(frame_opt->data()), frame_opt->size()),
+                    "image/jpeg");
+            } else {
+                res.status = 503;
+                res.set_content("{\"error\": \"No frame available for camera " + std::to_string(i) + "\"}", "application/json");
+            }
+        });
+    }
+
+    // Debug endpoint to check frame status
+    impl_->server.Get("/api/debug/frames", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+
+        json j;
+        j["num_cameras"] = impl_->num_cameras;
+        for (int i = 0; i < impl_->num_cameras; i++) {
+            auto frame_opt = impl_->latest_frames[i]->get();
+            j["cameras"][i]["has_frame"] = frame_opt.has_value();
+            j["cameras"][i]["frame_size"] = frame_opt ? frame_opt->size() : 0;
+        }
+        res.set_content(j.dump(), "application/json");
+    });
 
     // ==========================================================================
     // Server-Sent Events for real-time data
