@@ -8,41 +8,59 @@ Designed for **Orange Pi 5 (RK3588S, 5GB)** running **Ubuntu-Rockchip** (Joshua 
 - **3 Camera Support** - Simultaneous capture at 60-120 FPS (640x480 or 800x600)
 - **Multi-Tag Pose Estimation** - Accurate robot localization using PnP with RANSAC
 - **Fast Motion Tracking** - Alpha-beta filter maintains pose during motion blur/dropouts
+- **Auto-Align Support** - Built-in alignment to AprilTags via NetworkTables
 - **NetworkTables 4** - Full roboRIO integration with WPILib ntcore
 - **Web Dashboard** - Live MJPEG streams with canvas overlays, real-time metrics
-- **Hot Reload** - Change settings without restart via web API
+- **Fast Boot** - Ready in <65 seconds from power-on
+- **One-Command Setup** - Single script installs everything
 
 ## Quick Start
 
-### 1. Install Dependencies
+### One-Command Setup (Recommended)
 
 ```bash
 git clone <repo-url> frc-vision
 cd frc-vision
-sudo ./scripts/install_deps.sh
+./setup.sh --team 1234    # Replace 1234 with your team number
 ```
 
-Log out and log back in for camera permissions to take effect.
+This script:
+1. Installs all dependencies
+2. Builds the project
+3. Configures for your team's roboRIO IP
+4. Installs as a systemd service
+5. Starts the vision system
 
-### 2. Build
+### Manual Setup
+
+If you prefer step-by-step:
 
 ```bash
+# Install dependencies
+sudo ./scripts/install_deps.sh
+
+# Build
 mkdir build && cd build
 cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
 ninja
+
+# Run (for testing)
+./frc_vision ../config/config.yml
+
+# Install as service
+sudo ./scripts/install_service.sh
 ```
 
-### 3. Run
-
-```bash
-./frc_vision
-# Or from project root:
-./scripts/run.sh
-```
-
-### 4. Access Dashboard
+### Access Dashboard
 
 Open in browser: `http://<orange-pi-ip>:5800`
+
+### Verify Status
+
+```bash
+curl http://localhost:5800/api/status
+# Should return: {"ready": true, ...}
+```
 
 ## NetworkTables Setup
 
@@ -266,6 +284,58 @@ For lowest latency, connect Orange Pi directly to roboRIO's 2nd Ethernet port:
 
 **Important**: Always use raw IP addresses, never `roborio-TEAM-frc.local` (mDNS causes boot delays)
 
+## Auto-Align Integration
+
+The vision system supports automatic alignment to AprilTags for scoring, pickup, etc.
+
+### How It Works
+
+1. Robot publishes target tag ID to NetworkTables
+2. Vision calculates target pose and error
+3. Robot uses error values for closed-loop control
+4. Vision reports "ready" when aligned
+
+### NetworkTables Topics
+
+**Robot → Vision:**
+```
+/FRCVision/auto_align/target_tag_id    (int)     Tag ID to align to (-1 = none)
+/FRCVision/auto_align/target_offset    (double[]) [distance_m, angle_rad]
+```
+
+**Vision → Robot:**
+```
+/FRCVision/auto_align/error            (double[]) [x, y, theta] alignment error
+/FRCVision/auto_align/ready            (boolean)  True when aligned
+/FRCVision/auto_align/target_visible   (boolean)  Target tag visible
+/FRCVision/auto_align/distance_m       (double)   Distance to target
+```
+
+### Robot Code Example
+
+```java
+// Start alignment to tag 5 at 0.5m distance
+NetworkTableInstance.getDefault()
+    .getTable("FRCVision/auto_align")
+    .getEntry("target_tag_id")
+    .setInteger(5);
+
+// Read alignment error for PID control
+double[] error = table.getEntry("error").getDoubleArray(new double[3]);
+double xError = error[0];  // meters
+double yError = error[1];  // meters
+double thetaError = error[2];  // radians
+
+// Check if aligned
+boolean ready = table.getEntry("ready").getBoolean(false);
+```
+
+See `robot-code-examples/` for complete Java subsystem and command examples.
+
+### Full API Documentation
+
+See [`docs/API.md`](docs/API.md) for complete NetworkTables and HTTP API documentation.
+
 ## Web Dashboard
 
 ### Features
@@ -364,6 +434,7 @@ sudo modprobe -r uvcvideo && sudo modprobe uvcvideo
 /
 ├── CMakeLists.txt           # Build configuration
 ├── README.md                # This file
+├── setup.sh                 # One-command setup script
 ├── src/
 │   ├── main.cpp            # Entry point
 │   ├── types.hpp           # Core data types
@@ -374,7 +445,7 @@ sudo modprobe -r uvcvideo && sudo modprobe uvcvideo
 │   ├── tracker.hpp/cpp     # Motion tracking
 │   ├── pose.hpp/cpp        # Pose estimation
 │   ├── fusion.hpp/cpp      # Multi-camera fusion
-│   ├── nt_publisher.hpp/cpp # NetworkTables 4
+│   ├── nt_publisher.hpp/cpp # NetworkTables 4 + Auto-Align
 │   ├── web_server.hpp/cpp  # HTTP + SSE
 │   └── field_layout.hpp/cpp # Field tag positions
 ├── web/
@@ -385,8 +456,15 @@ sudo modprobe -r uvcvideo && sudo modprobe uvcvideo
 │   ├── config.yml          # Main configuration
 │   ├── cam*_intrinsics.yml # Camera calibration
 │   └── field_layout.json   # Tag positions
+├── docs/
+│   └── API.md              # Full API documentation
+├── robot-code-examples/
+│   ├── VisionSubsystem.java    # WPILib subsystem
+│   ├── AlignToTagCommand.java  # Auto-align command
+│   └── RobotContainerExample.java
 ├── scripts/
 │   ├── install_deps.sh     # Dependency installer
+│   ├── install_service.sh  # Service installer
 │   ├── run.sh              # Run script
 │   └── deploy.sh           # Production deploy
 └── deploy/

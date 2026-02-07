@@ -3,14 +3,35 @@
  * @file nt_publisher.hpp
  * @brief NetworkTables 4 publisher for roboRIO integration
  *
- * Publishes all vision data to NetworkTables for fusion with robot odometry.
- * Follows WPILib conventions for timestamps and pose estimation.
+ * Publishes all vision data to NetworkTables for fusion with robot odometry
+ * and auto-alignment. Follows WPILib conventions for timestamps and pose estimation.
+ *
+ * ## NetworkTables Schema for Auto-Align
+ *
+ * /FRCVision/
+ *   fused/
+ *     pose           - [x, y, theta] robot pose in field frame (meters, radians)
+ *     std_devs       - [x, y, theta] standard deviations for pose estimator
+ *     timestamp      - FPGA timestamp (seconds)
+ *     valid          - boolean, true if pose is trustworthy
+ *     confidence     - 0.0-1.0 confidence score
+ *
+ *   auto_align/
+ *     target_tag_id  - (subscribe) robot sets target tag ID for alignment
+ *     target_visible - boolean, true if target tag is currently visible
+ *     target_pose    - [x, y, theta] where robot should be for alignment
+ *     robot_pose     - [x, y, theta] current robot pose from vision
+ *     error          - [x, y, theta] error between current and target
+ *     distance_m     - distance to target position (meters)
+ *     ready          - boolean, true if aligned (error within tolerance)
+ *     has_target     - boolean, true if target pose is set
  */
 
 #include "types.hpp"
 #include <memory>
 #include <atomic>
 #include <thread>
+#include <functional>
 
 // Forward declarations for NT types
 namespace nt {
@@ -22,12 +43,38 @@ namespace nt {
     class IntegerArrayPublisher;
     class BooleanPublisher;
     class StringPublisher;
+    class IntegerSubscriber;
+    class DoubleArraySubscriber;
 }
 
 namespace frc_vision {
 
 /**
- * @brief NetworkTables 4 publisher
+ * @brief Auto-alignment target data
+ */
+struct AlignTarget {
+    int target_tag_id = -1;          // Tag ID to align to (-1 = none)
+    Pose2D target_pose;              // Where robot should be for alignment
+    double approach_distance = 0.5;   // Distance from tag (meters)
+    double approach_angle = 0.0;      // Angle offset from perpendicular (radians)
+    bool has_target = false;
+};
+
+/**
+ * @brief Auto-alignment result
+ */
+struct AlignResult {
+    bool target_visible = false;     // Is target tag currently visible?
+    Pose2D robot_pose;               // Current robot pose from vision
+    Pose2D target_pose;              // Target pose for alignment
+    Pose2D error;                    // Error (target - current)
+    double distance_m = 0.0;         // Distance to target
+    bool ready = false;              // True if within alignment tolerance
+    bool has_target = false;         // True if target is set
+};
+
+/**
+ * @brief NetworkTables 4 publisher with auto-align support
  */
 class NTPublisher {
 public:
@@ -79,6 +126,21 @@ public:
     void publish_status(const SystemStatus& status);
 
     /**
+     * @brief Set alignment target callback (called when robot requests alignment)
+     */
+    void set_align_target_callback(std::function<void(int tag_id)> callback);
+
+    /**
+     * @brief Publish auto-alignment result
+     */
+    void publish_align_result(const AlignResult& result);
+
+    /**
+     * @brief Get current alignment target from robot
+     */
+    AlignTarget get_align_target() const;
+
+    /**
      * @brief Force flush all published values
      */
     void flush();
@@ -87,9 +149,11 @@ private:
     struct CameraPublishers;
     struct FusedPublishers;
     struct StatusPublishers;
+    struct AlignPublishers;
 
     void publish_loop();
     void setup_publishers();
+    void check_align_subscriptions();
     int64_t to_nt_timestamp(SystemTimePoint time) const;
 
     std::unique_ptr<nt::NetworkTableInstance> nt_instance_;
@@ -100,12 +164,19 @@ private:
     std::unique_ptr<FusedPublishers> fused_pubs_;
     std::unique_ptr<FusedPublishers> fused_raw_pubs_;
     std::unique_ptr<StatusPublishers> status_pubs_;
+    std::unique_ptr<AlignPublishers> align_pubs_;
 
     // Latest data for background publishing
     std::vector<FrameDetections> latest_detections_;
     FusedPose latest_fused_;
     SystemStatus latest_status_;
-    std::mutex data_mutex_;
+    AlignResult latest_align_result_;
+    mutable std::mutex data_mutex_;
+
+    // Alignment target from robot
+    mutable std::mutex align_mutex_;
+    AlignTarget align_target_;
+    std::function<void(int)> align_target_callback_;
 
     std::thread publish_thread_;
     std::atomic<bool> running_{false};

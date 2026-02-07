@@ -4,6 +4,7 @@
  */
 
 #include "nt_publisher.hpp"
+#include "pose.hpp"
 #include <networktables/NetworkTableInstance.h>
 #include <networktables/NetworkTable.h>
 #include <networktables/DoubleTopic.h>
@@ -14,6 +15,7 @@
 #include <networktables/StringTopic.h>
 #include <iostream>
 #include <chrono>
+#include <cmath>
 
 namespace frc_vision {
 
@@ -60,6 +62,24 @@ struct NTPublisher::StatusPublishers {
     std::vector<nt::DoublePublisher> cam_fps;
     std::vector<nt::IntegerPublisher> cam_dropped;
     std::vector<nt::BooleanPublisher> cam_connected;
+};
+
+// Auto-alignment publishers/subscribers
+struct NTPublisher::AlignPublishers {
+    // Subscribers (robot -> vision)
+    nt::IntegerSubscriber target_tag_id_sub;
+    nt::DoubleArraySubscriber target_offset_sub;  // [distance_m, angle_rad]
+
+    // Publishers (vision -> robot)
+    nt::BooleanPublisher target_visible;
+    nt::DoubleArrayPublisher target_pose;    // [x, y, theta] - target pose for alignment
+    nt::DoubleArrayPublisher robot_pose;     // [x, y, theta] - current vision pose
+    nt::DoubleArrayPublisher error;          // [x, y, theta] - alignment error
+    nt::DoublePublisher distance_m;          // Distance to target
+    nt::DoublePublisher angle_error_rad;     // Rotation error
+    nt::BooleanPublisher ready;              // Within tolerance
+    nt::BooleanPublisher has_target;         // Target is set
+    nt::IntegerPublisher current_target_id;  // Echo back current target
 };
 
 NTPublisher::NTPublisher() = default;
@@ -173,6 +193,27 @@ void NTPublisher::setup_publishers() {
         status_pubs_->cam_connected.push_back(
             status_table->GetBooleanTopic("cam" + std::to_string(i) + "_connected").Publish());
     }
+
+    // Auto-alignment publishers/subscribers
+    auto align_table = table->GetSubTable("auto_align");
+    align_pubs_ = std::make_unique<AlignPublishers>();
+
+    // Subscribers - robot sets these to request alignment
+    align_pubs_->target_tag_id_sub = align_table->GetIntegerTopic("target_tag_id").Subscribe(-1);
+    align_pubs_->target_offset_sub = align_table->GetDoubleArrayTopic("target_offset").Subscribe({0.5, 0.0});
+
+    // Publishers - vision publishes alignment data
+    align_pubs_->target_visible = align_table->GetBooleanTopic("target_visible").Publish();
+    align_pubs_->target_pose = align_table->GetDoubleArrayTopic("target_pose").Publish();
+    align_pubs_->robot_pose = align_table->GetDoubleArrayTopic("robot_pose").Publish();
+    align_pubs_->error = align_table->GetDoubleArrayTopic("error").Publish();
+    align_pubs_->distance_m = align_table->GetDoubleTopic("distance_m").Publish();
+    align_pubs_->angle_error_rad = align_table->GetDoubleTopic("angle_error_rad").Publish();
+    align_pubs_->ready = align_table->GetBooleanTopic("ready").Publish();
+    align_pubs_->has_target = align_table->GetBooleanTopic("has_target").Publish();
+    align_pubs_->current_target_id = align_table->GetIntegerTopic("current_target_id").Publish();
+
+    std::cout << "[NT] Auto-align publishers initialized" << std::endl;
 }
 
 void NTPublisher::start(int rate_hz) {
@@ -379,6 +420,42 @@ void NTPublisher::publish_loop() {
             status_pubs_->cam_connected[i].Set(status.cameras[i].connected);
         }
 
+        // Check for alignment target changes from robot
+        check_align_subscriptions();
+
+        // Publish auto-alignment data
+        AlignResult align_result;
+        {
+            std::lock_guard<std::mutex> lock(data_mutex_);
+            align_result = latest_align_result_;
+        }
+
+        if (align_pubs_) {
+            align_pubs_->target_visible.Set(align_result.target_visible);
+            align_pubs_->target_pose.Set({
+                align_result.target_pose.x,
+                align_result.target_pose.y,
+                align_result.target_pose.theta
+            });
+            align_pubs_->robot_pose.Set({
+                align_result.robot_pose.x,
+                align_result.robot_pose.y,
+                align_result.robot_pose.theta
+            });
+            align_pubs_->error.Set({
+                align_result.error.x,
+                align_result.error.y,
+                align_result.error.theta
+            });
+            align_pubs_->distance_m.Set(align_result.distance_m);
+            align_pubs_->angle_error_rad.Set(align_result.error.theta);
+            align_pubs_->ready.Set(align_result.ready);
+            align_pubs_->has_target.Set(align_result.has_target);
+
+            AlignTarget target = get_align_target();
+            align_pubs_->current_target_id.Set(target.target_tag_id);
+        }
+
         // Flush NT
         nt_instance_->Flush();
 
@@ -395,6 +472,58 @@ void NTPublisher::publish_loop() {
 void NTPublisher::flush() {
     if (nt_instance_) {
         nt_instance_->Flush();
+    }
+}
+
+void NTPublisher::set_align_target_callback(std::function<void(int tag_id)> callback) {
+    std::lock_guard<std::mutex> lock(align_mutex_);
+    align_target_callback_ = callback;
+}
+
+void NTPublisher::publish_align_result(const AlignResult& result) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    latest_align_result_ = result;
+}
+
+AlignTarget NTPublisher::get_align_target() const {
+    std::lock_guard<std::mutex> lock(align_mutex_);
+    return align_target_;
+}
+
+void NTPublisher::check_align_subscriptions() {
+    if (!align_pubs_) return;
+
+    // Read target tag ID from robot
+    int64_t new_target_id = align_pubs_->target_tag_id_sub.Get();
+
+    // Read target offset [distance_m, angle_rad]
+    auto offset = align_pubs_->target_offset_sub.Get();
+    double distance = 0.5;
+    double angle = 0.0;
+    if (offset.size() >= 2) {
+        distance = offset[0];
+        angle = offset[1];
+    }
+
+    // Check if target changed
+    {
+        std::lock_guard<std::mutex> lock(align_mutex_);
+        if (new_target_id != align_target_.target_tag_id) {
+            align_target_.target_tag_id = static_cast<int>(new_target_id);
+            align_target_.has_target = (new_target_id >= 0);
+            align_target_.approach_distance = distance;
+            align_target_.approach_angle = angle;
+
+            std::cout << "[NT] Alignment target changed to tag " << new_target_id << std::endl;
+
+            // Call callback if set
+            if (align_target_callback_) {
+                align_target_callback_(static_cast<int>(new_target_id));
+            }
+        }
+        // Update offset even if target didn't change
+        align_target_.approach_distance = distance;
+        align_target_.approach_angle = angle;
     }
 }
 
