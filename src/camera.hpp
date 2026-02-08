@@ -103,6 +103,7 @@ public:
 private:
     void capture_loop();
     bool open_camera();
+    bool try_open_device(int device_index);
     void configure_camera();
 
     int id_;

@@ -8,6 +8,9 @@
 #include <chrono>
 #include <set>
 #include <cstdlib>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 namespace frc_vision {
 
@@ -73,27 +76,11 @@ void Camera::stop() {
     connected_.store(false);
 }
 
-bool Camera::open_camera() {
-    // Parse device - could be /dev/videoX or just index
-    int device_index = -1;
-    std::string device_path = config_.device;
-
-    if (device_path.find("/dev/video") == 0) {
-        device_index = std::stoi(device_path.substr(10));
-    } else {
-        try {
-            device_index = std::stoi(device_path);
-        } catch (...) {
-            device_index = id_;
-        }
-    }
-
+bool Camera::try_open_device(int device_index) {
     // Check if this device is already in use by another camera
     {
         std::lock_guard<std::mutex> lock(opened_devices_mutex);
         if (opened_devices.find(device_index) != opened_devices.end()) {
-            std::cerr << "[Camera " << id_ << "] Device " << device_path
-                      << " is already in use by another camera" << std::endl;
             return false;
         }
     }
@@ -107,19 +94,76 @@ bool Camera::open_camera() {
     }
 
     if (cap_.isOpened()) {
+        // Verify it's a real capture device by trying to grab a frame
+        cv::Mat test;
+        if (!cap_.read(test) || test.empty()) {
+            cap_.release();
+            return false;
+        }
+
         // Register this device as in use
         {
             std::lock_guard<std::mutex> lock(opened_devices_mutex);
             opened_devices.insert(device_index);
         }
         opened_device_index_ = device_index;
+        return true;
+    }
 
-        std::cout << "[Camera " << id_ << "] Opened " << device_path
+    return false;
+}
+
+bool Camera::open_camera() {
+    // Parse configured device - could be /dev/videoX or just index
+    int device_index = -1;
+    std::string device_path = config_.device;
+
+    if (device_path.find("/dev/video") == 0) {
+        device_index = std::stoi(device_path.substr(10));
+    } else {
+        try {
+            device_index = std::stoi(device_path);
+        } catch (...) {
+            device_index = id_;
+        }
+    }
+
+    // First try the configured device
+    if (try_open_device(device_index)) {
+        std::cout << "[Camera " << id_ << "] Opened configured device " << device_path
                   << " (index " << device_index << ")" << std::endl;
         return true;
     }
 
-    std::cerr << "[Camera " << id_ << "] Failed to open " << device_path << std::endl;
+    // Plug-and-play fallback: scan for available capture devices
+    // USB cameras can get different /dev/video* numbers each boot
+    std::cout << "[Camera " << id_ << "] Configured device " << device_path
+              << " not available, scanning for cameras..." << std::endl;
+
+    // Scan even-numbered devices first (USB cameras typically use even indices,
+    // odd indices are metadata devices)
+    std::vector<int> scan_order;
+    for (int i = 0; i <= 20; i += 2) {
+        if (i != device_index) scan_order.push_back(i);
+    }
+    // Then try odd ones as fallback
+    for (int i = 1; i <= 20; i += 2) {
+        if (i != device_index) scan_order.push_back(i);
+    }
+
+    for (int idx : scan_order) {
+        // Only try devices that exist in /dev
+        std::string dev_path = "/dev/video" + std::to_string(idx);
+        if (!fs::exists(dev_path)) continue;
+
+        if (try_open_device(idx)) {
+            std::cout << "[Camera " << id_ << "] Found available camera at /dev/video"
+                      << idx << " (plug-and-play)" << std::endl;
+            return true;
+        }
+    }
+
+    std::cerr << "[Camera " << id_ << "] No available camera devices found" << std::endl;
     return false;
 }
 
@@ -282,21 +326,23 @@ void Camera::capture_loop() {
         if (!cap_.grab()) {
             consecutive_failures++;
 
-            // After 30 consecutive failures (~1 second), try to reconnect
-            if (consecutive_failures >= 30) {
-                std::cerr << "[Camera " << id_ << "] Too many grab failures, reconnecting..." << std::endl;
+            // After 15 consecutive failures (~500ms), try to reconnect quickly
+            // This enables fast plug-and-play: camera unplugged -> detected in <1s
+            if (consecutive_failures >= 15) {
+                std::cerr << "[Camera " << id_ << "] Camera disconnected, scanning for devices..." << std::endl;
                 connected_.store(false);
                 cap_.release();
 
-                // Release device from tracking so we can re-open it
+                // Release device from tracking so we (or another camera) can re-open it
                 if (opened_device_index_ >= 0) {
                     std::lock_guard<std::mutex> lock(opened_devices_mutex);
                     opened_devices.erase(opened_device_index_);
                     opened_device_index_ = -1;
                 }
 
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+                // open_camera() will try configured device first, then scan all available
                 if (open_camera()) {
                     configure_camera();
                     // Warm up again (more frames for autofocus settling)
@@ -307,6 +353,10 @@ void Camera::capture_loop() {
                     connected_.store(true);
                     consecutive_failures = 0;
                     std::cout << "[Camera " << id_ << "] Reconnected successfully" << std::endl;
+                } else {
+                    // Wait a bit before retrying to avoid busy-loop
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                    consecutive_failures = 0;  // Reset to try again
                 }
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(33));

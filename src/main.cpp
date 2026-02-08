@@ -372,16 +372,7 @@ int main(int argc, char* argv[]) {
         processing_frames[i].store(0);
 
         processing_threads.emplace_back([&, i]() {
-            // Wait for camera to be ready (non-blocking check)
-            while (!g_shutdown.load()) {
-                Camera* cam = camera_manager.get_camera(i);
-                if (cam && cam->is_connected()) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-
-            Camera* cam = camera_manager.get_camera(i);
-            if (!cam || g_shutdown.load()) return;
-
+            Camera* cam = nullptr;
             const CameraIntrinsics& intr = intrinsics[i];
             const Pose3D& cam_to_robot = config.cameras[i].camera_to_robot;
 
@@ -390,14 +381,28 @@ int main(int argc, char* argv[]) {
             int empty_count = 0;
             std::vector<int> jpeg_params = {cv::IMWRITE_JPEG_QUALITY, config.performance.jpeg_quality};
 
-            std::cout << "[Processing " << i << "] Starting processing thread for camera " << i << std::endl;
-
             while (!g_shutdown.load()) {
-                // Get latest frame
+                // Wait for camera to be ready (handles initial connect AND reconnects)
+                cam = camera_manager.get_camera(i);
+                if (!cam || !cam->is_connected()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    continue;
+                }
+
+                if (empty_count == 0) {
+                    std::cout << "[Processing " << i << "] Processing thread active for camera " << i << std::endl;
+                }
+
+                // Get latest frame (ring buffer drops old frames to prevent lag)
                 auto frame_opt = cam->frame_buffer().pop_latest();
                 if (!frame_opt) {
                     empty_count++;
-                    // Log occasionally to help debug
+                    // If camera disconnects while we're waiting, go back to connection check
+                    if (!cam->is_connected()) {
+                        std::cout << "[Processing " << i << "] Camera disconnected, waiting for reconnect..." << std::endl;
+                        empty_count = 0;
+                        continue;
+                    }
                     if (empty_count == 100 || empty_count == 1000 || empty_count % 10000 == 0) {
                         std::cout << "[Processing " << i << "] Waiting for frames... (empty reads: "
                                   << empty_count << ", cam connected: " << cam->is_connected()
@@ -416,13 +421,11 @@ int main(int argc, char* argv[]) {
                 // Encode JPEG for web streaming
                 std::vector<uint8_t> jpeg;
                 if (processed.annotated_image.empty()) {
-                    std::cerr << "[Processing " << i << "] Warning: annotated_image is empty!" << std::endl;
                     continue;
                 }
 
                 cv::imencode(".jpg", processed.annotated_image, jpeg, jpeg_params);
                 if (jpeg.empty()) {
-                    std::cerr << "[Processing " << i << "] Warning: JPEG encoding failed!" << std::endl;
                     continue;
                 }
                 processed.jpeg = std::move(jpeg);
