@@ -175,37 +175,76 @@ void Camera::configure_camera() {
 void Camera::capture_loop() {
     running_.store(true);
 
-    // Open camera
-    if (!open_camera()) {
+    // Open camera with retry
+    int open_retries = 0;
+    while (!should_stop_.load() && open_retries < 10) {
+        if (open_camera()) {
+            break;
+        }
+        open_retries++;
+        std::cout << "[Camera " << id_ << "] Retry " << open_retries << "/10..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    if (!cap_.isOpened()) {
+        std::cerr << "[Camera " << id_ << "] Failed to open after retries" << std::endl;
         running_.store(false);
         return;
     }
 
     configure_camera();
+
+    // Warm up camera - grab a few frames to let auto-exposure settle
+    std::cout << "[Camera " << id_ << "] Warming up camera..." << std::endl;
+    cv::Mat warmup_frame;
+    for (int i = 0; i < 10 && !should_stop_.load(); i++) {
+        cap_.read(warmup_frame);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
     connected_.store(true);
+    std::cout << "[Camera " << id_ << "] Camera ready" << std::endl;
 
     cv::Mat frame;
     last_fps_time_ = SteadyClock::now();
     fps_frame_count_ = 0;
     uint64_t local_frame_count = 0;
+    auto last_successful_frame = SteadyClock::now();
+    int consecutive_failures = 0;
 
     std::cout << "[Camera " << id_ << "] Capture loop starting..." << std::endl;
 
     while (!should_stop_.load()) {
         // Grab frame with minimal latency
         if (!cap_.grab()) {
-            std::cerr << "[Camera " << id_ << "] Grab failed, reconnecting..." << std::endl;
-            connected_.store(false);
+            consecutive_failures++;
 
-            cap_.release();
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            // After 30 consecutive failures (~1 second), try to reconnect
+            if (consecutive_failures >= 30) {
+                std::cerr << "[Camera " << id_ << "] Too many grab failures, reconnecting..." << std::endl;
+                connected_.store(false);
+                cap_.release();
 
-            if (open_camera()) {
-                configure_camera();
-                connected_.store(true);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+                if (open_camera()) {
+                    configure_camera();
+                    // Warm up again
+                    for (int i = 0; i < 5 && !should_stop_.load(); i++) {
+                        cap_.read(warmup_frame);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    }
+                    connected_.store(true);
+                    consecutive_failures = 0;
+                    std::cout << "[Camera " << id_ << "] Reconnected successfully" << std::endl;
+                }
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(33));
             }
             continue;
         }
+
+        consecutive_failures = 0;
 
         // Timestamp immediately after grab
         auto capture_time = SteadyClock::now();
@@ -225,6 +264,8 @@ void Camera::capture_loop() {
             }
             continue;
         }
+
+        last_successful_frame = capture_time;
 
         // Create frame object
         Frame f;

@@ -97,8 +97,29 @@ bool WebServer::initialize(int port, const std::string& web_root,
             res.set_content_provider(
                 "multipart/x-mixed-replace; boundary=--frame",
                 [this, i](size_t /*offset*/, httplib::DataSink& sink) {
-                    uint64_t last_version = 0;
                     int frames_sent = 0;
+                    int wait_count = 0;
+                    const int MAX_WAIT = 300;  // 10 seconds at 33ms intervals
+
+                    // Wait for first frame with timeout
+                    while (!should_stop_.load() && wait_count < MAX_WAIT) {
+                        auto frame_opt = impl_->latest_frames[i]->get();
+                        if (frame_opt && !frame_opt->empty()) {
+                            break;
+                        }
+                        wait_count++;
+                        if (wait_count % 30 == 0) {
+                            std::cout << "[WebServer] MJPEG cam" << i << " waiting for frames..." << std::endl;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+                    }
+
+                    if (wait_count >= MAX_WAIT) {
+                        std::cerr << "[WebServer] MJPEG cam" << i << " timeout waiting for frames" << std::endl;
+                        return false;
+                    }
+
+                    std::cout << "[WebServer] MJPEG cam" << i << " starting stream" << std::endl;
 
                     while (!should_stop_.load()) {
                         // Try to get latest frame
@@ -126,7 +147,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
 
                             frames_sent++;
                             if (frames_sent == 1) {
-                                std::cout << "[WebServer] MJPEG cam" << i << " streaming started" << std::endl;
+                                std::cout << "[WebServer] MJPEG cam" << i << " first frame sent" << std::endl;
                             }
                         }
 
