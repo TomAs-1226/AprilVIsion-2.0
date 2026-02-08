@@ -13,11 +13,16 @@ class VisionDashboard {
         this.showOverlay = true;
         this.fieldCanvas = null;
         this.fieldCtx = null;
+        this.streamRetryTimers = {};
+        this.NUM_CAMERAS = 3;
 
         this.init();
     }
 
     init() {
+        // Start camera streams immediately with auto-reconnect
+        this.setupCameraStreams();
+
         // Setup event source for SSE
         this.connectEventSource();
 
@@ -34,6 +39,51 @@ class VisionDashboard {
         this.loadConfig();
 
         console.log('Vision Dashboard initialized');
+    }
+
+    setupCameraStreams() {
+        for (let i = 0; i < this.NUM_CAMERAS; i++) {
+            this.startCameraStream(i);
+        }
+    }
+
+    startCameraStream(camId) {
+        const img = document.getElementById(`cam${camId}-img`);
+        if (!img) return;
+
+        // Clear any pending retry timer
+        if (this.streamRetryTimers[camId]) {
+            clearTimeout(this.streamRetryTimers[camId]);
+            this.streamRetryTimers[camId] = null;
+        }
+
+        // Force-set the MJPEG stream src with a cache-buster to ensure fresh connection
+        const streamUrl = `/cam${camId}.mjpeg?t=${Date.now()}`;
+        img.src = streamUrl;
+
+        // On successful load, mark the panel as active
+        img.onload = () => {
+            const panel = img.closest('.camera-panel');
+            if (panel) {
+                panel.classList.remove('stream-error');
+                panel.classList.add('stream-active');
+            }
+        };
+
+        // On error, retry after a delay
+        img.onerror = () => {
+            console.warn(`Camera ${camId} stream failed, retrying...`);
+            const panel = img.closest('.camera-panel');
+            if (panel) {
+                panel.classList.add('stream-error');
+                panel.classList.remove('stream-active');
+            }
+
+            // Retry after 2 seconds
+            this.streamRetryTimers[camId] = setTimeout(() => {
+                this.startCameraStream(camId);
+            }, 2000);
+        };
     }
 
     connectEventSource() {

@@ -38,11 +38,11 @@ bool Camera::start() {
     should_stop_.store(false);
     capture_thread_ = std::thread(&Camera::capture_loop, this);
 
-    // Wait briefly for camera to connect
+    // Wait for camera to connect (longer timeout for USB cameras with autofocus settling)
     auto start = SteadyClock::now();
     while (!connected_.load() && !should_stop_.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        if (SteadyClock::now() - start > std::chrono::seconds(5)) {
+        if (SteadyClock::now() - start > std::chrono::seconds(15)) {
             std::cerr << "[Camera " << id_ << "] Timeout waiting for connection" << std::endl;
             break;
         }
@@ -178,6 +178,36 @@ void Camera::configure_camera() {
         std::cout << "[Camera " << id_ << "] Set auto exposure mode" << std::endl;
     }
 
+    // Enable autofocus - critical to avoid white/blurry images
+    {
+        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=focus_auto=1 2>/dev/null";
+        int ret = std::system(cmd.c_str());
+        if (ret != 0) {
+            // Try alternate control name used by some cameras
+            cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=focus_automatic_continuous=1 2>/dev/null";
+            ret = std::system(cmd.c_str());
+        }
+        if (ret == 0) {
+            std::cout << "[Camera " << id_ << "] Autofocus enabled" << std::endl;
+        } else {
+            // Try OpenCV property as last resort
+            cap_.set(cv::CAP_PROP_AUTOFOCUS, 1);
+            std::cout << "[Camera " << id_ << "] Autofocus set via OpenCV fallback" << std::endl;
+        }
+    }
+
+    // Disable backlight compensation to prevent white-out
+    {
+        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=backlight_compensation=0 2>/dev/null";
+        std::system(cmd.c_str());
+    }
+
+    // Set brightness and contrast to balanced defaults
+    {
+        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=brightness=128 --set-ctrl=contrast=128 --set-ctrl=saturation=128 2>/dev/null";
+        std::system(cmd.c_str());
+    }
+
     // Set gain (if specified)
     if (config_.gain >= 0) {
         cap_.set(cv::CAP_PROP_GAIN, config_.gain);
@@ -227,10 +257,10 @@ void Camera::capture_loop() {
 
     configure_camera();
 
-    // Warm up camera - grab a few frames to let auto-exposure settle
-    std::cout << "[Camera " << id_ << "] Warming up camera..." << std::endl;
+    // Warm up camera - grab frames to let auto-exposure and autofocus settle
+    std::cout << "[Camera " << id_ << "] Warming up camera (auto-exposure + autofocus settling)..." << std::endl;
     cv::Mat warmup_frame;
-    for (int i = 0; i < 10 && !should_stop_.load(); i++) {
+    for (int i = 0; i < 30 && !should_stop_.load(); i++) {
         cap_.read(warmup_frame);
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
@@ -269,8 +299,8 @@ void Camera::capture_loop() {
 
                 if (open_camera()) {
                     configure_camera();
-                    // Warm up again
-                    for (int i = 0; i < 5 && !should_stop_.load(); i++) {
+                    // Warm up again (more frames for autofocus settling)
+                    for (int i = 0; i < 15 && !should_stop_.load(); i++) {
                         cap_.read(warmup_frame);
                         std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     }

@@ -294,40 +294,69 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Initialize cameras with retry
-        int retry_count = 0;
-        int max_retries = 30;  // 30 retries = ~30 seconds
+        // Initialize all cameras in a single call - each camera's capture_loop
+        // has its own internal retry logic, so we don't need to re-initialize.
+        // The old code called initialize() in a loop, but initialize() calls
+        // stop_all() which kills cameras that were still connecting.
+        int started = camera_manager.initialize(config.cameras);
 
-        while (!g_shutdown.load() && retry_count < max_retries) {
-            int started = camera_manager.initialize(config.cameras);
+        // Set intrinsics on all camera objects (even ones still connecting)
+        for (int i = 0; i < num_cameras; i++) {
+            if (auto* cam = camera_manager.get_camera(i)) {
+                cam->set_intrinsics(intrinsics[i]);
+            }
+        }
 
-            if (started > 0) {
-                g_cameras_connected.store(started);
-                g_cameras_ready.store(true);
+        if (started > 0) {
+            g_cameras_connected.store(started);
+            g_cameras_ready.store(true);
+        }
 
-                // Set intrinsics
+        std::cout << "[Main] " << started << "/" << num_cameras
+                  << " cameras started initially (" << std::fixed << std::setprecision(2)
+                  << get_uptime() << "s)" << std::endl;
+
+        // Wait for remaining cameras to connect via their internal capture_loop retries.
+        // Each camera's capture thread keeps running and will reconnect on its own.
+        if (started < num_cameras) {
+            std::cout << "[Main] Waiting for remaining cameras to connect..." << std::endl;
+            int wait_count = 0;
+            int max_wait = 30;  // 30 seconds
+
+            while (!g_shutdown.load() && wait_count < max_wait) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                wait_count++;
+
+                int connected = 0;
                 for (int i = 0; i < num_cameras; i++) {
                     if (auto* cam = camera_manager.get_camera(i)) {
-                        cam->set_intrinsics(intrinsics[i]);
+                        if (cam->is_connected()) connected++;
                     }
                 }
 
-                std::cout << "[Main] " << started << "/" << num_cameras
-                          << " cameras started (" << std::fixed << std::setprecision(2)
-                          << get_uptime() << "s)" << std::endl;
+                if (connected > started) {
+                    g_cameras_connected.store(connected);
+                    if (!g_cameras_ready.load() && connected > 0) {
+                        g_cameras_ready.store(true);
+                    }
+                    std::cout << "[Main] " << connected << "/" << num_cameras
+                              << " cameras now connected (" << std::fixed << std::setprecision(2)
+                              << get_uptime() << "s)" << std::endl;
+                    started = connected;
+                }
 
-                check_ready_state();
-                return;
+                if (connected >= num_cameras) {
+                    std::cout << "[Main] All " << num_cameras << " cameras connected!" << std::endl;
+                    break;
+                }
             }
-
-            retry_count++;
-            std::cout << "[Main] Camera init retry " << retry_count
-                      << "/" << max_retries << "..." << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
-        std::cerr << "[Main] Warning: No cameras available after " << max_retries
-                  << " retries" << std::endl;
+        if (g_cameras_connected.load() == 0) {
+            std::cerr << "[Main] Warning: No cameras available after waiting" << std::endl;
+        }
+
+        check_ready_state();
     });
 
     // =========================================================================
