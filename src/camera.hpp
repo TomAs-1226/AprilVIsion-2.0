@@ -125,6 +125,9 @@ private:
     // FPS calculation
     SteadyTimePoint last_fps_time_;
     int fps_frame_count_{0};
+
+    // Track which device index we opened (for multi-camera coordination)
+    int opened_device_index_{-1};
 };
 
 /**

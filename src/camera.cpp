@@ -6,8 +6,14 @@
 #include "camera.hpp"
 #include <iostream>
 #include <chrono>
+#include <set>
+#include <cstdlib>
 
 namespace frc_vision {
+
+// Track which devices are already in use to prevent fallback conflicts
+static std::mutex opened_devices_mutex;
+static std::set<int> opened_devices;
 
 // =============================================================================
 // Camera
@@ -56,17 +62,18 @@ void Camera::stop() {
         cap_.release();
     }
 
+    // Release device from global tracking
+    if (opened_device_index_ >= 0) {
+        std::lock_guard<std::mutex> lock(opened_devices_mutex);
+        opened_devices.erase(opened_device_index_);
+        opened_device_index_ = -1;
+    }
+
     running_.store(false);
     connected_.store(false);
 }
 
 bool Camera::open_camera() {
-    // Try different backends in order of preference
-    std::vector<int> backends = {
-        cv::CAP_V4L2,
-        cv::CAP_ANY
-    };
-
     // Parse device - could be /dev/videoX or just index
     int device_index = -1;
     std::string device_path = config_.device;
@@ -81,37 +88,38 @@ bool Camera::open_camera() {
         }
     }
 
-    // Try configured device first
-    for (int backend : backends) {
-        cap_.open(device_index, backend);
-
-        if (cap_.isOpened()) {
-            std::cout << "[Camera " << id_ << "] Opened " << device_path
-                      << " (index " << device_index << ") with backend " << backend << std::endl;
-            return true;
+    // Check if this device is already in use by another camera
+    {
+        std::lock_guard<std::mutex> lock(opened_devices_mutex);
+        if (opened_devices.find(device_index) != opened_devices.end()) {
+            std::cerr << "[Camera " << id_ << "] Device " << device_path
+                      << " is already in use by another camera" << std::endl;
+            return false;
         }
     }
 
-    // If configured device failed, try fallback to any available camera
-    std::cout << "[Camera " << id_ << "] Configured device " << device_path
-              << " failed, trying fallback..." << std::endl;
+    // Try V4L2 backend (preferred for Linux cameras)
+    cap_.open(device_index, cv::CAP_V4L2);
 
-    // Try indices 0-7 to find an available camera
-    for (int fallback_idx = 0; fallback_idx < 8; fallback_idx++) {
-        if (fallback_idx == device_index) continue;  // Already tried
-
-        for (int backend : backends) {
-            cap_.open(fallback_idx, backend);
-
-            if (cap_.isOpened()) {
-                std::cout << "[Camera " << id_ << "] Fallback: Opened /dev/video"
-                          << fallback_idx << " with backend " << backend << std::endl;
-                return true;
-            }
-        }
+    if (!cap_.isOpened()) {
+        // Fallback to any backend
+        cap_.open(device_index, cv::CAP_ANY);
     }
 
-    std::cerr << "[Camera " << id_ << "] Failed to open any camera device" << std::endl;
+    if (cap_.isOpened()) {
+        // Register this device as in use
+        {
+            std::lock_guard<std::mutex> lock(opened_devices_mutex);
+            opened_devices.insert(device_index);
+        }
+        opened_device_index_ = device_index;
+
+        std::cout << "[Camera " << id_ << "] Opened " << device_path
+                  << " (index " << device_index << ")" << std::endl;
+        return true;
+    }
+
+    std::cerr << "[Camera " << id_ << "] Failed to open " << device_path << std::endl;
     return false;
 }
 
@@ -132,26 +140,51 @@ void Camera::configure_camera() {
     // Set FPS
     cap_.set(cv::CAP_PROP_FPS, config_.fps);
 
-    // Set exposure
+    // Configure exposure using v4l2-ctl for more reliable control
+    std::string device_path = "/dev/video" + std::to_string(opened_device_index_);
+
     if (config_.exposure > 0) {
         // Manual exposure mode
-        cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);  // Manual mode
-        cap_.set(cv::CAP_PROP_EXPOSURE, config_.exposure);
+        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=auto_exposure=1 --set-ctrl=exposure_time_absolute=" +
+                          std::to_string(config_.exposure) + " 2>/dev/null";
+        int ret = std::system(cmd.c_str());
+        if (ret != 0) {
+            // Fallback to OpenCV method
+            cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);
+            cap_.set(cv::CAP_PROP_EXPOSURE, config_.exposure);
+        }
         std::cout << "[Camera " << id_ << "] Set manual exposure: " << config_.exposure << std::endl;
     } else {
-        // Auto exposure - try multiple methods for compatibility
-        // Different cameras use different values for auto mode (0, 1, or 3)
-        cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 3);  // Try aperture priority first
+        // Auto exposure mode - use v4l2-ctl for reliable control
+        // auto_exposure: 0=manual, 1=auto, 3=aperture-priority
+        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=auto_exposure=3 2>/dev/null";
+        int ret = std::system(cmd.c_str());
 
-        // For some webcams, also need to explicitly enable auto
-        cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 0.75);  // Alternate auto mode
+        if (ret != 0) {
+            // Try alternate control name for some cameras
+            cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=exposure_auto=3 2>/dev/null";
+            ret = std::system(cmd.c_str());
+        }
 
-        std::cout << "[Camera " << id_ << "] Set auto exposure" << std::endl;
+        if (ret != 0) {
+            // Fallback to OpenCV (less reliable)
+            cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 3);
+        }
+
+        // Also enable auto white balance for better image quality
+        cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=white_balance_automatic=1 2>/dev/null";
+        std::system(cmd.c_str());
+
+        std::cout << "[Camera " << id_ << "] Set auto exposure mode" << std::endl;
     }
 
     // Set gain (if specified)
     if (config_.gain >= 0) {
         cap_.set(cv::CAP_PROP_GAIN, config_.gain);
+    } else {
+        // Enable auto gain if available
+        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=gain_automatic=1 2>/dev/null";
+        std::system(cmd.c_str());
     }
 
     // Minimize buffer size for low latency
@@ -224,6 +257,13 @@ void Camera::capture_loop() {
                 std::cerr << "[Camera " << id_ << "] Too many grab failures, reconnecting..." << std::endl;
                 connected_.store(false);
                 cap_.release();
+
+                // Release device from tracking so we can re-open it
+                if (opened_device_index_ >= 0) {
+                    std::lock_guard<std::mutex> lock(opened_devices_mutex);
+                    opened_devices.erase(opened_device_index_);
+                    opened_device_index_ = -1;
+                }
 
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
@@ -302,6 +342,14 @@ void Camera::capture_loop() {
     }
 
     cap_.release();
+
+    // Release device from tracking
+    if (opened_device_index_ >= 0) {
+        std::lock_guard<std::mutex> lock(opened_devices_mutex);
+        opened_devices.erase(opened_device_index_);
+        opened_device_index_ = -1;
+    }
+
     running_.store(false);
     connected_.store(false);
 }
