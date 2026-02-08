@@ -14,13 +14,15 @@ class VisionDashboard {
         this.fieldCanvas = null;
         this.fieldCtx = null;
         this.streamRetryTimers = {};
+        this.healthCheckInterval = null;
         this.NUM_CAMERAS = 3;
+        this.serverAlive = false;
 
         this.init();
     }
 
     init() {
-        // Start camera streams immediately with auto-reconnect
+        // Start camera streams immediately
         this.setupCameraStreams();
 
         // Setup event source for SSE
@@ -38,8 +40,15 @@ class VisionDashboard {
         // Load current config
         this.loadConfig();
 
+        // Start health check - detects server restarts and reconnects streams
+        this.startHealthCheck();
+
         console.log('Vision Dashboard initialized');
     }
+
+    // =========================================================================
+    // Camera Stream Management
+    // =========================================================================
 
     setupCameraStreams() {
         for (let i = 0; i < this.NUM_CAMERAS; i++) {
@@ -57,11 +66,15 @@ class VisionDashboard {
             this.streamRetryTimers[camId] = null;
         }
 
-        // Force-set the MJPEG stream src with a cache-buster to ensure fresh connection
+        // Force-reload by clearing src first, then setting new URL with cache-buster
+        img.src = '';
         const streamUrl = `/cam${camId}.mjpeg?t=${Date.now()}`;
-        img.src = streamUrl;
 
-        // On successful load, mark the panel as active
+        // For MJPEG streams, onload fires once when the first frame arrives.
+        // onerror fires if the connection is refused or fails initially.
+        // But if the server dies MID-STREAM, neither fires - the image just freezes.
+        // That's why we use the health check below to detect server restarts.
+
         img.onload = () => {
             const panel = img.closest('.camera-panel');
             if (panel) {
@@ -70,9 +83,8 @@ class VisionDashboard {
             }
         };
 
-        // On error, retry after a delay
         img.onerror = () => {
-            console.warn(`Camera ${camId} stream failed, retrying...`);
+            console.warn(`Camera ${camId} stream error, retrying in 2s...`);
             const panel = img.closest('.camera-panel');
             if (panel) {
                 panel.classList.add('stream-error');
@@ -84,9 +96,71 @@ class VisionDashboard {
                 this.startCameraStream(camId);
             }, 2000);
         };
+
+        img.src = streamUrl;
     }
 
+    restartAllStreams() {
+        console.log('Restarting all camera streams...');
+        for (let i = 0; i < this.NUM_CAMERAS; i++) {
+            this.startCameraStream(i);
+        }
+    }
+
+    // =========================================================================
+    // Health Check - Detects server restarts
+    // =========================================================================
+
+    startHealthCheck() {
+        // Poll /health every 3 seconds. If server was down and comes back,
+        // restart all MJPEG streams (they freeze when server dies mid-stream).
+        this.healthCheckInterval = setInterval(async () => {
+            try {
+                const response = await fetch('/health', {
+                    signal: AbortSignal.timeout(2000)
+                });
+                if (response.ok) {
+                    if (!this.serverAlive) {
+                        // Server just came back - restart everything
+                        console.log('Server reconnected, restarting streams...');
+                        this.serverAlive = true;
+                        this.restartAllStreams();
+                        this.loadConfig();
+                    }
+                } else {
+                    this.serverAlive = false;
+                }
+            } catch {
+                if (this.serverAlive) {
+                    console.warn('Server connection lost');
+                    this.serverAlive = false;
+                    // Mark all streams as errored
+                    for (let i = 0; i < this.NUM_CAMERAS; i++) {
+                        const panel = document.querySelector(`#cam${i}-img`)?.closest('.camera-panel');
+                        if (panel) {
+                            panel.classList.add('stream-error');
+                            panel.classList.remove('stream-active');
+                        }
+                    }
+                }
+            }
+        }, 3000);
+
+        // Initial state: try to connect immediately
+        this.serverAlive = true;
+    }
+
+    // =========================================================================
+    // SSE Event Source
+    // =========================================================================
+
     connectEventSource() {
+        // Close existing connection first
+        if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+        }
+
         this.eventSource = new EventSource('/events');
 
         this.eventSource.addEventListener('detections', (e) => {
@@ -105,24 +179,42 @@ class VisionDashboard {
         });
 
         this.eventSource.onerror = () => {
-            console.log('SSE connection error, reconnecting...');
+            console.log('SSE disconnected, reconnecting in 2s...');
+            if (this.eventSource) {
+                this.eventSource.close();
+                this.eventSource = null;
+            }
             setTimeout(() => this.connectEventSource(), 2000);
+        };
+
+        this.eventSource.onopen = () => {
+            console.log('SSE connected');
+            // SSE reconnected means server is (re)started - restart streams
+            if (this.serverAlive) {
+                this.restartAllStreams();
+            }
+            this.serverAlive = true;
         };
     }
 
+    // =========================================================================
+    // Canvas Overlays
+    // =========================================================================
+
     setupCanvasOverlays() {
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < this.NUM_CAMERAS; i++) {
             const img = document.getElementById(`cam${i}-img`);
             const canvas = document.getElementById(`cam${i}-overlay`);
 
             if (img && canvas) {
-                // Resize canvas to match image
                 const resizeCanvas = () => {
                     canvas.width = img.offsetWidth;
                     canvas.height = img.offsetHeight;
                 };
 
-                img.onload = resizeCanvas;
+                // Use ResizeObserver instead of onload (which conflicts with stream handler)
+                const observer = new ResizeObserver(resizeCanvas);
+                observer.observe(img);
                 window.addEventListener('resize', resizeCanvas);
                 resizeCanvas();
             }
@@ -171,6 +263,10 @@ class VisionDashboard {
             reloadBtn.addEventListener('click', () => this.reloadConfig());
         }
     }
+
+    // =========================================================================
+    // Data Handlers
+    // =========================================================================
 
     handleDetections(data) {
         const camId = data.camera_id;
@@ -259,6 +355,10 @@ class VisionDashboard {
         }
     }
 
+    // =========================================================================
+    // Drawing
+    // =========================================================================
+
     drawCameraOverlay(camId, data) {
         const canvas = document.getElementById(`cam${camId}-overlay`);
         const img = document.getElementById(`cam${camId}-img`);
@@ -311,7 +411,7 @@ class VisionDashboard {
     }
 
     clearAllOverlays() {
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < this.NUM_CAMERAS; i++) {
             const canvas = document.getElementById(`cam${i}-overlay`);
             if (canvas) {
                 const ctx = canvas.getContext('2d');
@@ -393,6 +493,10 @@ class VisionDashboard {
             );
         }
     }
+
+    // =========================================================================
+    // Configuration
+    // =========================================================================
 
     async loadConfig() {
         try {
