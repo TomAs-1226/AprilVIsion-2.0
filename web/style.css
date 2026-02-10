@@ -513,3 +513,213 @@ footer {
     font-size: 14px;
     font-weight: bold;
 }
+
+/* ========================================
+   Phase 3: Auto-Align & Testing Panel
+   ======================================== */
+.autoalign-panel {
+    grid-column: 1 / -1;
+}
+
+.testing-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.test-button {
+    padding: 12px 16px;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent-blue);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.test-button:hover {
+    background: #0056b3;
+    transform: translateY(-1px);
+}
+
+.test-button.danger {
+    background: var(--error);
+}
+
+.test-button.danger:hover {
+    background: #c82333;
+}
+
+.test-status {
+    background: var(--bg-panel);
+    padding: 15px;
+    border-radius: 6px;
+    border-left: 4px solid var(--accent-blue);
+    margin-top: 10px;
+}
+
+.test-status strong {
+    color: var(--accent-blue);
+}
+
+#test-instructions {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    display: block;
+    margin-top: 5px;
+}
+
+.autoalign-status {
+    background: var(--bg-panel);
+    padding: 15px;
+    border-radius: 6px;
+    margin-top: 15px;
+}
+
+.status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.status-row:last-child {
+    border-bottom: none;
+}
+
+.status-row label {
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.badge.approach {
+    background: var(--warning);
+    color: var(--bg-primary);
+}
+
+.badge.fine_align {
+    background: var(--accent-blue);
+    color: white;
+}
+
+.badge.ready {
+    background: var(--success);
+    color: var(--bg-primary);
+}
+
+.shooting-positions {
+    margin-top: 20px;
+}
+
+.shooting-positions h4 {
+    color: var(--accent-blue);
+    margin-bottom: 10px;
+}
+
+#positions-list {
+    display: grid;
+    gap: 10px;
+}
+
+.position-card {
+    background: var(--bg-panel);
+    padding: 12px;
+    border-radius: 6px;
+    border-left: 4px solid var(--accent-blue);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.position-card:hover {
+    transform: translateX(4px);
+    border-left-color: var(--success);
+}
+
+.position-card.optimal {
+    border-left-color: var(--success);
+}
+
+.position-card.acceptable {
+    border-left-color: var(--warning);
+}
+
+.position-card h5 {
+    margin: 0 0 8px 0;
+    color: white;
+}
+
+.position-card .position-details {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.position-card .position-details span {
+    display: block;
+}
+
+.position-card .position-details strong {
+    color: white;
+}
+
+/* NetworkTables Status Enhancement */
+#status-nt {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#status-nt.connected {
+    background: rgba(40, 167, 69, 0.2);
+    color: var(--success);
+}
+
+#status-nt.disconnected {
+    background: rgba(220, 53, 69, 0.2);
+    color: var(--error);
+}
+
+#nt-server-ip {
+    font-weight: normal;
+    opacity: 0.8;
+}
+
+/* Status indicator dot */
+.status-indicator::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 5px;
+    animation: pulse 2s infinite;
+}
+
+.status-indicator.connected::before {
+    background: var(--success);
+}
+
+.status-indicator.disconnected::before {
+    background: var(--error);
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}

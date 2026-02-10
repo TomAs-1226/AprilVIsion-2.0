@@ -64,6 +64,11 @@ struct NTPublisher::StatusPublishers {
     std::vector<nt::DoublePublisher> cam_fps;
     std::vector<nt::IntegerPublisher> cam_dropped;
     std::vector<nt::BooleanPublisher> cam_connected;
+
+    // NEW: NetworkTables connection status
+    nt::BooleanPublisher nt_connected;
+    nt::IntegerPublisher nt_connection_count;
+    nt::StringPublisher nt_server_ip;
 };
 
 // Auto-alignment publishers/subscribers
@@ -200,6 +205,11 @@ void NTPublisher::setup_publishers() {
             status_table->GetBooleanTopic("cam" + std::to_string(i) + "_connected").Publish());
     }
 
+    // NEW: NetworkTables connection status publishers
+    status_pubs_->nt_connected = status_table->GetBooleanTopic("nt_connected").Publish();
+    status_pubs_->nt_connection_count = status_table->GetIntegerTopic("nt_connection_count").Publish();
+    status_pubs_->nt_server_ip = status_table->GetStringTopic("nt_server_ip").Publish();
+
     // Auto-alignment publishers/subscribers
     auto align_table = table->GetSubTable("auto_align");
     align_pubs_ = std::make_unique<AlignPublishers>();
@@ -260,7 +270,38 @@ bool NTPublisher::is_connected() const {
     if (!nt_instance_) {
         return false;
     }
-    return nt_instance_->IsConnected();
+
+    // Check both IsConnected() and GetConnections()
+    // IsConnected() returns true if NT client is running and has connections
+    bool nt_connected = nt_instance_->IsConnected();
+    auto connections = nt_instance_->GetConnections();
+
+    // Log connection status for debugging
+    static bool last_status = false;
+    static auto last_log_time = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+
+    // Log every 5 seconds or on status change
+    bool should_log = (nt_connected != last_status) ||
+                     (std::chrono::duration_cast<std::chrono::seconds>(now - last_log_time).count() >= 5);
+
+    if (should_log) {
+        std::cout << "[NT] Connection status: " << (nt_connected ? "CONNECTED" : "DISCONNECTED")
+                  << ", active connections: " << connections.size() << std::endl;
+
+        if (!connections.empty()) {
+            for (const auto& conn : connections) {
+                std::cout << "[NT]   - Connected to: " << conn.remote_ip
+                         << ":" << conn.remote_port
+                         << " (protocol " << conn.protocol_version << ")" << std::endl;
+            }
+        }
+
+        last_status = nt_connected;
+        last_log_time = now;
+    }
+
+    return nt_connected && !connections.empty();
 }
 
 void NTPublisher::publish_camera(int camera_id, const FrameDetections& detections) {
@@ -452,6 +493,19 @@ void NTPublisher::publish_loop() {
             status_pubs_->cam_fps[i].Set(status.cameras[i].fps);
             status_pubs_->cam_dropped[i].Set(static_cast<int64_t>(status.cameras[i].frames_dropped));
             status_pubs_->cam_connected[i].Set(status.cameras[i].connected);
+        }
+
+        // NEW: Publish NetworkTables connection status
+        bool nt_connected = is_connected();
+        auto connections = nt_instance_->GetConnections();
+        status_pubs_->nt_connected.Set(nt_connected);
+        status_pubs_->nt_connection_count.Set(static_cast<int64_t>(connections.size()));
+
+        if (!connections.empty()) {
+            // Publish first connection's IP
+            status_pubs_->nt_server_ip.Set(connections[0].remote_ip);
+        } else {
+            status_pubs_->nt_server_ip.Set("disconnected");
         }
 
         // Check for alignment target changes from robot

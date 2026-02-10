@@ -365,16 +365,30 @@ class VisionDashboard {
         document.getElementById('status-clients').textContent =
             `Clients: ${data.sse_clients}`;
 
-        // NT status (inferred from fused pose validity)
+        // NT status (from actual connection status - Phase 3 fix)
         const ntStatus = document.getElementById('status-nt');
-        if (data.fused_valid) {
-            ntStatus.textContent = 'NT: Connected';
+        const ntStatusText = document.getElementById('nt-status-text');
+        const ntServerIp = document.getElementById('nt-server-ip');
+
+        // Use nt_connected from status API
+        const isNTConnected = data.nt_connected || false;
+        const ntConnCount = data.nt_connection_count || 0;
+        const serverIp = data.nt_server_ip || '';
+
+        if (isNTConnected && ntConnCount > 0) {
+            ntStatusText.textContent = 'Connected';
             ntStatus.classList.remove('disconnected');
             ntStatus.classList.add('connected');
+            if (serverIp && serverIp !== 'disconnected') {
+                ntServerIp.textContent = `(${serverIp})`;
+            } else {
+                ntServerIp.textContent = '';
+            }
         } else {
-            ntStatus.textContent = 'NT: Disconnected';
+            ntStatusText.textContent = 'Disconnected';
             ntStatus.classList.remove('connected');
             ntStatus.classList.add('disconnected');
+            ntServerIp.textContent = '';
         }
     }
 
@@ -731,3 +745,243 @@ class VisionDashboard {
 document.addEventListener('DOMContentLoaded', () => {
     window.dashboard = new VisionDashboard();
 });
+
+// =========================================================================
+// Phase 3: Testing Modes & Auto-Align
+// =========================================================================
+
+// Testing mode controls
+document.getElementById('start-calibration-mode')?.addEventListener('click', async () => {
+    try {
+        const response = await fetch('/api/mode/calibration', { method: 'POST' });
+        if (response.ok) {
+            showTestMode('Calibration Mode', 'Point camera at ChArUco board from various angles. Press SPACE to capture frames. Press C to compute calibration. Press Q to quit.');
+        } else {
+            alert('Failed to start calibration mode');
+        }
+    } catch (err) {
+        console.error('Error starting calibration:', err);
+        alert('Error starting calibration mode');
+    }
+});
+
+document.getElementById('start-validation-mode')?.addEventListener('click', async () => {
+    try {
+        const response = await fetch('/api/mode/validation', { method: 'POST' });
+        if (response.ok) {
+            showTestMode('Validation Mode', 'Place AprilTag EXACTLY 1.5m from camera, facing straight on. System will measure accuracy. Target: <2cm distance error, <2° angle error.');
+        } else {
+            alert('Failed to start validation mode');
+        }
+    } catch (err) {
+        console.error('Error starting validation:', err);
+        alert('Error starting validation mode');
+    }
+});
+
+document.getElementById('start-diagnostics')?.addEventListener('click', async () => {
+    try {
+        const response = await fetch('/api/mode/diagnostics', { method: 'POST' });
+        if (response.ok) {
+            showTestMode('Diagnostics Mode', 'Running comprehensive diagnostics. Check console for detailed output.');
+        } else {
+            alert('Failed to start diagnostics');
+        }
+    } catch (err) {
+        console.error('Error starting diagnostics:', err);
+        alert('Error starting diagnostics');
+    }
+});
+
+document.getElementById('stop-test-mode')?.addEventListener('click', async () => {
+    try {
+        const response = await fetch('/api/mode/normal', { method: 'POST' });
+        if (response.ok) {
+            hideTestMode();
+        } else {
+            alert('Failed to stop test mode');
+        }
+    } catch (err) {
+        console.error('Error stopping test mode:', err);
+        alert('Error stopping test mode');
+    }
+});
+
+function showTestMode(modeName, instructions) {
+    const statusEl = document.getElementById('test-mode-status');
+    const modeEl = document.getElementById('current-test-mode');
+    const instrEl = document.getElementById('test-instructions');
+    const stopBtn = document.getElementById('stop-test-mode');
+
+    modeEl.textContent = modeName;
+    instrEl.textContent = instructions;
+    statusEl.style.display = 'block';
+    stopBtn.style.display = 'block';
+
+    // Hide start buttons
+    document.getElementById('start-calibration-mode').style.display = 'none';
+    document.getElementById('start-validation-mode').style.display = 'none';
+    document.getElementById('start-diagnostics').style.display = 'none';
+}
+
+function hideTestMode() {
+    const statusEl = document.getElementById('test-mode-status');
+    const stopBtn = document.getElementById('stop-test-mode');
+
+    statusEl.style.display = 'none';
+    stopBtn.style.display = 'none';
+
+    // Show start buttons
+    document.getElementById('start-calibration-mode').style.display = 'block';
+    document.getElementById('start-validation-mode').style.display = 'block';
+    document.getElementById('start-diagnostics').style.display = 'block';
+}
+
+// Auto-align controls
+document.getElementById('set-align-target')?.addEventListener('click', async () => {
+    const tagId = parseInt(document.getElementById('target-tag-id').value);
+
+    if (isNaN(tagId) || tagId < 1 || tagId > 16) {
+        alert('Please enter a valid tag ID (1-16)');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/autoalign/set_target', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tag_id: tagId })
+        });
+
+        if (response.ok) {
+            document.getElementById('autoalign-status').style.display = 'block';
+            console.log(`Set auto-align target to tag ${tagId}`);
+        } else {
+            alert('Failed to set alignment target');
+        }
+    } catch (err) {
+        console.error('Error setting align target:', err);
+        alert('Error setting alignment target');
+    }
+});
+
+document.getElementById('calculate-positions')?.addEventListener('click', async () => {
+    const distance = parseFloat(document.getElementById('shooting-distance').value);
+    const alliance = document.querySelector('input[name="alliance"]:checked').value;
+
+    try {
+        const response = await fetch('/api/autoalign/calculate_positions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                shooting_distance: distance,
+                is_red_alliance: alliance === 'red'
+            })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            displayShootingPositions(data.positions || []);
+        } else {
+            alert('Failed to calculate shooting positions');
+        }
+    } catch (err) {
+        console.error('Error calculating positions:', err);
+        alert('Error calculating shooting positions');
+    }
+});
+
+function displayShootingPositions(positions) {
+    const container = document.getElementById('positions-list');
+    const wrapper = document.getElementById('shooting-positions');
+
+    if (positions.length === 0) {
+        container.innerHTML = '<p class="muted">No valid shooting positions found</p>';
+        wrapper.style.display = 'block';
+        return;
+    }
+
+    container.innerHTML = '';
+
+    positions.slice(0, 5).forEach((pos, index) => {
+        const card = document.createElement('div');
+        card.className = `position-card ${pos.position_type}`;
+        card.innerHTML = `
+            <h5>Position ${index + 1}: ${pos.position_type.toUpperCase()}</h5>
+            <div class="position-details">
+                <span><strong>X:</strong> ${pos.pose.x.toFixed(2)}m</span>
+                <span><strong>Y:</strong> ${pos.pose.y.toFixed(2)}m</span>
+                <span><strong>θ:</strong> ${(pos.pose.theta * 180 / Math.PI).toFixed(1)}°</span>
+                <span><strong>Distance:</strong> ${pos.distance_to_target_m.toFixed(2)}m</span>
+                <span><strong>Visible Tags:</strong> ${pos.visible_tags}</span>
+                <span><strong>Accuracy:</strong> ${(pos.expected_accuracy * 100).toFixed(0)}%</span>
+            </div>
+        `;
+        card.addEventListener('click', () => {
+            navigateToPosition(pos.pose);
+        });
+        container.appendChild(card);
+    });
+
+    wrapper.style.display = 'block';
+}
+
+function navigateToPosition(pose) {
+    // Send navigation command to robot via NT
+    fetch('/api/autoalign/navigate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pose)
+    }).then(response => {
+        if (response.ok) {
+            console.log('Navigation command sent:', pose);
+        }
+    }).catch(err => {
+        console.error('Error sending navigation command:', err);
+    });
+}
+
+// Update auto-align status from SSE
+function updateAutoAlignStatus(data) {
+    if (!data.autoalign) return;
+
+    const status = data.autoalign;
+
+    // Update status display
+    const targetVisibleEl = document.getElementById('target-visible');
+    if (targetVisibleEl) {
+        targetVisibleEl.textContent = status.target_visible ? 'YES' : 'NO';
+        targetVisibleEl.className = status.target_visible ? 'status-indicator connected' : 'status-indicator disconnected';
+    }
+
+    const distanceEl = document.getElementById('align-distance');
+    if (distanceEl && status.distance_m !== undefined) {
+        distanceEl.textContent = status.distance_m.toFixed(2);
+    }
+
+    const headingEl = document.getElementById('heading-error');
+    if (headingEl && status.heading_error_deg !== undefined) {
+        headingEl.textContent = status.heading_error_deg.toFixed(1);
+    }
+
+    const stageEl = document.getElementById('align-stage');
+    if (stageEl && status.current_stage) {
+        stageEl.textContent = status.current_stage.replace('_', ' ').toUpperCase();
+        stageEl.className = `badge ${status.current_stage}`;
+    }
+
+    const readyEl = document.getElementById('ready-to-shoot');
+    if (readyEl) {
+        readyEl.textContent = status.ready_to_shoot ? 'YES' : 'NO';
+        readyEl.className = status.ready_to_shoot ? 'status-indicator connected' : 'status-indicator disconnected';
+    }
+}
+
+// Hook into existing SSE update
+const originalUpdateStatus = app.updateStatus.bind(app);
+app.updateStatus = function(data) {
+    originalUpdateStatus(data);
+    updateAutoAlignStatus(data);
+};
+
+console.log('Phase 3 auto-align & testing controls initialized');

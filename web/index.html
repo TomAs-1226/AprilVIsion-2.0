@@ -8,11 +8,14 @@
 </head>
 <body>
     <header>
-        <h1>FRC AprilTag Vision</h1>
+        <h1>AprilVision 2.1 Dashboard</h1>
         <div class="status-bar">
             <span id="status-uptime">Uptime: --</span>
             <span id="status-temp">CPU: --°C</span>
-            <span id="status-nt" class="status-indicator disconnected">NT: Disconnected</span>
+            <span id="status-nt" class="status-indicator disconnected" title="NetworkTables connection to roboRIO">
+                NT: <span id="nt-status-text">Disconnected</span>
+                <span id="nt-server-ip" style="font-size: 0.9em;"></span>
+            </span>
             <span id="status-clients">Clients: 0</span>
         </div>
     </header>
@@ -212,11 +215,96 @@
                     <button id="reload-config">Reload from File</button>
                 </div>
             </div>
+
+            <!-- NEW: Phase 3 Auto-Align & Testing Panel -->
+            <div class="panel autoalign-panel">
+                <h3>🎯 Phase 3: Auto-Align & Testing</h3>
+
+                <!-- Testing Modes -->
+                <div class="config-section">
+                    <h4>Testing Modes</h4>
+                    <div class="testing-controls">
+                        <button id="start-calibration-mode" class="test-button">
+                            📷 Start Calibration Mode
+                        </button>
+                        <button id="start-validation-mode" class="test-button">
+                            ✅ Start Validation Test (1.5m)
+                        </button>
+                        <button id="start-diagnostics" class="test-button">
+                            🔧 Run Diagnostics
+                        </button>
+                        <button id="stop-test-mode" class="test-button danger" style="display:none;">
+                            ⏹ Stop Test Mode
+                        </button>
+                    </div>
+                    <div id="test-mode-status" class="test-status" style="display:none;">
+                        <strong>Test Mode Active:</strong> <span id="current-test-mode">--</span><br>
+                        <span id="test-instructions">--</span>
+                    </div>
+                </div>
+
+                <!-- Auto-Align Control -->
+                <div class="config-section">
+                    <h4>Auto-Align (Phase 3)</h4>
+                    <div class="config-row">
+                        <label for="target-tag-id">Target Tag ID:</label>
+                        <input type="number" id="target-tag-id" min="1" max="16" value="7" style="width:60px">
+                        <button id="set-align-target">Set Target</button>
+                    </div>
+                    <div class="config-row">
+                        <label for="shooting-distance">Shooting Distance:</label>
+                        <input type="number" id="shooting-distance" min="1.0" max="5.0" step="0.5" value="2.5" style="width:60px">
+                        <span class="unit">m</span>
+                    </div>
+                    <div class="config-row">
+                        <label>Alliance:</label>
+                        <label style="margin-left: 10px;">
+                            <input type="radio" name="alliance" value="blue" checked> Blue
+                        </label>
+                        <label style="margin-left: 10px;">
+                            <input type="radio" name="alliance" value="red"> Red
+                        </label>
+                    </div>
+                    <button id="calculate-positions" class="test-button">
+                        🎯 Calculate Shooting Positions
+                    </button>
+                </div>
+
+                <!-- Auto-Align Status -->
+                <div id="autoalign-status" class="autoalign-status" style="display:none;">
+                    <div class="status-row">
+                        <label>Target Visible:</label>
+                        <span id="target-visible" class="status-indicator">--</span>
+                    </div>
+                    <div class="status-row">
+                        <label>Distance to Target:</label>
+                        <span id="align-distance">--</span> m
+                    </div>
+                    <div class="status-row">
+                        <label>Heading Error:</label>
+                        <span id="heading-error">--</span>°
+                    </div>
+                    <div class="status-row">
+                        <label>Status:</label>
+                        <span id="align-stage" class="badge">--</span>
+                    </div>
+                    <div class="status-row">
+                        <label>Ready to Shoot:</label>
+                        <span id="ready-to-shoot" class="status-indicator">--</span>
+                    </div>
+                </div>
+
+                <!-- Shooting Positions List -->
+                <div id="shooting-positions" class="shooting-positions" style="display:none;">
+                    <h4>Recommended Shooting Positions</h4>
+                    <div id="positions-list"></div>
+                </div>
+            </div>
         </section>
     </main>
 
     <footer>
-        <p>FRC Vision Coprocessor v2.0 | FRC 2026 Season</p>
+        <p>AprilVision 2.1 | Phase 1 + 2 + 3 Complete | FRC 2026 Season</p>
     </footer>
 
     <script src="app.js"></script>
