@@ -128,8 +128,8 @@ std::vector<TagDetection> Detector::detect(const cv::Mat& image) {
     // Run detection
     zarray_t* detections = apriltag_detector_detect(detector_, &img);
 
-    // Process detections
-    auto result = process_detections(detections);
+    // Process detections (pass grayscale for sub-pixel refinement)
+    auto result = process_detections(detections, gray);
 
     // Free detections
     apriltag_detections_destroy(detections);
@@ -177,7 +177,7 @@ std::vector<TagDetection> Detector::detect_roi(const cv::Mat& image, const cv::R
     return detections;
 }
 
-std::vector<TagDetection> Detector::process_detections(void* detections_ptr) {
+std::vector<TagDetection> Detector::process_detections(void* detections_ptr, const cv::Mat& gray_image) {
     zarray_t* detections = static_cast<zarray_t*>(detections_ptr);
     std::vector<TagDetection> result;
 
@@ -225,6 +225,37 @@ std::vector<TagDetection> Detector::process_detections(void* detections_ptr) {
         for (int j = 0; j < 4; j++) {
             tag.corners.corners[j].x = det->p[j][0];
             tag.corners.corners[j].y = det->p[j][1];
+        }
+
+        // Phase 1: Additional sub-pixel corner refinement with OpenCV
+        if (config_.subpixel_refine && !gray_image.empty()) {
+            std::vector<cv::Point2f> corners_cv;
+            corners_cv.reserve(4);
+            for (int j = 0; j < 4; j++) {
+                corners_cv.emplace_back(tag.corners.corners[j].x, tag.corners.corners[j].y);
+            }
+
+            // Sub-pixel refinement parameters (optimized for AprilTag corners)
+            cv::Size win_size(5, 5);           // 5x5 window
+            cv::Size zero_zone(-1, -1);        // No dead zone
+            cv::TermCriteria criteria(
+                cv::TermCriteria::EPS + cv::TermCriteria::COUNT,
+                40,      // Max 40 iterations
+                0.001    // Epsilon for convergence
+            );
+
+            try {
+                cv::cornerSubPix(gray_image, corners_cv, win_size, zero_zone, criteria);
+
+                // Update corners with refined positions
+                for (int j = 0; j < 4; j++) {
+                    tag.corners.corners[j].x = corners_cv[j].x;
+                    tag.corners.corners[j].y = corners_cv[j].y;
+                }
+            } catch (const cv::Exception& e) {
+                // If sub-pixel refinement fails, keep original corners
+                // This can happen at image edges
+            }
         }
 
         result.push_back(std::move(tag));

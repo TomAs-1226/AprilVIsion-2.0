@@ -47,6 +47,12 @@ bool ConfigManager::reload() {
             parse_tracker(&tracking_node);
         }
 
+        // Phase 1: Parse calibration settings
+        if (root["calibration"]) {
+            YAML::Node calibration_node = root["calibration"];
+            parse_calibration(&calibration_node);
+        }
+
         // Parse field layout
         if (root["field"]) {
             YAML::Node field_node = root["field"];
@@ -120,6 +126,7 @@ bool ConfigManager::parse_detector(void* node_ptr) {
     config_.detector.sigma = node["sigma"].as<double>(0.0);
     config_.detector.nthreads = node["nthreads"].as<int>(4);
     config_.detector.refine_edges = node["refine_edges"].as<bool>(true);
+    config_.detector.subpixel_refine = node["subpixel_refine"].as<bool>(true);  // Phase 1
     config_.detector.max_hamming = node["max_hamming"].as<int>(1);
     config_.detector.min_margin = node["min_margin"].as<double>(20.0);
     config_.detector.max_tags_per_frame = node["max_tags_per_frame"].as<int>(16);
@@ -135,6 +142,28 @@ bool ConfigManager::parse_tracker(void* node_ptr) {
     config_.tracker.filter_alpha = node["filter_alpha"].as<double>(0.3);
     config_.tracker.roi_enable = node["roi_enable"].as<bool>(false);
     config_.tracker.velocity_decay = node["velocity_decay"].as<double>(0.9);
+
+    return true;
+}
+
+bool ConfigManager::parse_calibration(void* node_ptr) {
+    YAML::Node& node = *static_cast<YAML::Node*>(node_ptr);
+
+    // Phase 1: Calibration quality thresholds
+    config_.calibration.min_rms_for_excellent = node["min_rms_for_excellent"].as<double>(0.3);
+    config_.calibration.min_rms_for_good = node["min_rms_for_good"].as<double>(0.5);
+    config_.calibration.min_rms_for_acceptable = node["min_rms_for_acceptable"].as<double>(1.0);
+
+    // Spatial coverage requirements
+    config_.calibration.require_spatial_coverage = node["require_spatial_coverage"].as<bool>(true);
+    config_.calibration.min_samples_per_region = node["min_samples_per_region"].as<int>(3);
+
+    // Validation mode from set distance
+    config_.calibration.validation_mode_enable = node["validation_mode_enable"].as<bool>(false);
+    config_.calibration.validation_distance_m = node["validation_distance_m"].as<double>(1.5);
+    config_.calibration.validation_frames_required = node["validation_frames_required"].as<int>(30);
+    config_.calibration.max_distance_error_cm = node["max_distance_error_cm"].as<double>(2.0);
+    config_.calibration.max_angle_error_deg = node["max_angle_error_deg"].as<double>(2.0);
 
     return true;
 }

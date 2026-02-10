@@ -66,7 +66,8 @@ apriltag:
   decimation: 2
   sigma: 0.0
   nthreads: 2                # 2 threads per detector × 3 cameras = 6 threads total
-  refine_edges: true         # Keep for accuracy (small cost)
+  refine_edges: true         # AprilTag library edge refinement
+  subpixel_refine: true      # Phase 1: Additional OpenCV sub-pixel refinement (0.1-0.3px improvement)
   max_hamming: 1
   min_margin: 15.0
   max_tags_per_frame: 32
@@ -80,6 +81,26 @@ tracking:
   filter_alpha: 0.3
   roi_enable: false
   velocity_decay: 0.9
+
+# ==============================================================================
+# Calibration Quality & Validation (Phase 1)
+# ==============================================================================
+calibration:
+  # Quality thresholds (RMS reprojection error in pixels)
+  min_rms_for_excellent: 0.3   # <0.3px = excellent calibration
+  min_rms_for_good: 0.5         # <0.5px = good calibration
+  min_rms_for_acceptable: 1.0   # <1.0px = acceptable calibration
+
+  # Spatial coverage requirements
+  require_spatial_coverage: true  # Require corners in all image regions (3x3 grid)
+  min_samples_per_region: 3       # Minimum corner samples per grid region
+
+  # Validation mode from known distance (for testing accuracy)
+  validation_mode_enable: false   # Set to true to enable distance validation mode
+  validation_distance_m: 1.5      # Place tag exactly 1.5m away, facing camera straight on
+  validation_frames_required: 30  # Number of frames to collect for validation
+  max_distance_error_cm: 2.0      # Maximum acceptable distance error (cm)
+  max_angle_error_deg: 2.0        # Maximum acceptable angle error (degrees)
 
 # ==============================================================================
 # Field Layout

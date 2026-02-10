@@ -95,6 +95,17 @@ public:
         const CameraIntrinsics& intrinsics);
 
     /**
+     * @brief Compute multi-method distance estimate with geometric consistency (Phase 1).
+     * Calculates distance using multiple methods and validates consistency.
+     * @param detection Tag detection with corners and pose
+     * @param intrinsics Camera intrinsic parameters
+     * @return Distance estimate with confidence based on method agreement
+     */
+    DistanceEstimate compute_distance_estimate(
+        const TagDetection& detection,
+        const CameraIntrinsics& intrinsics);
+
+    /**
      * @brief Get quality metrics for pose estimate.
      * Includes standard deviations for WPILib SwerveDrivePoseEstimator fusion.
      * @param detections Detected tags

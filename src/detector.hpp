@@ -69,7 +69,7 @@ public:
 
 private:
     void cleanup();
-    std::vector<TagDetection> process_detections(void* detections_ptr);
+    std::vector<TagDetection> process_detections(void* detections_ptr, const cv::Mat& gray_image);
 
     DetectorConfig config_;
 

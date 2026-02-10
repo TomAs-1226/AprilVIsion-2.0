@@ -54,6 +54,9 @@ struct CalibrationResult {
 
     // Per-frame errors for analysis
     std::vector<double> per_frame_errors;
+
+    // Phase 1: Comprehensive quality metrics
+    CalibrationQualityMetrics quality_metrics;
 };
 
 /**
@@ -172,9 +175,37 @@ cv::Mat get_optimal_camera_matrix(
     double alpha = 0.0);  // 0 = crop to valid, 1 = keep all
 
 /**
- * @brief Validate calibration quality
+ * @brief Validate calibration quality (Phase 1 enhanced)
  */
 bool validate_calibration(const CalibrationResult& result);
+
+/**
+ * @brief Compute comprehensive quality metrics for calibration (Phase 1)
+ * @param result Calibration result with per-frame errors
+ * @param all_corners All detected corner positions for spatial analysis
+ * @param image_size Image dimensions
+ * @return Comprehensive quality metrics
+ */
+CalibrationQualityMetrics compute_quality_metrics(
+    const CalibrationResult& result,
+    const std::vector<std::vector<cv::Point2f>>& all_corners,
+    cv::Size image_size);
+
+/**
+ * @brief Validate calibration from a known distance (Phase 1 validation mode)
+ * @param intrinsics Camera intrinsics to validate
+ * @param tag_size_m Known AprilTag size in meters
+ * @param expected_distance_m Expected distance to tag in meters
+ * @param detected_corners Detected tag corners in image
+ * @param max_error_cm Maximum acceptable error in centimeters
+ * @return true if validation passes
+ */
+bool validate_at_distance(
+    const CameraIntrinsics& intrinsics,
+    double tag_size_m,
+    double expected_distance_m,
+    const std::vector<cv::Point2f>& detected_corners,
+    double max_error_cm = 2.0);
 
 }  // namespace calibration_utils
 

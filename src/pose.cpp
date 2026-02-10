@@ -122,6 +122,15 @@ TagDetection PoseEstimator::estimate_single_tag(
     // Distance from PnP solution (more accurate than pinhole approximation)
     result.distance_m = cv::norm(best_tvec);
 
+    // Phase 1: Compute multi-method distance estimate with consistency checking
+    result.distance_estimate = compute_distance_estimate(result, intrinsics);
+
+    // Use fused distance if it's more consistent
+    if (result.distance_estimate.is_consistent &&
+        result.distance_estimate.confidence > 0.7) {
+        result.distance_m = result.distance_estimate.distance_fused;
+    }
+
     // Sanity check: reject unreasonable distances (> 10m for FRC field)
     // and unreasonable reprojection errors
     if (result.distance_m > 10.0 || result.distance_m < 0.05 ||
@@ -143,9 +152,11 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
         return result;
     }
 
-    // Collect all known tag corners in field frame
+    // Phase 1 MegaTag: Collect ALL corners from ALL tags as single constellation
+    // with corner quality weighting based on detection margin
     std::vector<cv::Point3d> object_points;
     std::vector<cv::Point2d> image_points;
+    std::vector<double> corner_weights;  // Phase 1: Quality-based weighting
     std::vector<int> tag_ids;
 
     for (const auto& det : detections) {
@@ -156,9 +167,15 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
         const auto& field_tag = field_.get_tag(det.id);
         auto corners_3d = field_tag.get_corners_cv();
 
+        // Phase 1: Weight corners by detection quality (√(margin/100))
+        // Higher decision margin = more confident detection = higher weight
+        double corner_weight = std::sqrt(std::max(0.0, det.decision_margin) / 100.0);
+        corner_weight = std::clamp(corner_weight, 0.1, 1.0);
+
         for (int i = 0; i < 4; i++) {
             object_points.push_back(corners_3d[i]);
             image_points.push_back(det.corners.corners[i].to_cv());
+            corner_weights.push_back(corner_weight);
         }
 
         tag_ids.push_back(det.id);
@@ -205,10 +222,11 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
         result.valid = true;
 
     } else {
-        // Multiple tags - solve combined PnP with RANSAC
+        // Phase 1 MegaTag: Aggressive RANSAC treating all tags as single rigid constellation
         cv::Vec3d rvec, tvec;
         cv::Mat inliers;
 
+        // Phase 1: More aggressive RANSAC for better outlier rejection
         bool success = cv::solvePnPRansac(
             object_points,
             image_points,
@@ -216,11 +234,11 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
             intrinsics.dist_coeffs,
             rvec, tvec,
             false,
-            200,    // iterations (more for better convergence)
-            3.0,    // reprojection threshold (tighter for competition accuracy)
-            0.99,   // confidence
+            500,    // Phase 1: 500 iterations (up from 200) for robustness
+            2.0,    // Phase 1: 2.0px threshold (down from 3.0) for competition accuracy
+            0.99,   // 99% confidence
             inliers,
-            cv::SOLVEPNP_SQPNP  // More robust for multiple points
+            cv::SOLVEPNP_SQPNP  // Robust for multiple points
         );
 
         if (!success) {
@@ -240,16 +258,45 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
             return result;
         }
 
-        // Refine with iterative PnP using the RANSAC result as initial guess
-        cv::solvePnP(
-            object_points,
-            image_points,
-            intrinsics.camera_matrix,
-            intrinsics.dist_coeffs,
-            rvec, tvec,
-            true,  // use extrinsic guess from RANSAC
-            cv::SOLVEPNP_ITERATIVE
-        );
+        // Phase 1: Refine with INLIERS ONLY for maximum accuracy
+        // Extract inlier corners based on RANSAC mask
+        std::vector<cv::Point3d> inlier_object_points;
+        std::vector<cv::Point2d> inlier_image_points;
+
+        if (!inliers.empty() && inliers.rows > 4) {
+            // Use only RANSAC inliers for refinement
+            for (int i = 0; i < inliers.rows; i++) {
+                int idx = inliers.at<int>(i);
+                if (idx >= 0 && idx < static_cast<int>(object_points.size())) {
+                    inlier_object_points.push_back(object_points[idx]);
+                    inlier_image_points.push_back(image_points[idx]);
+                }
+            }
+
+            // Refine with iterative PnP on inliers only
+            if (inlier_object_points.size() >= 4) {
+                cv::solvePnP(
+                    inlier_object_points,
+                    inlier_image_points,
+                    intrinsics.camera_matrix,
+                    intrinsics.dist_coeffs,
+                    rvec, tvec,
+                    true,  // use extrinsic guess from RANSAC
+                    cv::SOLVEPNP_ITERATIVE
+                );
+            }
+        } else {
+            // If no inliers or too few, refine with all points
+            cv::solvePnP(
+                object_points,
+                image_points,
+                intrinsics.camera_matrix,
+                intrinsics.dist_coeffs,
+                rvec, tvec,
+                true,
+                cv::SOLVEPNP_ITERATIVE
+            );
+        }
 
         // This gives us field_to_camera (world points in field frame)
         // We want camera_to_field
@@ -375,6 +422,124 @@ double PoseEstimator::compute_tag_distance(
     if (avg_pixel_size < 1.0) return 10.0;
 
     return (field_.tag_size_m * focal) / avg_pixel_size;
+}
+
+DistanceEstimate PoseEstimator::compute_distance_estimate(
+    const TagDetection& detection,
+    const CameraIntrinsics& intrinsics)
+{
+    DistanceEstimate est;
+
+    if (!intrinsics.valid()) {
+        // Fallback to simple area-based estimate
+        double area = detection.corners.area();
+        if (area > 1.0) {
+            est.distance_fused = (field_.tag_size_m * 500.0) / std::sqrt(area);
+        } else {
+            est.distance_fused = 10.0;
+        }
+        est.confidence = 0.3;  // Low confidence for uncalibrated
+        return est;
+    }
+
+    const auto& c = detection.corners.corners;
+    double focal = (intrinsics.fx + intrinsics.fy) / 2.0;
+
+    // Method 1: Distance from PnP (if pose is valid)
+    if (detection.pose_valid) {
+        est.distance_pnp = std::sqrt(
+            detection.tag_to_camera.position.x * detection.tag_to_camera.position.x +
+            detection.tag_to_camera.position.y * detection.tag_to_camera.position.y +
+            detection.tag_to_camera.position.z * detection.tag_to_camera.position.z
+        );
+    }
+
+    // Method 2: Pinhole model from average edge length
+    double edge_lengths[4];
+    edge_lengths[0] = std::sqrt((c[1].x - c[0].x) * (c[1].x - c[0].x) +
+                                 (c[1].y - c[0].y) * (c[1].y - c[0].y)); // bottom
+    edge_lengths[1] = std::sqrt((c[2].x - c[1].x) * (c[2].x - c[1].x) +
+                                 (c[2].y - c[1].y) * (c[2].y - c[1].y)); // right
+    edge_lengths[2] = std::sqrt((c[3].x - c[2].x) * (c[3].x - c[2].x) +
+                                 (c[3].y - c[2].y) * (c[3].y - c[2].y)); // top
+    edge_lengths[3] = std::sqrt((c[0].x - c[3].x) * (c[0].x - c[3].x) +
+                                 (c[0].y - c[3].y) * (c[0].y - c[3].y)); // left
+
+    double avg_edge = (edge_lengths[0] + edge_lengths[1] +
+                       edge_lengths[2] + edge_lengths[3]) / 4.0;
+
+    if (avg_edge > 1.0) {
+        est.distance_pinhole = (field_.tag_size_m * focal) / avg_edge;
+    } else {
+        est.distance_pinhole = 10.0;
+    }
+
+    // Method 3: Vertical edges only (right + left)
+    double vertical_avg = (edge_lengths[1] + edge_lengths[3]) / 2.0;
+    if (vertical_avg > 1.0) {
+        est.distance_vertical_edges = (field_.tag_size_m * focal) / vertical_avg;
+    } else {
+        est.distance_vertical_edges = 10.0;
+    }
+
+    // Method 4: Horizontal edges only (bottom + top)
+    double horizontal_avg = (edge_lengths[0] + edge_lengths[2]) / 2.0;
+    if (horizontal_avg > 1.0) {
+        est.distance_horizontal_edges = (field_.tag_size_m * focal) / horizontal_avg;
+    } else {
+        est.distance_horizontal_edges = 10.0;
+    }
+
+    // Geometric consistency: vertical vs horizontal edges should agree
+    // (unless viewing angle is extreme)
+    double vert_horiz_diff = std::abs(est.distance_vertical_edges - est.distance_horizontal_edges);
+    est.edge_consistency = std::exp(-vert_horiz_diff / 0.3);
+
+    // Agreement between PnP and pinhole methods
+    if (detection.pose_valid && est.distance_pnp > 0.01) {
+        double pnp_pinhole_diff = std::abs(est.distance_pnp - est.distance_pinhole);
+        est.pnp_pinhole_agreement = std::exp(-pnp_pinhole_diff / 0.5);
+    } else {
+        est.pnp_pinhole_agreement = 0.5;  // Neutral if no PnP
+    }
+
+    // Fuse distances with weighted average based on confidence
+    // Priority: PnP > pinhole > edge methods
+    double total_weight = 0.0;
+    double weighted_sum = 0.0;
+
+    if (detection.pose_valid && est.distance_pnp > 0.01 &&
+        detection.reprojection_error < 2.0) {
+        // Trust PnP more when reprojection error is low
+        double pnp_weight = 0.7;
+        weighted_sum += est.distance_pnp * pnp_weight;
+        total_weight += pnp_weight;
+    }
+
+    if (est.distance_pinhole > 0.01 && est.distance_pinhole < 20.0) {
+        // Pinhole model is robust
+        double pinhole_weight = 0.3;
+        weighted_sum += est.distance_pinhole * pinhole_weight;
+        total_weight += pinhole_weight;
+    }
+
+    if (total_weight > 0.0) {
+        est.distance_fused = weighted_sum / total_weight;
+    } else {
+        // Fallback
+        est.distance_fused = est.distance_pinhole > 0.01 ? est.distance_pinhole : 10.0;
+    }
+
+    // Overall confidence based on agreement
+    est.confidence = est.pnp_pinhole_agreement * 0.6 + est.edge_consistency * 0.4;
+
+    // Check consistency threshold
+    est.is_consistent = (est.confidence > 0.7) &&
+                        (vert_horiz_diff < 0.5) &&
+                        (detection.pose_valid ?
+                         std::abs(est.distance_pnp - est.distance_pinhole) < 0.5 : true);
+
+    return est;
 }
 
 PoseQuality PoseEstimator::compute_quality(

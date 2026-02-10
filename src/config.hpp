@@ -72,6 +72,7 @@ private:
     bool parse_cameras(void* node);
     bool parse_detector(void* node);
     bool parse_tracker(void* node);
+    bool parse_calibration(void* node);  // Phase 1
     bool parse_field(void* node);
     bool parse_output(void* node);
     bool parse_performance(void* node);

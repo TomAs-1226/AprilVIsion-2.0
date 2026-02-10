@@ -225,6 +225,10 @@ CalibrationResult CameraCalibrator::compute_calibration(cv::Size image_size) {
     result.frames_used = static_cast<int>(all_charuco_corners_.size());
     result.success = true;
 
+    // Phase 1: Compute comprehensive quality metrics
+    result.quality_metrics = calibration_utils::compute_quality_metrics(
+        result, all_charuco_corners_, image_size);
+
     std::cout << "[Calibrator] Calibration complete!" << std::endl;
     std::cout << "  RMS Error: " << std::fixed << std::setprecision(4) << result.rms_error << " pixels" << std::endl;
     std::cout << "  Frames used: " << result.frames_used << std::endl;
@@ -375,35 +379,305 @@ cv::Mat get_optimal_camera_matrix(
         image_size, alpha);
 }
 
+CalibrationQualityMetrics compute_quality_metrics(
+    const CalibrationResult& result,
+    const std::vector<std::vector<cv::Point2f>>& all_corners,
+    cv::Size image_size) {
+
+    CalibrationQualityMetrics metrics;
+
+    if (!result.success || result.per_frame_errors.empty()) {
+        metrics.quality_level = "poor";
+        metrics.confidence = 0.0;
+        metrics.warnings.push_back("Calibration failed or no per-frame errors available");
+        return metrics;
+    }
+
+    const auto& intr = result.intrinsics;
+
+    // Basic error metrics
+    metrics.rms_error = result.rms_error;
+    metrics.per_frame_errors = result.per_frame_errors;
+
+    // Find max per-frame error
+    metrics.max_per_frame_error = 0.0;
+    for (double err : result.per_frame_errors) {
+        if (err > metrics.max_per_frame_error) {
+            metrics.max_per_frame_error = err;
+        }
+    }
+
+    // Focal length asymmetry
+    double avg_focal = (intr.fx + intr.fy) / 2.0;
+    metrics.focal_length_asymmetry = std::abs(intr.fx - intr.fy) / avg_focal;
+
+    // Principal point offset from center
+    double cx_center = image_size.width / 2.0;
+    double cy_center = image_size.height / 2.0;
+    double dx = intr.cx - cx_center;
+    double dy = intr.cy - cy_center;
+    metrics.principal_point_offset = std::sqrt(dx * dx + dy * dy);
+
+    // Spatial coverage analysis (3x3 grid)
+    metrics.corner_coverage_grid.fill(0);
+
+    int grid_width = image_size.width / 3;
+    int grid_height = image_size.height / 3;
+
+    for (const auto& frame_corners : all_corners) {
+        for (const auto& corner : frame_corners) {
+            int grid_x = static_cast<int>(corner.x / grid_width);
+            int grid_y = static_cast<int>(corner.y / grid_height);
+
+            // Clamp to valid grid indices
+            grid_x = std::max(0, std::min(2, grid_x));
+            grid_y = std::max(0, std::min(2, grid_y));
+
+            int grid_idx = grid_y * 3 + grid_x;
+            metrics.corner_coverage_grid[grid_idx]++;
+        }
+    }
+
+    // Find min/max coverage
+    metrics.min_corners_per_region = metrics.corner_coverage_grid[0];
+    metrics.max_corners_per_region = metrics.corner_coverage_grid[0];
+
+    for (int count : metrics.corner_coverage_grid) {
+        if (count < metrics.min_corners_per_region) {
+            metrics.min_corners_per_region = count;
+        }
+        if (count > metrics.max_corners_per_region) {
+            metrics.max_corners_per_region = count;
+        }
+    }
+
+    // Check if all regions have at least 3 samples
+    metrics.has_good_coverage = true;
+    for (int count : metrics.corner_coverage_grid) {
+        if (count < 3) {
+            metrics.has_good_coverage = false;
+            break;
+        }
+    }
+
+    // Quality level assessment based on RMS error
+    if (metrics.rms_error < 0.3) {
+        metrics.quality_level = "excellent";
+        metrics.confidence = 0.95;
+    } else if (metrics.rms_error < 0.5) {
+        metrics.quality_level = "good";
+        metrics.confidence = 0.85;
+    } else if (metrics.rms_error < 1.0) {
+        metrics.quality_level = "acceptable";
+        metrics.confidence = 0.70;
+    } else {
+        metrics.quality_level = "poor";
+        metrics.confidence = 0.50;
+    }
+
+    // Adjust confidence based on spatial coverage
+    if (!metrics.has_good_coverage) {
+        metrics.confidence *= 0.8;
+        metrics.warnings.push_back("Insufficient spatial coverage in some image regions");
+    }
+
+    // Check for focal length issues
+    double fx_expected = image_size.width * 0.8;
+    if (intr.fx < fx_expected * 0.5 || intr.fx > fx_expected * 2.0) {
+        metrics.warnings.push_back("Unusual focal length: " + std::to_string(intr.fx));
+        metrics.confidence *= 0.9;
+    }
+
+    // Check for asymmetry
+    if (metrics.focal_length_asymmetry > 0.05) {
+        metrics.warnings.push_back("High focal length asymmetry: " +
+                                   std::to_string(metrics.focal_length_asymmetry * 100) + "%");
+        metrics.confidence *= 0.95;
+    }
+
+    // Check principal point offset
+    double max_offset = image_size.width * 0.1;
+    if (metrics.principal_point_offset > max_offset) {
+        metrics.warnings.push_back("Principal point far from center: " +
+                                   std::to_string(metrics.principal_point_offset) + " pixels");
+        metrics.confidence *= 0.95;
+    }
+
+    // Recommendations
+    if (metrics.rms_error > 0.5) {
+        metrics.recommendations.push_back("Capture more frames with better lighting");
+        metrics.recommendations.push_back("Ensure calibration board is flat and in focus");
+    }
+
+    if (!metrics.has_good_coverage) {
+        metrics.recommendations.push_back("Capture frames with board in all regions of image");
+        metrics.recommendations.push_back("Include tilted views and different distances");
+    }
+
+    if (metrics.max_per_frame_error > 2.0) {
+        metrics.recommendations.push_back("Review frames with high error (>" +
+                                         std::to_string(metrics.max_per_frame_error) + "px)");
+    }
+
+    return metrics;
+}
+
 bool validate_calibration(const CalibrationResult& result) {
     if (!result.success) {
+        std::cerr << "[Calibration] Validation FAILED: Calibration was not successful" << std::endl;
         return false;
     }
 
-    // Check RMS error
-    if (result.rms_error > 1.5) {
-        std::cerr << "[Calibration] Warning: High RMS error: " << result.rms_error << std::endl;
-    }
-
-    // Check focal length is reasonable
+    const auto& metrics = result.quality_metrics;
     const auto& intr = result.intrinsics;
-    double aspect = static_cast<double>(intr.width) / intr.height;
-    double fx_expected = intr.width * 0.8;  // Rough estimate for typical cameras
 
-    if (intr.fx < fx_expected * 0.5 || intr.fx > fx_expected * 2.0) {
-        std::cerr << "[Calibration] Warning: Unusual focal length: " << intr.fx << std::endl;
+    // Print comprehensive quality report
+    std::cout << "\n========== Calibration Quality Report ==========" << std::endl;
+    std::cout << "Quality Level: " << metrics.quality_level << std::endl;
+    std::cout << "Confidence: " << std::fixed << std::setprecision(1)
+              << (metrics.confidence * 100.0) << "%" << std::endl;
+    std::cout << "\nError Metrics:" << std::endl;
+    std::cout << "  RMS Error: " << std::setprecision(3) << metrics.rms_error << " pixels" << std::endl;
+    std::cout << "  Max Frame Error: " << metrics.max_per_frame_error << " pixels" << std::endl;
+    std::cout << "  Frames Used: " << result.frames_used << std::endl;
+
+    std::cout << "\nIntrinsic Parameters:" << std::endl;
+    std::cout << "  Focal Length: fx=" << std::setprecision(2) << intr.fx
+              << ", fy=" << intr.fy << std::endl;
+    std::cout << "  Asymmetry: " << std::setprecision(1)
+              << (metrics.focal_length_asymmetry * 100.0) << "%" << std::endl;
+    std::cout << "  Principal Point: (" << std::setprecision(1)
+              << intr.cx << ", " << intr.cy << ")" << std::endl;
+    std::cout << "  Offset from Center: " << std::setprecision(1)
+              << metrics.principal_point_offset << " pixels" << std::endl;
+
+    std::cout << "\nSpatial Coverage (3x3 grid):" << std::endl;
+    for (int row = 0; row < 3; row++) {
+        std::cout << "  ";
+        for (int col = 0; col < 3; col++) {
+            int count = metrics.corner_coverage_grid[row * 3 + col];
+            std::cout << std::setw(4) << count << " ";
+        }
+        std::cout << std::endl;
+    }
+    std::cout << "  Min/Max per region: " << metrics.min_corners_per_region
+              << " / " << metrics.max_corners_per_region << std::endl;
+    std::cout << "  Good Coverage: " << (metrics.has_good_coverage ? "YES" : "NO") << std::endl;
+
+    // Print warnings
+    if (!metrics.warnings.empty()) {
+        std::cout << "\nWarnings:" << std::endl;
+        for (const auto& warning : metrics.warnings) {
+            std::cout << "  ⚠ " << warning << std::endl;
+        }
     }
 
-    // Check principal point is near center
-    double cx_expected = intr.width / 2.0;
-    double cy_expected = intr.height / 2.0;
-
-    if (std::abs(intr.cx - cx_expected) > intr.width * 0.1 ||
-        std::abs(intr.cy - cy_expected) > intr.height * 0.1) {
-        std::cerr << "[Calibration] Warning: Principal point far from center" << std::endl;
+    // Print recommendations
+    if (!metrics.recommendations.empty()) {
+        std::cout << "\nRecommendations:" << std::endl;
+        for (const auto& rec : metrics.recommendations) {
+            std::cout << "  → " << rec << std::endl;
+        }
     }
 
-    return true;
+    std::cout << "================================================\n" << std::endl;
+
+    // Determine pass/fail
+    bool pass = true;
+
+    if (metrics.rms_error > 1.5) {
+        std::cerr << "[Calibration] FAIL: RMS error too high (>" << metrics.rms_error << ")" << std::endl;
+        pass = false;
+    }
+
+    if (!metrics.has_good_coverage) {
+        std::cerr << "[Calibration] FAIL: Insufficient spatial coverage" << std::endl;
+        pass = false;
+    }
+
+    if (metrics.confidence < 0.6) {
+        std::cerr << "[Calibration] FAIL: Overall confidence too low ("
+                  << (metrics.confidence * 100) << "%)" << std::endl;
+        pass = false;
+    }
+
+    if (pass) {
+        std::cout << "[Calibration] ✓ Validation PASSED" << std::endl;
+    } else {
+        std::cout << "[Calibration] ✗ Validation FAILED" << std::endl;
+    }
+
+    return pass;
+}
+
+bool validate_at_distance(
+    const CameraIntrinsics& intrinsics,
+    double tag_size_m,
+    double expected_distance_m,
+    const std::vector<cv::Point2f>& detected_corners,
+    double max_error_cm) {
+
+    if (detected_corners.size() != 4) {
+        std::cerr << "[Calibration] Validation failed: Need exactly 4 corners, got "
+                  << detected_corners.size() << std::endl;
+        return false;
+    }
+
+    if (!intrinsics.valid()) {
+        std::cerr << "[Calibration] Validation failed: Invalid intrinsics" << std::endl;
+        return false;
+    }
+
+    // Compute distance using pinhole model (average of edge lengths)
+    double edge_lengths[4];
+    edge_lengths[0] = cv::norm(detected_corners[1] - detected_corners[0]); // bottom edge
+    edge_lengths[1] = cv::norm(detected_corners[2] - detected_corners[1]); // right edge
+    edge_lengths[2] = cv::norm(detected_corners[3] - detected_corners[2]); // top edge
+    edge_lengths[3] = cv::norm(detected_corners[0] - detected_corners[3]); // left edge
+
+    double avg_edge_pixels = (edge_lengths[0] + edge_lengths[1] +
+                               edge_lengths[2] + edge_lengths[3]) / 4.0;
+
+    double focal_avg = (intrinsics.fx + intrinsics.fy) / 2.0;
+    double estimated_distance = (tag_size_m * focal_avg) / avg_edge_pixels;
+
+    // Compute distance error
+    double distance_error_m = std::abs(estimated_distance - expected_distance_m);
+    double distance_error_cm = distance_error_m * 100.0;
+
+    // Compute angle consistency (edges should be roughly equal length)
+    double vertical_avg = (edge_lengths[1] + edge_lengths[3]) / 2.0;
+    double horizontal_avg = (edge_lengths[0] + edge_lengths[2]) / 2.0;
+    double edge_ratio = std::max(vertical_avg, horizontal_avg) /
+                        std::min(vertical_avg, horizontal_avg);
+    double angle_error_deg = (edge_ratio - 1.0) * 45.0;  // Rough approximation
+
+    // Print validation results
+    std::cout << "\n========== Distance Validation Report ==========" << std::endl;
+    std::cout << "Expected Distance: " << std::fixed << std::setprecision(2)
+              << expected_distance_m << " m" << std::endl;
+    std::cout << "Measured Distance: " << estimated_distance << " m" << std::endl;
+    std::cout << "Distance Error: " << std::setprecision(1)
+              << distance_error_cm << " cm" << std::endl;
+    std::cout << "Angle Consistency: " << std::setprecision(1)
+              << angle_error_deg << "°" << std::endl;
+    std::cout << "Edge Lengths: [" << std::setprecision(1)
+              << edge_lengths[0] << ", " << edge_lengths[1] << ", "
+              << edge_lengths[2] << ", " << edge_lengths[3] << "] pixels" << std::endl;
+
+    bool pass = (distance_error_cm <= max_error_cm);
+
+    if (pass) {
+        std::cout << "[Calibration] ✓ Distance validation PASSED" << std::endl;
+    } else {
+        std::cout << "[Calibration] ✗ Distance validation FAILED" << std::endl;
+        std::cout << "  Error " << distance_error_cm << " cm exceeds maximum "
+                  << max_error_cm << " cm" << std::endl;
+    }
+
+    std::cout << "================================================\n" << std::endl;
+
+    return pass;
 }
 
 }  // namespace calibration_utils

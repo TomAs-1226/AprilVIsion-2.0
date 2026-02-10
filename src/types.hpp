@@ -177,6 +177,10 @@ struct TagDetection {
     double distance_m = 0.0;     // Distance to tag in meters (from PnP or pinhole)
     double ambiguity = 1.0;      // Pose ambiguity ratio (0=unambiguous, 1=highly ambiguous)
 
+    // Phase 1 enhancements
+    DistanceEstimate distance_estimate;      // Multi-method distance validation
+    TagAccuracyEstimate accuracy_estimate;   // Predicted accuracy
+
     // For tracking
     int track_id = -1;           // Persistent track ID
     int frames_tracked = 0;
@@ -371,6 +375,71 @@ struct CameraIntrinsics {
     }
 };
 
+// =============================================================================
+// Calibration Quality & Distance Estimation (Phase 1 Enhancements)
+// =============================================================================
+
+/**
+ * @brief Comprehensive calibration quality metrics
+ */
+struct CalibrationQualityMetrics {
+    double rms_error = 0.0;                    // Overall RMS reprojection error (pixels)
+    double max_per_frame_error = 0.0;          // Maximum error in any single frame
+    std::vector<double> per_frame_errors;      // Error distribution
+
+    double focal_length_asymmetry = 0.0;       // |fx - fy| / avg(fx, fy)
+    double principal_point_offset = 0.0;       // Distance from image center (pixels)
+
+    // Spatial coverage analysis (3x3 grid)
+    std::array<int, 9> corner_coverage_grid;   // Corner count per region
+    int min_corners_per_region = 0;
+    int max_corners_per_region = 0;
+    bool has_good_coverage = false;            // All regions have >= 3 samples
+
+    // Quality assessment
+    std::string quality_level = "unknown";     // "excellent", "good", "acceptable", "poor"
+    double confidence = 0.0;                   // 0-1 overall confidence score
+
+    // Recommendations
+    std::vector<std::string> warnings;
+    std::vector<std::string> recommendations;
+};
+
+/**
+ * @brief Multi-method distance estimation with geometric consistency checking
+ */
+struct DistanceEstimate {
+    double distance_pnp = 0.0;                 // From PnP translation vector norm
+    double distance_pinhole = 0.0;             // From pinhole model (avg edge length)
+    double distance_vertical_edges = 0.0;      // From vertical edges only
+    double distance_horizontal_edges = 0.0;    // From horizontal edges only
+
+    double distance_fused = 0.0;               // Final fused estimate
+    double confidence = 0.0;                   // 0-1 based on agreement between methods
+
+    // Consistency metrics
+    double pnp_pinhole_agreement = 0.0;        // exp(-|pnp - pinhole| / 0.5)
+    double edge_consistency = 0.0;             // exp(-|vert - horiz| / 0.3)
+
+    bool is_consistent = false;                // True if all methods agree within tolerance
+};
+
+/**
+ * @brief Per-tag accuracy estimation based on viewing conditions
+ */
+struct TagAccuracyEstimate {
+    double estimated_error_m = 0.0;            // Predicted absolute distance error (meters)
+    double estimated_angle_error_deg = 0.0;    // Predicted angle error (degrees)
+
+    std::string confidence_level = "unknown";  // "high", "medium", "low"
+
+    // Contributing factors
+    double base_error = 0.0;                   // 0.01 * distance^2
+    double reprojection_contribution = 0.0;    // reproj_err * 0.005 * distance
+    double viewing_angle_contribution = 0.0;   // viewing_angle_factor * 0.01 * distance
+    double ambiguity_contribution = 0.0;       // ambiguity * 0.02 * distance
+};
+
 /**
  * @brief AprilTag detector configuration
  */
@@ -379,7 +448,8 @@ struct DetectorConfig {
     int decimation = 2;          // Downsampling factor (1-4)
     double sigma = 0.0;          // Gaussian blur sigma (0 = off)
     int nthreads = 4;            // Detection threads
-    bool refine_edges = true;    // Subpixel edge refinement
+    bool refine_edges = true;    // Subpixel edge refinement (AprilTag library)
+    bool subpixel_refine = true; // Additional OpenCV cornerSubPix refinement (Phase 1)
     int max_hamming = 1;         // Max bit errors to accept
     double min_margin = 20.0;    // Minimum decision margin
     int max_tags_per_frame = 16; // Limit detections per frame
@@ -394,6 +464,27 @@ struct TrackerConfig {
     double filter_alpha = 0.3;   // EMA filter coefficient (0-1)
     bool roi_enable = false;     // Use predicted ROI for next frame
     double velocity_decay = 0.9; // Velocity decay per frame
+};
+
+/**
+ * @brief Calibration quality thresholds and validation mode
+ */
+struct CalibrationConfig {
+    // Quality thresholds (RMS reprojection error in pixels)
+    double min_rms_for_excellent = 0.3;
+    double min_rms_for_good = 0.5;
+    double min_rms_for_acceptable = 1.0;
+
+    // Spatial coverage requirements
+    bool require_spatial_coverage = true;
+    int min_samples_per_region = 3;  // For 3x3 grid
+
+    // Validation mode from set distance
+    bool validation_mode_enable = false;
+    double validation_distance_m = 1.5;       // Distance to place tag for validation
+    int validation_frames_required = 30;      // Frames to collect
+    double max_distance_error_cm = 2.0;       // Maximum acceptable error in cm
+    double max_angle_error_deg = 2.0;         // Maximum acceptable angle error in degrees
 };
 
 /**
@@ -453,6 +544,7 @@ struct Config {
     std::vector<CameraConfig> cameras;
     DetectorConfig detector;
     TrackerConfig tracker;
+    CalibrationConfig calibration;
     FieldLayout field;
     OutputConfig output;
     PerformanceConfig performance;
