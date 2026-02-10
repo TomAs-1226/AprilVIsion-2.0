@@ -1,9 +1,9 @@
 #!/bin/bash
 #===============================================================================
-# AprilVision 2.1 - Ultimate FRC AprilTag Vision System
+# AprilVision 3.1 - Ultimate FRC AprilTag Vision System
 # Complete Setup Script - One script to build, configure, and deploy
 #
-# Version 2.1 includes:
+# Version 3.1 includes:
 #   - Phase 1: Sub-pixel refinement + MegaTag fusion
 #   - Phase 2: Runtime monitoring + pose consistency
 #   - Fixed: Angle & distance calculations (coordinate systems)
@@ -78,7 +78,7 @@ EOF
     echo -e "${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
     echo -e "${GREEN}║${NC}  ${YELLOW}Ultimate FRC AprilTag Vision System${NC}                    ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  Version 2.1 - Phase 1 & 2 Complete                    ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  Version 3.1 - Phase 1 + 2 + 3 + Java Integration                    ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}  ${BLUE}Accuracy:${NC} <2cm @ 1.5m, <5cm @ 3m, <2° angle           ${GREEN}║${NC}"
     echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
     echo ""
@@ -156,7 +156,7 @@ done
 #===============================================================================
 
 validate_phase_files() {
-    log_info "Validating AprilVision 2.1 files (Phase 1/2)..."
+    log_info "Validating AprilVision 3.1 files (Phase 1/2)..."
 
     local missing_files=()
 
@@ -177,7 +177,7 @@ validate_phase_files() {
     done
 
     if [[ ${#missing_files[@]} -gt 0 ]]; then
-        log_error "Missing required AprilVision 2.1 files:"
+        log_error "Missing required AprilVision 3.1 files:"
         for file in "${missing_files[@]}"; do
             echo "  - $file"
         done
@@ -193,7 +193,7 @@ validate_phase_files() {
         log_warn "Phase 1 calibration validation not configured in config.yml"
     fi
 
-    log_success "AprilVision 2.1 files validated"
+    log_success "AprilVision 3.1 files validated"
 }
 
 #===============================================================================
@@ -201,7 +201,7 @@ validate_phase_files() {
 #===============================================================================
 
 install_dependencies() {
-    log_info "Installing system dependencies for AprilVision 2.1..."
+    log_info "Installing system dependencies for AprilVision 3.1..."
 
     # Check if we need to install packages
     PACKAGES_NEEDED=false
@@ -240,7 +240,7 @@ install_dependencies() {
         log_info "OpenCV version: $OPENCV_VER"
 
         if [[ "$OPENCV_VER" == "3."* ]]; then
-            log_warn "OpenCV 3.x detected. AprilVision 2.1 works best with OpenCV 4.x"
+            log_warn "OpenCV 3.x detected. AprilVision 3.1 works best with OpenCV 4.x"
             log_warn "Consider upgrading for optimal Phase 1/2 performance"
         fi
     fi
@@ -251,7 +251,7 @@ install_dependencies() {
 #===============================================================================
 
 build_project() {
-    log_info "Building AprilVision 2.1 (Phase 1/2 enhanced)..."
+    log_info "Building AprilVision 3.1 (Phase 1/2 enhanced)..."
 
     # IMPORTANT: Stop service first to avoid "text file busy" error
     if systemctl is-active --quiet frc_vision 2>/dev/null; then
@@ -276,7 +276,7 @@ build_project() {
 
     if [[ -f "${BUILD_DIR}/frc_vision" ]]; then
         log_success "Build successful: ${BUILD_DIR}/frc_vision"
-        log_info "AprilVision 2.1 binary includes:"
+        log_info "AprilVision 3.1 binary includes:"
         echo "  ✓ Phase 1: Sub-pixel refinement + MegaTag fusion"
         echo "  ✓ Phase 2: Runtime monitoring + pose consistency"
         echo "  ✓ Fixed coordinate systems for accurate angles"
@@ -432,7 +432,7 @@ install_service() {
 
     sudo tee "$SERVICE_FILE" > /dev/null << 'EOF'
 [Unit]
-Description=AprilVision 2.1 - Ultimate FRC AprilTag Vision System
+Description=AprilVision 3.1 - Ultimate FRC AprilTag Vision System
 Documentation=https://github.com/TomAs-1226/AprilVIsion-2.0
 After=network.target
 Wants=network.target
@@ -572,7 +572,7 @@ print_completion_message() {
     echo ""
     echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║${NC}                                                                   ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  ${YELLOW}🎉  AprilVision 2.1 Setup Complete!${NC}                           ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}  ${YELLOW}🎉  AprilVision 3.1 Setup Complete!${NC}                           ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}                                                                   ${GREEN}║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -616,7 +616,7 @@ main() {
     check_root
     check_arch
 
-    # NEW: Validate AprilVision 2.1 Phase 1/2 files
+    # NEW: Validate AprilVision 3.1 Phase 1/2 files
     validate_phase_files
 
     if $INSTALL_ONLY; then
