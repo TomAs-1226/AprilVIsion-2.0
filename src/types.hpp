@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -173,6 +174,7 @@ struct TagDetection {
     bool pose_valid = false;
     Pose3D tag_to_camera;        // Transform from tag frame to camera frame
     double reprojection_error = std::numeric_limits<double>::max();
+    double distance_m = 0.0;     // Distance to tag in meters (from PnP or pinhole)
 
     // For tracking
     int track_id = -1;           // Persistent track ID
@@ -301,7 +303,7 @@ struct CameraConfig {
     std::string device = "/dev/video0";
     int width = 640;
     int height = 480;
-    int fps = 60;
+    int fps = 30;                // 30fps balances detection rate vs CPU
     int exposure = -1;           // -1 = auto
     int gain = -1;               // -1 = auto
     std::string format = "MJPG"; // MJPG or YUYV
@@ -325,17 +327,46 @@ struct CameraIntrinsics {
     double cy = 0;  // Principal point Y
 
     bool valid() const {
-        return !camera_matrix.empty() && camera_matrix.rows == 3;
+        return !camera_matrix.empty() && camera_matrix.rows == 3 && fx > 0;
     }
 
     // Extract fx, fy, cx, cy from camera matrix
     void update_from_matrix() {
-        if (valid()) {
+        if (!camera_matrix.empty() && camera_matrix.rows == 3) {
             fx = camera_matrix.at<double>(0, 0);
             fy = camera_matrix.at<double>(1, 1);
             cx = camera_matrix.at<double>(0, 2);
             cy = camera_matrix.at<double>(1, 2);
         }
+    }
+
+    /**
+     * @brief Create default intrinsics for uncalibrated cameras.
+     * Uses typical USB webcam parameters (~65 degree HFOV).
+     * Good enough for approximate pose estimation until proper calibration.
+     */
+    static CameraIntrinsics create_default(int w, int h) {
+        CameraIntrinsics intr;
+        intr.width = w;
+        intr.height = h;
+
+        // Typical USB webcam: ~65° horizontal FOV
+        // f = width / (2 * tan(hfov/2)) = width / (2 * tan(32.5°))
+        double f = w / (2.0 * std::tan(32.5 * M_PI / 180.0));
+
+        intr.camera_matrix = (cv::Mat_<double>(3, 3) <<
+            f, 0, w / 2.0,
+            0, f, h / 2.0,
+            0, 0, 1.0);
+
+        intr.dist_coeffs = cv::Mat::zeros(5, 1, CV_64F);
+
+        intr.fx = f;
+        intr.fy = f;
+        intr.cx = w / 2.0;
+        intr.cy = h / 2.0;
+
+        return intr;
     }
 };
 

@@ -235,13 +235,43 @@ void Camera::configure_camera() {
         std::system(cmd.c_str());
     }
 
-    // Verify settings
+    // Verify settings and force lower res if camera didn't respect request
     double actual_width = cap_.get(cv::CAP_PROP_FRAME_WIDTH);
     double actual_height = cap_.get(cv::CAP_PROP_FRAME_HEIGHT);
     double actual_fps = cap_.get(cv::CAP_PROP_FPS);
 
+    // If camera negotiated higher res than requested, try common lower resolutions
+    if (actual_width > config_.width || actual_height > config_.height) {
+        std::cout << "[Camera " << id_ << "] WARNING: Camera gave " << actual_width << "x"
+                  << actual_height << " instead of " << config_.width << "x" << config_.height
+                  << ". Trying fallback resolutions..." << std::endl;
+
+        struct Res { int w, h; };
+        Res fallbacks[] = {{640, 480}, {800, 600}, {320, 240}};
+        for (auto& r : fallbacks) {
+            cap_.set(cv::CAP_PROP_FRAME_WIDTH, r.w);
+            cap_.set(cv::CAP_PROP_FRAME_HEIGHT, r.h);
+            actual_width = cap_.get(cv::CAP_PROP_FRAME_WIDTH);
+            actual_height = cap_.get(cv::CAP_PROP_FRAME_HEIGHT);
+            if (actual_width <= config_.width + 10) {
+                std::cout << "[Camera " << id_ << "] Fallback resolution: "
+                          << actual_width << "x" << actual_height << std::endl;
+                break;
+            }
+        }
+    }
+
+    // Verify FPS - some cameras ignore the set and stay at 30 or 60
+    if (actual_fps > config_.fps + 5) {
+        std::cout << "[Camera " << id_ << "] WARNING: Camera running at " << actual_fps
+                  << "fps instead of " << config_.fps << "fps" << std::endl;
+        cap_.set(cv::CAP_PROP_FPS, config_.fps);
+    }
+
+    actual_fps = cap_.get(cv::CAP_PROP_FPS);
     std::cout << "[Camera " << id_ << "] Configured: "
               << actual_width << "x" << actual_height << " @ " << actual_fps << " fps"
+              << " (requested " << config_.width << "x" << config_.height << " @ " << config_.fps << ")"
               << std::endl;
 }
 
@@ -318,6 +348,11 @@ void Camera::capture_loop() {
             f.frame_number = frame_number_++;
             f.capture_time = capture_time;
             f.capture_wall_time = capture_wall;
+
+            // Save dimensions BEFORE move (use-after-move = undefined behavior / crash)
+            int frame_width = frame.cols;
+            int frame_height = frame.rows;
+
             // Move the mat data - avoids expensive deep copy.
             // retrieve() will allocate a new buffer on the next call.
             f.image = std::move(frame);
@@ -328,7 +363,7 @@ void Camera::capture_loop() {
 
             if (local_frame_count <= 3 || local_frame_count % 2000 == 0) {
                 std::cout << "[Camera " << id_ << "] Frame " << local_frame_count
-                          << " (" << f.image.cols << "x" << f.image.rows << ")" << std::endl;
+                          << " (" << frame_width << "x" << frame_height << ")" << std::endl;
             }
 
             fps_frame_count_++;

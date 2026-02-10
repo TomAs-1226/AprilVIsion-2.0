@@ -37,6 +37,9 @@ class VisionDashboard {
         // Setup configuration controls
         this.setupConfigControls();
 
+        // Setup accuracy testing controls
+        this.setupAccuracyControls();
+
         // Load current config
         this.loadConfig();
 
@@ -288,6 +291,12 @@ class VisionDashboard {
             tagsEl.textContent = `${data.tags.length} tags`;
         }
 
+        // Update debug per-tag data
+        this.updateDebugTags(data);
+
+        // Update debug latency
+        this.updateDebugLatency(camId, data);
+
         // Draw overlay
         if (this.showOverlay) {
             this.drawCameraOverlay(camId, data);
@@ -320,7 +329,21 @@ class VisionDashboard {
 
         // Draw field
         if (data.valid) {
-            this.drawField(pose);
+            this.drawField(pose, data.reference);
+        }
+
+        // Update accuracy error display
+        if (data.reference && data.reference.set) {
+            const el = document.getElementById('accuracy-result');
+            if (el) el.style.display = 'block';
+            const setVal = (id, val, digits=3) => {
+                const e = document.getElementById(id);
+                if (e) e.textContent = val.toFixed(digits);
+            };
+            setVal('err-x', data.reference.error_x);
+            setVal('err-y', data.reference.error_y);
+            setVal('err-theta', data.reference.error_theta_deg, 1);
+            setVal('err-dist', data.reference.error_distance);
         }
     }
 
@@ -352,6 +375,102 @@ class VisionDashboard {
             ntStatus.textContent = 'NT: Disconnected';
             ntStatus.classList.remove('connected');
             ntStatus.classList.add('disconnected');
+        }
+    }
+
+    // =========================================================================
+    // Drawing
+    // =========================================================================
+
+    // =========================================================================
+    // Debug Data
+    // =========================================================================
+
+    updateDebugTags(data) {
+        const el = document.getElementById('debug-tags');
+        if (!el) return;
+
+        if (data.tags.length === 0) {
+            el.innerHTML = `<span class="muted">Cam ${data.camera_id}: No tags</span>`;
+            return;
+        }
+
+        let html = `<div class="debug-cam-header">Cam ${data.camera_id}</div>`;
+        for (const tag of data.tags) {
+            const dist = tag.distance_m ? tag.distance_m.toFixed(2) + 'm' : '--';
+            const reproj = tag.reproj_error ? tag.reproj_error.toFixed(1) + 'px' : '--';
+            const pxSize = tag.pixel_size ? tag.pixel_size.toFixed(0) + 'px' : '--';
+
+            html += `<div class="debug-tag-row">
+                <span class="tag-id">Tag ${tag.id}</span>
+                <span class="tag-dist">${dist}</span>
+                <span class="tag-px">${pxSize}</span>
+                <span class="tag-reproj">${reproj}</span>
+                <span class="tag-margin">M:${tag.margin.toFixed(0)}</span>
+            </div>`;
+        }
+
+        if (data.robot_pose) {
+            html += `<div class="debug-pose-row">Pose: (${data.robot_pose.x.toFixed(2)}, ${data.robot_pose.y.toFixed(2)}, ${data.robot_pose.theta_deg.toFixed(1)}°)</div>`;
+        }
+
+        el.innerHTML = html;
+    }
+
+    updateDebugLatency(camId, data) {
+        const el = document.getElementById('debug-latency');
+        if (!el) return;
+
+        // Store per-camera latency
+        if (!this._latencyData) this._latencyData = {};
+        this._latencyData[camId] = data.latency || {
+            detect_ms: 0, pose_ms: 0, total_ms: data.latency_ms
+        };
+
+        let html = '';
+        for (const [cam, lat] of Object.entries(this._latencyData)) {
+            html += `<div class="debug-latency-row">
+                <span>Cam ${cam}:</span>
+                <span>Det: ${lat.detect_ms.toFixed(1)}ms</span>
+                <span>Pose: ${lat.pose_ms.toFixed(1)}ms</span>
+                <span>Total: ${lat.total_ms.toFixed(1)}ms</span>
+            </div>`;
+        }
+        el.innerHTML = html;
+    }
+
+    setupAccuracyControls() {
+        const setBtn = document.getElementById('set-reference');
+        const clearBtn = document.getElementById('clear-reference');
+
+        if (setBtn) {
+            setBtn.addEventListener('click', async () => {
+                const x = parseFloat(document.getElementById('ref-x').value) || 0;
+                const y = parseFloat(document.getElementById('ref-y').value) || 0;
+                const theta_deg = parseFloat(document.getElementById('ref-theta').value) || 0;
+
+                try {
+                    await fetch('/api/debug/reference', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({x, y, theta_deg})
+                    });
+                    document.getElementById('accuracy-result').style.display = 'block';
+                } catch (e) {
+                    console.error('Failed to set reference:', e);
+                }
+            });
+        }
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', async () => {
+                try {
+                    await fetch('/api/debug/reference', {method: 'DELETE'});
+                    document.getElementById('accuracy-result').style.display = 'none';
+                } catch (e) {
+                    console.error('Failed to clear reference:', e);
+                }
+            });
         }
     }
 
@@ -403,10 +522,12 @@ class VisionDashboard {
             ctx.textAlign = 'center';
             ctx.fillText(tag.id.toString(), center[0] * scaleX, center[1] * scaleY - 10);
 
-            // Draw margin
+            // Draw margin and distance
             ctx.fillStyle = '#ffffff';
             ctx.font = '10px sans-serif';
-            ctx.fillText(`M:${tag.margin.toFixed(0)}`, center[0] * scaleX, center[1] * scaleY + 20);
+            const marginStr = `M:${tag.margin.toFixed(0)}`;
+            const distStr = tag.distance_m ? `${tag.distance_m.toFixed(2)}m` : '';
+            ctx.fillText(`${marginStr} ${distStr}`, center[0] * scaleX, center[1] * scaleY + 20);
         });
     }
 
@@ -420,7 +541,7 @@ class VisionDashboard {
         }
     }
 
-    drawField(pose = null) {
+    drawField(pose = null, reference = null) {
         if (!this.fieldCtx) return;
 
         const ctx = this.fieldCtx;
@@ -488,9 +609,39 @@ class VisionDashboard {
             ctx.font = '10px sans-serif';
             ctx.textAlign = 'left';
             ctx.fillText(
-                `(${pose.x.toFixed(2)}, ${pose.y.toFixed(2)})`,
+                `(${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}, ${pose.theta_deg.toFixed(1)}°)`,
                 offsetX + 5, offsetY + 12
             );
+        }
+
+        // Draw reference position (yellow outline) if set
+        if (reference && reference.set) {
+            const refX = offsetX + reference.ref_x * scale;
+            const refY = offsetY + (FIELD_WIDTH - reference.ref_y) * scale;
+            const robotSize = 0.5 * scale;
+
+            ctx.save();
+            ctx.translate(refX, refY);
+            ctx.rotate(-reference.ref_theta || 0);
+
+            ctx.strokeStyle = '#ffaa00';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(-robotSize / 2, -robotSize / 2, robotSize, robotSize);
+            ctx.setLineDash([]);
+
+            ctx.restore();
+
+            // Show error distance
+            if (reference.error_distance !== undefined) {
+                ctx.fillStyle = '#ffaa00';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(
+                    `Err: ${reference.error_distance.toFixed(3)}m`,
+                    offsetX + FIELD_LENGTH * scale - 5, offsetY + 12
+                );
+            }
         }
     }
 

@@ -416,11 +416,19 @@ void VisionPipeline::annotate_frame(cv::Mat& image, const FrameDetections& detec
                    cv::Point(center.x + 10, center.y - 10),
                    cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_TEXT, 2);
 
-        // Draw margin
+        // Draw margin and distance
         std::string margin_str = "M:" + std::to_string(static_cast<int>(det.decision_margin));
         cv::putText(image, margin_str,
                    cv::Point(center.x + 10, center.y + 15),
                    cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_TEXT, 1);
+
+        // Distance on screen
+        if (det.distance_m > 0.01) {
+            std::string dist_str = std::to_string(det.distance_m).substr(0, 4) + "m";
+            cv::putText(image, dist_str,
+                       cv::Point(center.x + 10, center.y + 30),
+                       cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_CORNER, 1);
+        }
     }
 
     // Draw robot pose if valid

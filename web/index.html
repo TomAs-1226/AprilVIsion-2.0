@@ -115,6 +115,53 @@
                 </div>
             </div>
 
+            <!-- Debug & Accuracy Panel -->
+            <div class="panel debug-panel">
+                <h3>Debug & Accuracy</h3>
+                <div class="debug-section">
+                    <h4>Per-Tag Data</h4>
+                    <div id="debug-tags" class="debug-tags-list">
+                        <span class="muted">Waiting for detections...</span>
+                    </div>
+                </div>
+                <div class="debug-section">
+                    <h4>Per-Camera Latency</h4>
+                    <div id="debug-latency" class="debug-latency-list">
+                        <span class="muted">--</span>
+                    </div>
+                </div>
+                <div class="debug-section">
+                    <h4>Accuracy Test</h4>
+                    <p class="muted small-text">Place robot at known position, enter coordinates, click Set.</p>
+                    <div class="accuracy-inputs">
+                        <div class="config-row">
+                            <label for="ref-x">X (m):</label>
+                            <input type="number" id="ref-x" step="0.01" value="0" style="width:70px">
+                        </div>
+                        <div class="config-row">
+                            <label for="ref-y">Y (m):</label>
+                            <input type="number" id="ref-y" step="0.01" value="0" style="width:70px">
+                        </div>
+                        <div class="config-row">
+                            <label for="ref-theta">θ (°):</label>
+                            <input type="number" id="ref-theta" step="1" value="0" style="width:70px">
+                        </div>
+                        <div class="config-buttons">
+                            <button id="set-reference">Set Reference</button>
+                            <button id="clear-reference">Clear</button>
+                        </div>
+                    </div>
+                    <div id="accuracy-result" class="accuracy-result" style="display:none;">
+                        <div class="pose-row"><label>Error X:</label><span id="err-x">--</span><span class="unit">m</span></div>
+                        <div class="pose-row"><label>Error Y:</label><span id="err-y">--</span><span class="unit">m</span></div>
+                        <div class="pose-row"><label>Error θ:</label><span id="err-theta">--</span><span class="unit">°</span></div>
+                        <div class="pose-row"><label>Error Dist:</label><span id="err-dist">--</span><span class="unit">m</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="data-panels" style="margin-top: 0;">
             <!-- Configuration Panel -->
             <div class="panel config-panel">
                 <h3>Configuration</h3>

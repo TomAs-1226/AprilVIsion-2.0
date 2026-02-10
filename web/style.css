@@ -389,6 +389,114 @@ footer {
     animation: pulse 1s infinite;
 }
 
+/* Debug Panel */
+.debug-panel h4 {
+    font-size: 0.9rem;
+    color: var(--accent-blue);
+    margin-bottom: 6px;
+}
+
+.debug-section {
+    margin-bottom: 12px;
+}
+
+.debug-cam-header {
+    font-size: 0.8rem;
+    color: var(--accent-green);
+    margin-bottom: 2px;
+    font-weight: bold;
+}
+
+.debug-tag-row {
+    display: flex;
+    gap: 8px;
+    font-size: 0.8rem;
+    font-family: 'Courier New', monospace;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(42, 58, 94, 0.3);
+}
+
+.debug-tag-row .tag-id { color: var(--accent); min-width: 50px; }
+.debug-tag-row .tag-dist { color: var(--accent-green); min-width: 50px; }
+.debug-tag-row .tag-px { color: var(--text-secondary); min-width: 40px; }
+.debug-tag-row .tag-reproj { color: var(--warning); min-width: 50px; }
+.debug-tag-row .tag-margin { color: var(--text-secondary); }
+
+.debug-pose-row {
+    font-size: 0.8rem;
+    color: var(--accent-blue);
+    margin-top: 4px;
+    font-family: 'Courier New', monospace;
+}
+
+.debug-latency-row {
+    display: flex;
+    gap: 10px;
+    font-size: 0.8rem;
+    font-family: 'Courier New', monospace;
+    color: var(--text-secondary);
+    padding: 2px 0;
+}
+
+.debug-latency-row span:first-child {
+    color: var(--accent-blue);
+    min-width: 50px;
+}
+
+.muted { color: var(--text-secondary); }
+.small-text { font-size: 0.8rem; margin-bottom: 6px; }
+
+.accuracy-inputs {
+    margin: 6px 0;
+}
+
+.accuracy-inputs .config-row {
+    margin-bottom: 4px;
+}
+
+.accuracy-inputs input[type="number"] {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    width: 70px;
+}
+
+.accuracy-result {
+    margin-top: 8px;
+    padding: 8px;
+    background: rgba(233, 69, 96, 0.1);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+}
+
+.accuracy-result .pose-row {
+    font-size: 0.85rem;
+    margin-bottom: 2px;
+}
+
+.accuracy-result .pose-row label {
+    width: 70px;
+    font-size: 0.85rem;
+}
+
+.accuracy-result .pose-row span {
+    font-size: 0.85rem;
+}
+
+#set-reference {
+    background: var(--accent);
+    color: white;
+}
+
+#clear-reference {
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
 /* Overlay Colors */
 .overlay-tag {
     stroke: var(--accent-green);

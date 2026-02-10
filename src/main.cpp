@@ -285,12 +285,25 @@ int main(int argc, char* argv[]) {
         // Load intrinsics first (fast)
         for (int i = 0; i < num_cameras; i++) {
             const auto& cam_config = config.cameras[i];
+            bool loaded = false;
+
             if (!cam_config.intrinsics_file.empty()) {
                 fs::path intr_path = fs::path(config_path).parent_path() / cam_config.intrinsics_file;
                 auto intr = ConfigManager::load_intrinsics(intr_path.string());
                 if (intr) {
                     intrinsics[i] = *intr;
+                    loaded = true;
                 }
+            }
+
+            // Generate default intrinsics if calibration file not found.
+            // Uses typical USB webcam parameters (~65 deg HFOV).
+            // Approximate but MUCH better than no intrinsics (which disables PnP entirely).
+            if (!loaded || !intrinsics[i].valid()) {
+                intrinsics[i] = CameraIntrinsics::create_default(cam_config.width, cam_config.height);
+                std::cout << "[Main] Camera " << i << ": using default intrinsics"
+                          << " (fx=" << intrinsics[i].fx << "). Calibrate for better accuracy!"
+                          << std::endl;
             }
         }
 

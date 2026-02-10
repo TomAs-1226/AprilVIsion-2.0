@@ -69,6 +69,9 @@ TagDetection PoseEstimator::estimate_single_tag(
     result.tag_to_camera = Pose3D::from_rvec_tvec(rvec, tvec);
     result.pose_valid = true;
 
+    // Distance from PnP solution (more accurate than pinhole approximation)
+    result.distance_m = cv::norm(tvec);
+
     return result;
 }
 

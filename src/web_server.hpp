@@ -94,6 +94,28 @@ public:
      */
     int websocket_client_count() const;
 
+    /**
+     * @brief Set reference position for accuracy testing.
+     * Place the robot at a known field position and call this.
+     * The dashboard will then show error = (measured - reference).
+     */
+    void set_reference_pose(double x, double y, double theta);
+
+    /**
+     * @brief Clear reference position
+     */
+    void clear_reference_pose();
+
+    /**
+     * @brief Check if reference pose is set
+     */
+    bool has_reference_pose() const { return ref_pose_set_; }
+
+    /**
+     * @brief Get reference pose
+     */
+    Pose2D get_reference_pose() const { return ref_pose_; }
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -108,6 +130,10 @@ private:
     int jpeg_quality_ = 70;
 
     ConfigManager* config_manager_ = nullptr;
+
+    // Reference pose for accuracy testing
+    Pose2D ref_pose_;
+    std::atomic<bool> ref_pose_set_{false};
 };
 
 } // namespace frc_vision

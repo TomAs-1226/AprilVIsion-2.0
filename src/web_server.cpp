@@ -11,6 +11,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/videoio.hpp>
 #include <opencv2/imgproc.hpp>
+#include <cmath>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -465,6 +466,58 @@ bool WebServer::initialize(int port, const std::string& web_root,
     });
 
     // ==========================================================================
+    // Accuracy Testing Endpoints
+    // ==========================================================================
+
+    // Set reference position for accuracy comparison.
+    // POST /api/debug/reference  {"x": 1.5, "y": 3.0, "theta_deg": 0}
+    // Place robot at known position, set reference, then see error in real time.
+    impl_->server.Post("/api/debug/reference", [this](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        try {
+            auto j = json::parse(req.body);
+            double x = j.value("x", 0.0);
+            double y = j.value("y", 0.0);
+            double theta = j.value("theta_deg", 0.0) * M_PI / 180.0;
+            if (j.contains("theta")) theta = j["theta"].get<double>();
+
+            set_reference_pose(x, y, theta);
+
+            json response;
+            response["status"] = "set";
+            response["x"] = x;
+            response["y"] = y;
+            response["theta_deg"] = theta * 180.0 / M_PI;
+            res.set_content(response.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 400;
+            res.set_content("{\"error\": \"" + std::string(e.what()) + "\"}", "application/json");
+        }
+    });
+
+    // Clear reference position
+    impl_->server.Delete("/api/debug/reference", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        clear_reference_pose();
+        res.set_content("{\"status\": \"cleared\"}", "application/json");
+    });
+
+    // Get current reference position
+    impl_->server.Get("/api/debug/reference", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        json j;
+        if (ref_pose_set_.load()) {
+            j["set"] = true;
+            j["x"] = ref_pose_.x;
+            j["y"] = ref_pose_.y;
+            j["theta_deg"] = ref_pose_.theta * 180.0 / M_PI;
+        } else {
+            j["set"] = false;
+        }
+        res.set_content(j.dump(), "application/json");
+    });
+
+    // ==========================================================================
     // Calibration Endpoints
     // ==========================================================================
 
@@ -757,10 +810,35 @@ void WebServer::push_detections(const FrameDetections& detections) {
 
         if (det.pose_valid) {
             tag["reproj_error"] = det.reprojection_error;
+            tag["distance_m"] = det.distance_m;
+
+            // Per-tag PnP pose (tag-to-camera translation gives distance components)
+            tag["depth"] = {
+                {"x", det.tag_to_camera.position.x},
+                {"y", det.tag_to_camera.position.y},
+                {"z", det.tag_to_camera.position.z}
+            };
         }
+
+        // Pixel size for debug
+        double edge_sum = 0;
+        for (int i = 0; i < 4; i++) {
+            int ni = (i + 1) % 4;
+            double dx = det.corners.corners[ni].x - det.corners.corners[i].x;
+            double dy = det.corners.corners[ni].y - det.corners.corners[i].y;
+            edge_sum += std::sqrt(dx * dx + dy * dy);
+        }
+        tag["pixel_size"] = edge_sum / 4.0;
 
         j["tags"].push_back(tag);
     }
+
+    // Latency breakdown
+    j["latency"] = {
+        {"detect_ms", detections.timestamps.detect_ms()},
+        {"pose_ms", detections.timestamps.pose_ms()},
+        {"total_ms", detections.timestamps.total_pipeline_ms()}
+    };
 
     if (detections.multi_tag_pose_valid) {
         j["robot_pose"] = {
@@ -817,6 +895,31 @@ void WebServer::push_fused_pose(const FusedPose& fused) {
     j["cameras_contributing"] = fused.cameras_contributing;
     j["total_tags"] = fused.total_tags;
 
+    // Reference pose error for accuracy testing
+    if (ref_pose_set_.load()) {
+        double dx = fused.pose_filtered.x - ref_pose_.x;
+        double dy = fused.pose_filtered.y - ref_pose_.y;
+        double dtheta = fused.pose_filtered.theta - ref_pose_.theta;
+        // Normalize theta error to [-pi, pi]
+        while (dtheta > M_PI) dtheta -= 2 * M_PI;
+        while (dtheta < -M_PI) dtheta += 2 * M_PI;
+
+        j["reference"] = {
+            {"set", true},
+            {"ref_x", ref_pose_.x},
+            {"ref_y", ref_pose_.y},
+            {"ref_theta", ref_pose_.theta},
+            {"ref_theta_deg", ref_pose_.theta * 180.0 / M_PI},
+            {"error_x", dx},
+            {"error_y", dy},
+            {"error_theta", dtheta},
+            {"error_theta_deg", dtheta * 180.0 / M_PI},
+            {"error_distance", std::sqrt(dx * dx + dy * dy)}
+        };
+    } else {
+        j["reference"] = {{"set", false}};
+    }
+
     impl_->latest_fused_json.set(j.dump());
 }
 
@@ -850,6 +953,20 @@ void WebServer::push_status(const SystemStatus& status) {
 
 int WebServer::websocket_client_count() const {
     return impl_->sse_client_count.load();
+}
+
+void WebServer::set_reference_pose(double x, double y, double theta) {
+    ref_pose_.x = x;
+    ref_pose_.y = y;
+    ref_pose_.theta = theta;
+    ref_pose_set_.store(true);
+    std::cout << "[WebServer] Reference pose set: (" << x << ", " << y
+              << ", " << (theta * 180.0 / M_PI) << " deg)" << std::endl;
+}
+
+void WebServer::clear_reference_pose() {
+    ref_pose_set_.store(false);
+    std::cout << "[WebServer] Reference pose cleared" << std::endl;
 }
 
 } // namespace frc_vision

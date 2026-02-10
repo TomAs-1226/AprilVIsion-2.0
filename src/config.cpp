@@ -92,7 +92,7 @@ bool ConfigManager::parse_cameras(void* node_ptr) {
         cam.device = cam_node["device"].as<std::string>("/dev/video0");
         cam.width = cam_node["width"].as<int>(640);
         cam.height = cam_node["height"].as<int>(480);
-        cam.fps = cam_node["fps"].as<int>(60);
+        cam.fps = cam_node["fps"].as<int>(30);
         cam.exposure = cam_node["exposure"].as<int>(-1);
         cam.gain = cam_node["gain"].as<int>(-1);
         cam.format = cam_node["format"].as<std::string>("MJPG");
@@ -185,19 +185,19 @@ bool ConfigManager::parse_performance(void* node_ptr) {
 
 Pose3D ConfigManager::parse_transform(void* node_ptr) {
     YAML::Node& node = *static_cast<YAML::Node*>(node_ptr);
-    Pose3D pose;
 
-    // Position
-    pose.position.x = node["x"].as<double>(0.0);
-    pose.position.y = node["y"].as<double>(0.0);
-    pose.position.z = node["z"].as<double>(0.0);
+    // Position: camera location in robot frame (WPILib: X=forward, Y=left, Z=up)
+    double cam_x = node["x"].as<double>(0.0);
+    double cam_y = node["y"].as<double>(0.0);
+    double cam_z = node["z"].as<double>(0.0);
 
-    // Rotation (roll, pitch, yaw in degrees -> convert to quaternion)
+    // Mounting angles in degrees (WPILib convention)
+    // yaw=0: camera faces forward, yaw=90: left, yaw=-90: right
     double roll = node["roll"].as<double>(0.0) * M_PI / 180.0;
     double pitch = node["pitch"].as<double>(0.0) * M_PI / 180.0;
     double yaw = node["yaw"].as<double>(0.0) * M_PI / 180.0;
 
-    // Convert Euler angles to quaternion (ZYX convention)
+    // User's mounting rotation as quaternion (ZYX Euler in WPILib robot coords)
     double cy = std::cos(yaw * 0.5);
     double sy = std::sin(yaw * 0.5);
     double cp = std::cos(pitch * 0.5);
@@ -205,12 +205,35 @@ Pose3D ConfigManager::parse_transform(void* node_ptr) {
     double cr = std::cos(roll * 0.5);
     double sr = std::sin(roll * 0.5);
 
-    pose.orientation.w = cr * cp * cy + sr * sp * sy;
-    pose.orientation.x = sr * cp * cy - cr * sp * sy;
-    pose.orientation.y = cr * sp * cy + sr * cp * sy;
-    pose.orientation.z = cr * cp * sy - sr * sp * cy;
+    Pose3D mounting;
+    mounting.position = Point3D(cam_x, cam_y, cam_z);
+    mounting.orientation.w = cr * cp * cy + sr * sp * sy;
+    mounting.orientation.x = sr * cp * cy - cr * sp * sy;
+    mounting.orientation.y = cr * sp * cy + sr * cp * sy;
+    mounting.orientation.z = cr * cp * sy - sr * sp * cy;
 
-    return pose;
+    // Standard OpenCV camera -> WPILib robot coordinate rotation.
+    // OpenCV: +Z=forward(depth), +X=right, +Y=down
+    // WPILib: +X=forward,        +Y=left,  +Z=up
+    //
+    // Camera +Z -> Robot +X,  Camera -X -> Robot +Y,  Camera -Y -> Robot +Z
+    // Rotation matrix: [[0,0,1],[-1,0,0],[0,-1,0]]
+    // Quaternion: (0.5, -0.5, 0.5, -0.5)
+    //
+    // Without this, theta is ~90° off because atan2(R[1,0],R[0,0]) measures
+    // the camera X-axis (RIGHT) angle instead of the Z-axis (FORWARD).
+    Pose3D opencv_to_wpilib;
+    opencv_to_wpilib.orientation = Quaternion(0.5, -0.5, 0.5, -0.5);
+
+    // Full camera_to_robot = mounting.compose(opencv_to_wpilib)
+    // First convert camera coords to WPILib, then apply mounting rotation + offset
+    Pose3D result = mounting.compose(opencv_to_wpilib);
+
+    std::cout << "[Config] Camera extrinsics: pos=(" << cam_x << "," << cam_y << "," << cam_z
+              << ") yaw=" << (yaw * 180.0 / M_PI) << " deg (OpenCV->WPILib rotation applied)"
+              << std::endl;
+
+    return result;
 }
 
 std::optional<CameraIntrinsics> ConfigManager::load_intrinsics(const std::string& path) {
@@ -250,7 +273,13 @@ std::optional<CameraIntrinsics> ConfigManager::load_intrinsics(const std::string
             intrinsics.dist_coeffs.convertTo(intrinsics.dist_coeffs, CV_64F);
         }
 
-        std::cout << "[Config] Loaded intrinsics from " << path << std::endl;
+        // Extract individual parameters (fx, fy, cx, cy) from the matrix.
+        // Without this call, fx=fy=0 and compute_tag_distance gives infinity.
+        intrinsics.update_from_matrix();
+
+        std::cout << "[Config] Loaded intrinsics from " << path
+                  << " (fx=" << intrinsics.fx << " fy=" << intrinsics.fy
+                  << " cx=" << intrinsics.cx << " cy=" << intrinsics.cy << ")" << std::endl;
         return intrinsics;
 
     } catch (const cv::Exception& e) {
