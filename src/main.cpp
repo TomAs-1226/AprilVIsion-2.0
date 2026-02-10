@@ -484,6 +484,21 @@ int main(int argc, char* argv[]) {
         while (!g_shutdown.load()) {
             auto start = SteadyClock::now();
 
+            // Read odometry from RoboRIO (via NT) for innovation gating
+            if (config.output.nt_enable && nt_publisher.is_connected()) {
+                auto rio_odom = nt_publisher.get_rio_odometry();
+                if (rio_odom.valid) {
+                    OdometryData odom;
+                    odom.pose.x = rio_odom.x;
+                    odom.pose.y = rio_odom.y;
+                    odom.pose.theta = rio_odom.theta;
+                    odom.angular_velocity = rio_odom.angular_velocity;
+                    odom.timestamp = SteadyClock::now();
+                    odom.valid = true;
+                    pipeline.fusion().update_odometry(odom);
+                }
+            }
+
             // Get fused pose
             auto fused = pipeline.get_fused_pose();
 

@@ -220,7 +220,16 @@ void NTPublisher::setup_publishers() {
     align_pubs_->has_target = align_table->GetBooleanTopic("has_target").Publish();
     align_pubs_->current_target_id = align_table->GetIntegerTopic("current_target_id").Publish();
 
-    std::cout << "[NT] Auto-align publishers initialized" << std::endl;
+    // Subscribe to RoboRIO odometry for innovation gating.
+    // The robot publishes its odometry pose so the coprocessor can reject
+    // vision measurements that disagree too strongly with where the robot is.
+    auto odom_table = table->GetSubTable("rio_odometry");
+    rio_odom_pose_sub_ = std::make_unique<nt::DoubleArraySubscriber>(
+        odom_table->GetDoubleArrayTopic("pose").Subscribe({}));
+    rio_odom_angular_vel_sub_ = std::make_unique<nt::DoubleSubscriber>(
+        odom_table->GetDoubleTopic("angular_velocity").Subscribe(0.0));
+
+    std::cout << "[NT] Publishers initialized (including RIO odometry subscriber)" << std::endl;
 }
 
 void NTPublisher::start(int rate_hz) {
@@ -377,8 +386,8 @@ void NTPublisher::publish_loop() {
             pub->avg_reproj_error.Set(det.avg_reproj_error());
             pub->pose_valid.Set(det.multi_tag_pose_valid);
 
-            // Compute quality and std devs
-            auto quality = PoseEstimator::compute_quality(det.detections, det.multi_tag_reproj_error);
+            // Use pre-computed quality from the pipeline (includes proper distance calc)
+            const auto& quality = det.quality;
             std::vector<double> std_devs_data = {quality.std_dev_x, quality.std_dev_y, quality.std_dev_theta};
             pub->std_devs.Set(std_devs_data);
             pub->confidence.Set(quality.confidence);
@@ -495,6 +504,25 @@ void NTPublisher::publish_loop() {
     }
 
     running_.store(false);
+}
+
+NTPublisher::RioOdometry NTPublisher::get_rio_odometry() const {
+    RioOdometry odom;
+
+    if (!rio_odom_pose_sub_ || !rio_odom_angular_vel_sub_) {
+        return odom;
+    }
+
+    auto pose_data = rio_odom_pose_sub_->Get();
+    if (pose_data.size() >= 3) {
+        odom.x = pose_data[0];
+        odom.y = pose_data[1];
+        odom.theta = pose_data[2];
+        odom.angular_velocity = rio_odom_angular_vel_sub_->Get();
+        odom.valid = true;
+    }
+
+    return odom;
 }
 
 void NTPublisher::flush() {

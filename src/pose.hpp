@@ -84,14 +84,32 @@ public:
         const Pose3D& camera_to_robot);
 
     /**
-     * @brief Get quality metrics for pose estimate
+     * @brief Compute distance to a tag using pinhole camera model.
+     * distance = (real_tag_size * focal_length) / pixel_tag_size
+     * @param detection Tag detection with corners
+     * @param intrinsics Camera intrinsic parameters
+     * @return Distance in meters
      */
-    static PoseQuality compute_quality(
-        const std::vector<TagDetection>& detections,
-        double reproj_error);
+    double compute_tag_distance(
+        const TagDetection& detection,
+        const CameraIntrinsics& intrinsics);
 
     /**
-     * @brief Estimate standard deviations based on detection quality
+     * @brief Get quality metrics for pose estimate.
+     * Includes standard deviations for WPILib SwerveDrivePoseEstimator fusion.
+     * @param detections Detected tags
+     * @param reproj_error Reprojection error in pixels
+     * @param intrinsics Camera intrinsics for distance calculation
+     */
+    PoseQuality compute_quality(
+        const std::vector<TagDetection>& detections,
+        double reproj_error,
+        const CameraIntrinsics& intrinsics);
+
+    /**
+     * @brief Estimate standard deviations based on detection quality.
+     * These values are consumed by the robot's pose estimator Kalman filter
+     * to weight vision measurements against wheel odometry.
      * @param tag_count Number of tags used
      * @param avg_distance Average distance to tags (meters)
      * @param reproj_error Reprojection error (pixels)

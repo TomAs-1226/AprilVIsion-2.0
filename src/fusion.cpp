@@ -35,7 +35,52 @@ void PoseFusion::update(const CameraPoseEstimate& estimate) {
         return;
     }
 
+    // Innovation gating: if odometry says robot is far from where
+    // vision thinks, reject the vision measurement. This prevents
+    // bad detections from corrupting the pose estimate.
+    if (estimate.valid && !passes_innovation_gate(estimate)) {
+        // Mark as invalid - don't use this measurement
+        CameraPoseEstimate rejected = estimate;
+        rejected.valid = false;
+        estimates_[estimate.camera_id] = rejected;
+        return;
+    }
+
     estimates_[estimate.camera_id] = estimate;
+}
+
+void PoseFusion::update_odometry(const OdometryData& odom) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    latest_odom_ = odom;
+}
+
+bool PoseFusion::passes_innovation_gate(const CameraPoseEstimate& estimate) const {
+    // If no odometry available, accept all vision measurements
+    if (!latest_odom_.valid) {
+        return true;
+    }
+
+    // Reject vision during fast rotation - cameras produce blurry/bad data
+    if (std::abs(latest_odom_.angular_velocity) > ANGULAR_VEL_REJECT) {
+        return false;
+    }
+
+    // Check distance between vision pose and odometry pose.
+    // If they disagree by more than INNOVATION_GATE_M, reject vision.
+    // This catches false positive tag detections.
+    double dx = estimate.pose.x - latest_odom_.pose.x;
+    double dy = estimate.pose.y - latest_odom_.pose.y;
+    double distance = std::sqrt(dx * dx + dy * dy);
+
+    if (distance > INNOVATION_GATE_M) {
+        std::cerr << "[Fusion] Innovation gate rejected cam" << estimate.camera_id
+                  << " vision: (" << estimate.pose.x << ", " << estimate.pose.y
+                  << ") odom: (" << latest_odom_.pose.x << ", " << latest_odom_.pose.y
+                  << ") dist: " << distance << "m" << std::endl;
+        return false;
+    }
+
+    return true;
 }
 
 FusedPose PoseFusion::get_fused_pose() {
@@ -310,7 +355,8 @@ ProcessedFrame VisionPipeline::process_frame(
     estimate.pose = multi_result.robot_pose_field;
     estimate.tag_count = multi_result.tags_used;
     estimate.timestamps = result.timestamps;
-    estimate.quality = PoseEstimator::compute_quality(detections, multi_result.reprojection_error);
+    estimate.quality = pose_estimator_->compute_quality(detections, multi_result.reprojection_error, intrinsics);
+    result.detections.quality = estimate.quality;
     fusion_.update(estimate);
 
     // Annotate frame for web streaming

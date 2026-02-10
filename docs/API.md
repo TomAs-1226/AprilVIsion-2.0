@@ -30,6 +30,20 @@ Primary pose data for robot localization and pose estimation.
 | `/FRCVision/fused/tag_count` | int | Number of tags used for pose |
 | `/FRCVision/fused/cameras_contributing` | int | Number of cameras with valid pose |
 
+### RoboRIO Odometry (Robot -> Coprocessor)
+
+The coprocessor subscribes to odometry from the robot for **innovation gating** -
+rejecting vision measurements that disagree too strongly with the robot's estimated pose.
+This prevents false positive tag detections from corrupting the pose.
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/FRCVision/rio_odometry/pose` | double[] | `[x, y, theta]` - Robot odometry pose from `poseEstimator.getEstimatedPosition()` |
+| `/FRCVision/rio_odometry/angular_velocity` | double | Gyro angular velocity (rad/s). Vison rejected when > 3 rad/s |
+
+The robot-side code should publish these values every cycle (~20ms). See `VisionSubsystem.java`
+for the implementation.
+
 ### Raw Fused Pose (Unfiltered)
 
 | Topic | Type | Description |

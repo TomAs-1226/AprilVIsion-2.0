@@ -58,6 +58,10 @@ public class VisionSubsystem extends SubsystemBase {
     private final BooleanSubscriber cam1ConnectedSub;
     private final BooleanSubscriber cam2ConnectedSub;
 
+    // Odometry publishers (robot -> vision coprocessor for innovation gating)
+    private final DoubleArrayPublisher rioOdomPosePub;
+    private final DoublePublisher rioOdomAngularVelPub;
+
     // Pose estimator reference (provided by drive subsystem)
     private SwerveDrivePoseEstimator poseEstimator;
 
@@ -111,6 +115,13 @@ public class VisionSubsystem extends SubsystemBase {
         cam1ConnectedSub = statusTable.getBooleanTopic("cam1_connected").subscribe(false);
         cam2ConnectedSub = statusTable.getBooleanTopic("cam2_connected").subscribe(false);
 
+        // Odometry publishers - send robot's odometry to coprocessor so it can
+        // reject vision measurements that disagree too much (innovation gating).
+        // This prevents false positive tag detections from corrupting the pose.
+        NetworkTable odomTable = visionTable.getSubTable("rio_odometry");
+        rioOdomPosePub = odomTable.getDoubleArrayTopic("pose").publish();
+        rioOdomAngularVelPub = odomTable.getDoubleTopic("angular_velocity").publish();
+
         // Initialize alignment to no target
         targetTagIdPub.set(-1);
         targetOffsetPub.set(new double[]{0.5, 0.0});
@@ -126,8 +137,32 @@ public class VisionSubsystem extends SubsystemBase {
 
     @Override
     public void periodic() {
+        publishOdometry();
         updatePoseEstimator();
         updateTelemetry();
+    }
+
+    /**
+     * Publishes robot odometry to the coprocessor for innovation gating.
+     * The coprocessor uses this to reject vision measurements that disagree
+     * too much with where the robot thinks it is (e.g., false tag detections).
+     */
+    private void publishOdometry() {
+        if (poseEstimator == null) return;
+
+        Pose2d currentPose = poseEstimator.getEstimatedPosition();
+        rioOdomPosePub.set(new double[]{
+            currentPose.getX(),
+            currentPose.getY(),
+            currentPose.getRotation().getRadians()
+        });
+
+        // Angular velocity should come from the gyro. If you have access to
+        // the drive subsystem's gyro rate, publish it here. For now, we use 0.0
+        // which disables the angular velocity rejection on the coprocessor.
+        // TODO: Replace with actual gyro rate from your drive subsystem:
+        //   rioOdomAngularVelPub.set(drive.getGyroRate());
+        rioOdomAngularVelPub.set(0.0);
     }
 
     /**
@@ -176,16 +211,16 @@ public class VisionSubsystem extends SubsystemBase {
             new Rotation2d(pose[2])
         );
 
-        // Scale standard deviations based on confidence and tag count
-        int tagCount = (int) tagCountSub.get();
-        double tagScale = tagCount > 1 ? 0.5 : 1.0;  // Multi-tag is more accurate
-        double confScale = 1.0 / Math.max(confidence, 0.1);
-        double scale = tagScale * confScale;
-
+        // The coprocessor computes distance-based standard deviations using
+        // the pinhole camera model: distance = (tag_size * focal_length) / pixel_size.
+        // These std_devs scale with distance^2 and 1/sqrt(tag_count), so they
+        // naturally weight close multi-tag readings higher than far single-tag ones.
+        // Just pass them through to the pose estimator - the coprocessor already
+        // did the hard work of computing proper values.
         var scaledStdDevs = VecBuilder.fill(
-            stdDevs[0] * scale,
-            stdDevs[1] * scale,
-            stdDevs[2] * scale
+            stdDevs[0],
+            stdDevs[1],
+            stdDevs[2]
         );
 
         // Add vision measurement to pose estimator with latency-compensated timestamp

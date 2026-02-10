@@ -181,6 +181,22 @@ struct TagDetection {
 };
 
 /**
+ * @brief Quality metrics for pose estimation
+ */
+struct PoseQuality {
+    int tag_count = 0;
+    double avg_margin = 0;
+    double avg_reproj_error = 0;
+    double confidence = 0;        // 0-1 confidence score
+
+    // Standard deviations for WPILib SwerveDrivePoseEstimator.
+    // These tell the robot's Kalman filter how much to trust vision vs odometry.
+    double std_dev_x = 0.1;       // meters
+    double std_dev_y = 0.1;       // meters
+    double std_dev_theta = 0.05;  // radians
+};
+
+/**
  * @brief Detection result for a single frame
  */
 struct FrameDetections {
@@ -196,6 +212,9 @@ struct FrameDetections {
     Pose2D robot_pose_field;     // Robot pose on field (2D)
     double multi_tag_reproj_error = 0;
     int tags_used_for_pose = 0;
+
+    // Pre-computed quality (set by pipeline, consumed by NT publisher)
+    PoseQuality quality;
 
     // Quality metrics
     double avg_margin() const {
@@ -255,21 +274,6 @@ struct ProcessedFrame {
 // =============================================================================
 // Fused Output Types
 // =============================================================================
-
-/**
- * @brief Quality metrics for pose estimation
- */
-struct PoseQuality {
-    int tag_count = 0;
-    double avg_margin = 0;
-    double avg_reproj_error = 0;
-    double confidence = 0;        // 0-1 confidence score
-
-    // Standard deviations for roboRIO pose estimation
-    double std_dev_x = 0.1;       // meters
-    double std_dev_y = 0.1;       // meters
-    double std_dev_theta = 0.05;  // radians
-};
 
 /**
  * @brief Fused robot pose from all cameras

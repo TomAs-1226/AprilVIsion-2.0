@@ -38,12 +38,14 @@ namespace nt {
     class NetworkTableInstance;
     class NetworkTable;
     class DoublePublisher;
+    class DoubleSubscriber;
     class DoubleArrayPublisher;
     class IntegerPublisher;
     class IntegerArrayPublisher;
     class BooleanPublisher;
     class StringPublisher;
     class IntegerSubscriber;
+    class DoubleSubscriber;
     class DoubleArraySubscriber;
 }
 
@@ -141,6 +143,19 @@ public:
     AlignTarget get_align_target() const;
 
     /**
+     * @brief Get latest odometry data from RoboRIO (subscribed via NT).
+     * The coprocessor uses this for innovation gating: rejecting vision
+     * measurements that disagree too much with where the robot thinks it is.
+     * @return Latest odometry pose, angular velocity, and validity
+     */
+    struct RioOdometry {
+        double x = 0, y = 0, theta = 0;
+        double angular_velocity = 0;
+        bool valid = false;
+    };
+    RioOdometry get_rio_odometry() const;
+
+    /**
      * @brief Force flush all published values
      */
     void flush();
@@ -183,6 +198,10 @@ private:
     std::atomic<bool> should_stop_{false};
     int publish_rate_hz_ = 50;
     int64_t heartbeat_counter_ = 0;
+
+    // RoboRIO odometry subscribers (for innovation gating on the coprocessor)
+    std::unique_ptr<nt::DoubleArraySubscriber> rio_odom_pose_sub_;
+    std::unique_ptr<nt::DoubleSubscriber> rio_odom_angular_vel_sub_;
 };
 
 } // namespace frc_vision

@@ -29,7 +29,19 @@ struct CameraPoseEstimate {
 };
 
 /**
- * @brief Multi-camera pose fusion
+ * @brief Odometry data received from the RoboRIO via NetworkTables.
+ * Used for innovation gating: reject vision poses that disagree
+ * too much with where odometry says the robot is.
+ */
+struct OdometryData {
+    Pose2D pose;
+    double angular_velocity = 0.0;  // rad/s - reject vision during fast turns
+    SteadyTimePoint timestamp;
+    bool valid = false;
+};
+
+/**
+ * @brief Multi-camera pose fusion with RoboRIO odometry integration
  */
 class PoseFusion {
 public:
@@ -43,10 +55,18 @@ public:
     void initialize(int num_cameras, double filter_alpha = 0.3);
 
     /**
-     * @brief Update with new pose estimate from a camera
+     * @brief Update with new pose estimate from a camera.
+     * Vision estimates are checked against odometry (if available)
+     * to reject outliers before fusion.
      * @param estimate Camera pose estimate
      */
     void update(const CameraPoseEstimate& estimate);
+
+    /**
+     * @brief Update odometry from RoboRIO (via NetworkTables).
+     * This is used for innovation gating, not for pose estimation itself.
+     */
+    void update_odometry(const OdometryData& odom);
 
     /**
      * @brief Get fused pose (call after updating all cameras for a frame)
@@ -81,6 +101,7 @@ public:
 
 private:
     double compute_weight(const CameraPoseEstimate& estimate) const;
+    bool passes_innovation_gate(const CameraPoseEstimate& estimate) const;
     Pose2D weighted_average(const std::vector<std::pair<Pose2D, double>>& poses) const;
     PoseQuality fuse_quality(const std::vector<CameraPoseEstimate>& estimates) const;
 
@@ -90,10 +111,17 @@ private:
     PoseSmoother smoother_;
     mutable std::mutex mutex_;
 
+    // Odometry from RoboRIO for innovation gating
+    OdometryData latest_odom_;
+
     // Fusion parameters
     double tag_weight_ = 2.0;     // Weight multiplier per tag
     double margin_weight_ = 0.01; // Weight per margin unit
     double error_penalty_ = 0.1;  // Penalty per pixel reproj error
+
+    // Innovation gate: reject vision if it disagrees with odom by more than this
+    static constexpr double INNOVATION_GATE_M = 2.0;       // meters
+    static constexpr double ANGULAR_VEL_REJECT = 3.0;      // rad/s - reject above this
 };
 
 /**

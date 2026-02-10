@@ -263,9 +263,47 @@ Pose2D PoseEstimator::camera_to_robot_pose(
     return result;
 }
 
+double PoseEstimator::compute_tag_distance(
+    const TagDetection& detection,
+    const CameraIntrinsics& intrinsics)
+{
+    // Pure vision distance using pinhole camera model:
+    // distance = (real_tag_size * focal_length) / pixel_tag_size
+    //
+    // pixel_tag_size = average of the 4 edge lengths of the detected tag
+    // corners in the image. This is more robust than using area because
+    // it handles perspective foreshortening better.
+
+    if (!intrinsics.valid()) {
+        // Fallback: rough estimate from pixel area
+        double area = detection.corners.area();
+        if (area < 1.0) return 10.0;
+        return (field_.tag_size_m * 500.0) / std::sqrt(area);
+    }
+
+    // Average focal length (fx and fy should be close for square pixels)
+    double focal = (intrinsics.fx + intrinsics.fy) / 2.0;
+
+    // Compute average edge length in pixels
+    const auto& c = detection.corners.corners;
+    double edge_sum = 0;
+    for (int i = 0; i < 4; i++) {
+        int j = (i + 1) % 4;
+        double dx = c[j].x - c[i].x;
+        double dy = c[j].y - c[i].y;
+        edge_sum += std::sqrt(dx * dx + dy * dy);
+    }
+    double avg_pixel_size = edge_sum / 4.0;
+
+    if (avg_pixel_size < 1.0) return 10.0;
+
+    return (field_.tag_size_m * focal) / avg_pixel_size;
+}
+
 PoseQuality PoseEstimator::compute_quality(
     const std::vector<TagDetection>& detections,
-    double reproj_error)
+    double reproj_error,
+    const CameraIntrinsics& intrinsics)
 {
     PoseQuality quality;
     quality.tag_count = static_cast<int>(detections.size());
@@ -276,30 +314,29 @@ PoseQuality PoseEstimator::compute_quality(
     }
 
     double margin_sum = 0;
-    double area_sum = 0;
+    double distance_sum = 0;
     for (const auto& det : detections) {
         margin_sum += det.decision_margin;
-        area_sum += det.corners.area();
+        distance_sum += compute_tag_distance(det, intrinsics);
     }
 
     quality.avg_margin = margin_sum / detections.size();
-
-    // Estimate distance from tag pixel area
-    // Larger area = closer = more accurate
-    double avg_area = area_sum / detections.size();
-    double estimated_distance = 1000.0 / std::sqrt(avg_area);  // Rough approximation
+    double avg_distance = distance_sum / detections.size();
 
     // Compute confidence (0-1)
+    // More tags, better margins, lower reproj error, closer distance = higher confidence
     double tag_factor = std::min(1.0, quality.tag_count / 4.0);
     double margin_factor = std::min(1.0, quality.avg_margin / 100.0);
-    double error_factor = std::max(0.0, 1.0 - reproj_error / 10.0);
-    double distance_factor = std::max(0.0, 1.0 - estimated_distance / 5.0);
+    double error_factor = std::max(0.0, 1.0 - reproj_error / 5.0);
+    // Distance confidence: linearly drops from 1.0 at 0m to 0.0 at 8m
+    double distance_factor = std::clamp(1.0 - avg_distance / 8.0, 0.0, 1.0);
 
     quality.confidence = tag_factor * 0.3 + margin_factor * 0.2 +
                         error_factor * 0.3 + distance_factor * 0.2;
 
-    // Estimate standard deviations
-    auto std_devs = estimate_std_devs(quality.tag_count, estimated_distance, reproj_error);
+    // Estimate standard deviations for the RoboRIO pose estimator.
+    // These directly control how much the robot trusts vision vs wheel odometry.
+    auto std_devs = estimate_std_devs(quality.tag_count, avg_distance, reproj_error);
     quality.std_dev_x = std_devs.std_dev_x;
     quality.std_dev_y = std_devs.std_dev_y;
     quality.std_dev_theta = std_devs.std_dev_theta;
@@ -316,27 +353,34 @@ PoseQuality PoseEstimator::estimate_std_devs(
     quality.tag_count = tag_count;
     quality.avg_reproj_error = reproj_error;
 
-    // Base standard deviations (at 1m with 1 tag, 1px error)
-    constexpr double BASE_XY_STD = 0.05;   // 5cm
-    constexpr double BASE_THETA_STD = 0.03; // ~2 degrees
+    // Standard deviations for WPILib SwerveDrivePoseEstimator.
+    // These values tell the Kalman filter how much to trust vision vs odometry.
+    //
+    // WPILib default odometry std devs: (0.1, 0.1, 0.1) [m, m, rad]
+    // We want vision to beat odometry when close with multiple tags,
+    // and be worse than odometry when far away with poor detections.
+    //
+    // Empirical model calibrated for 640x480 cameras at typical FRC distances:
+    //   std_xy  = 0.02 * distance^2 / sqrt(tag_count) * (1 + reproj_err * 0.2)
+    //   std_theta = 0.04 / sqrt(tag_count) * (1 + reproj_err * 0.2)
 
-    // Scale by number of tags (more tags = lower std dev)
+    double dist_sq = avg_distance * avg_distance;
     double tag_scale = 1.0 / std::sqrt(std::max(1, tag_count));
+    double error_scale = 1.0 + reproj_error * 0.2;
 
-    // Scale by distance (further = higher std dev)
-    double distance_scale = std::max(0.5, avg_distance);
+    // XY standard deviation scales with distance squared (pinhole geometry)
+    quality.std_dev_x = 0.02 * dist_sq * tag_scale * error_scale;
+    quality.std_dev_y = 0.02 * dist_sq * tag_scale * error_scale;
 
-    // Scale by reprojection error
-    double error_scale = 1.0 + reproj_error * 0.1;
+    // Theta standard deviation - less dependent on distance
+    quality.std_dev_theta = 0.04 * tag_scale * error_scale;
 
-    quality.std_dev_x = BASE_XY_STD * tag_scale * distance_scale * error_scale;
-    quality.std_dev_y = BASE_XY_STD * tag_scale * distance_scale * error_scale;
-    quality.std_dev_theta = BASE_THETA_STD * tag_scale * error_scale;
-
-    // Clamp to reasonable ranges
-    quality.std_dev_x = std::clamp(quality.std_dev_x, 0.01, 1.0);
-    quality.std_dev_y = std::clamp(quality.std_dev_y, 0.01, 1.0);
-    quality.std_dev_theta = std::clamp(quality.std_dev_theta, 0.005, 0.5);
+    // Clamp to useful range for the pose estimator
+    // At minimum (close, multi-tag): ~0.01m = very trusted
+    // At maximum (far, single tag): ~2.0m = mostly ignored vs odometry
+    quality.std_dev_x = std::clamp(quality.std_dev_x, 0.01, 2.0);
+    quality.std_dev_y = std::clamp(quality.std_dev_y, 0.01, 2.0);
+    quality.std_dev_theta = std::clamp(quality.std_dev_theta, 0.01, 1.0);
 
     return quality;
 }

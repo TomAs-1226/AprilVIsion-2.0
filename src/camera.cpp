@@ -163,8 +163,10 @@ void Camera::configure_camera() {
     // Set FPS
     cap_.set(cv::CAP_PROP_FPS, config_.fps);
 
-    // Minimize buffer size for low latency
-    cap_.set(cv::CAP_PROP_BUFFERSIZE, 1);
+    // Buffer of 2 prevents driver-level drops while keeping latency low.
+    // Buffer of 1 causes the V4L2 driver to drop frames under CPU load,
+    // which triggers consecutive_failures and false disconnects.
+    cap_.set(cv::CAP_PROP_BUFFERSIZE, 2);
 
     // Configure camera controls via v4l2-ctl for reliable control
     std::string device_path = "/dev/video" + std::to_string(opened_device_index_);
@@ -280,15 +282,20 @@ void Camera::capture_loop() {
 
         // Capture loop - runs until camera disconnects or shutdown
         while (!should_stop_.load()) {
+            // grab() can sometimes hang on a dead USB bus. We detect that
+            // via the consecutive_failures counter and reconnect.
             if (!cap_.grab()) {
                 consecutive_failures++;
 
-                if (consecutive_failures >= 15) {
-                    std::cerr << "[Camera " << id_ << "] Camera lost, will scan for devices..."
+                if (consecutive_failures >= 30) {
+                    std::cerr << "[Camera " << id_ << "] Camera lost after "
+                              << consecutive_failures << " failures, reconnecting..."
                               << std::endl;
                     break;  // Break inner loop to reconnect
                 }
-                std::this_thread::sleep_for(std::chrono::milliseconds(33));
+
+                // Short sleep - don't busy-loop on failure
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
 
@@ -297,6 +304,8 @@ void Camera::capture_loop() {
             auto capture_time = SteadyClock::now();
             auto capture_wall = SystemClock::now();
 
+            // retrieve() decodes into 'frame'. We then MOVE this mat into
+            // the ring buffer frame to avoid a deep copy (clone).
             if (!cap_.retrieve(frame)) continue;
 
             if (frame.empty() || frame.cols == 0 || frame.rows == 0) {
@@ -309,15 +318,17 @@ void Camera::capture_loop() {
             f.frame_number = frame_number_++;
             f.capture_time = capture_time;
             f.capture_wall_time = capture_wall;
-            f.image = frame.clone();
+            // Move the mat data - avoids expensive deep copy.
+            // retrieve() will allocate a new buffer on the next call.
+            f.image = std::move(frame);
 
             frame_buffer_.push(std::move(f));
             frames_captured_.fetch_add(1);
             local_frame_count++;
 
-            if (local_frame_count <= 3 || local_frame_count % 1000 == 0) {
+            if (local_frame_count <= 3 || local_frame_count % 2000 == 0) {
                 std::cout << "[Camera " << id_ << "] Frame " << local_frame_count
-                          << " (" << frame.cols << "x" << frame.rows << ")" << std::endl;
+                          << " (" << f.image.cols << "x" << f.image.rows << ")" << std::endl;
             }
 
             fps_frame_count_++;

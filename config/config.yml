@@ -11,7 +11,7 @@ cameras:
     device: /dev/video0
     width: 640
     height: 480
-    fps: 60                  # 60fps for highest performance
+    fps: 30                  # 30fps balances detection rate vs CPU load
     exposure: -1            # -1 = auto exposure
     gain: -1                # -1 = auto
     format: MJPG
@@ -28,7 +28,7 @@ cameras:
     device: /dev/video2
     width: 640
     height: 480
-    fps: 60                  # 60fps for highest performance
+    fps: 30                  # 30fps balances detection rate vs CPU load
     exposure: -1
     gain: -1
     format: MJPG
@@ -45,7 +45,7 @@ cameras:
     device: /dev/video4
     width: 640
     height: 480
-    fps: 60                  # 60fps for highest performance
+    fps: 30                  # 30fps balances detection rate vs CPU load
     exposure: -1
     gain: -1
     format: MJPG
@@ -65,7 +65,7 @@ apriltag:
   family: tag36h11
   decimation: 2
   sigma: 0.0
-  nthreads: 6                # RK3588S has 8 cores, use 6 for detection
+  nthreads: 4                # 4 threads leaves CPU headroom for capture+encode
   refine_edges: true
   max_hamming: 1
   min_margin: 15.0
@@ -102,6 +102,6 @@ outputs:
 # Performance Tuning
 # ==============================================================================
 performance:
-  jpeg_quality: 85             # Higher quality for clearer streams
+  jpeg_quality: 50             # Lower quality = less CPU for streaming
   enable_annotations: true
   annotation_line_width: 2

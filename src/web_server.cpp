@@ -154,8 +154,8 @@ bool WebServer::initialize(int port, const std::string& web_root,
                                 }
                             }
 
-                            // Tight polling for smooth streaming (~60fps max)
-                            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                            // Poll at ~30fps to match camera capture rate
+                            std::this_thread::sleep_for(std::chrono::milliseconds(33));
                         } catch (const std::exception& e) {
                             std::cerr << "[WebServer] MJPEG cam" << i << " error: " << e.what() << std::endl;
                             break;
@@ -771,6 +771,14 @@ void WebServer::push_detections(const FrameDetections& detections) {
         };
         j["reproj_error"] = detections.multi_tag_reproj_error;
         j["tags_used"] = detections.tags_used_for_pose;
+
+        // Quality and standard deviations for RoboRIO pose estimator fusion
+        j["quality"] = {
+            {"confidence", detections.quality.confidence},
+            {"std_dev_x", detections.quality.std_dev_x},
+            {"std_dev_y", detections.quality.std_dev_y},
+            {"std_dev_theta", detections.quality.std_dev_theta}
+        };
     }
 
     impl_->latest_detections_json.set(j.dump());
