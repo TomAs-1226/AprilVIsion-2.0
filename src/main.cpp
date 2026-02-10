@@ -30,6 +30,7 @@
 #include "ring_buffer.hpp"
 
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 #include <iostream>
 #include <iomanip>
 #include <signal.h>
