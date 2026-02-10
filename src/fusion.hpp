@@ -180,15 +180,18 @@ public:
         const DetectorConfig& detector_config,
         const TrackerConfig& tracker_config);
 
+    /**
+     * @brief Annotate a frame with detection results (for streaming).
+     * Call this on a RESIZED frame to minimize CPU cost.
+     */
+    void annotate_frame(cv::Mat& image, const FrameDetections& detections);
+
 private:
     std::vector<std::unique_ptr<Detector>> detectors_;
     std::vector<std::unique_ptr<TagTracker>> trackers_;
     std::unique_ptr<PoseEstimator> pose_estimator_;
     PoseFusion fusion_;
     int num_cameras_ = 0;
-
-    // For annotation
-    void annotate_frame(cv::Mat& image, const FrameDetections& detections);
 };
 
 } // namespace frc_vision

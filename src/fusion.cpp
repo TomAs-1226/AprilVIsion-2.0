@@ -318,9 +318,18 @@ ProcessedFrame VisionPipeline::process_frame(
         return result;
     }
 
-    // Detection
+    // Convert to grayscale ONCE (detector would do this anyway).
+    // Passing gray directly avoids a redundant BGR→gray conversion inside detect().
+    cv::Mat gray;
+    if (frame.image.channels() > 1) {
+        cv::cvtColor(frame.image, gray, cv::COLOR_BGR2GRAY);
+    } else {
+        gray = frame.image;
+    }
+
+    // Detection on grayscale
     result.timestamps.detect_start = SteadyClock::now();
-    auto detections = detectors_[frame.camera_id]->detect(frame.image);
+    auto detections = detectors_[frame.camera_id]->detect(gray);
     result.timestamps.detect_end = SteadyClock::now();
 
     // Tracking
@@ -359,9 +368,10 @@ ProcessedFrame VisionPipeline::process_frame(
     result.detections.quality = estimate.quality;
     fusion_.update(estimate);
 
-    // Annotate frame for web streaming
-    result.annotated_image = frame.image.clone();
-    annotate_frame(result.annotated_image, result.detections);
+    // NOTE: Do NOT clone or annotate here. The caller (main.cpp) handles
+    // streaming at reduced resolution/rate to avoid the massive CPU cost
+    // of cloning + annotating + encoding every full-res frame.
+    // result.annotated_image is left empty.
 
     result.timestamps.publish = SteadyClock::now();
 
@@ -369,91 +379,72 @@ ProcessedFrame VisionPipeline::process_frame(
 }
 
 void VisionPipeline::annotate_frame(cv::Mat& image, const FrameDetections& detections) {
-    // Colors
-    const cv::Scalar COLOR_CORNER = cv::Scalar(0, 255, 0);    // Green
-    const cv::Scalar COLOR_EDGE = cv::Scalar(255, 255, 0);    // Cyan
-    const cv::Scalar COLOR_CENTER = cv::Scalar(0, 0, 255);    // Red
-    const cv::Scalar COLOR_TEXT = cv::Scalar(255, 255, 255);  // White
-    const cv::Scalar COLOR_POSE = cv::Scalar(255, 0, 255);    // Magenta
-    const cv::Scalar COLOR_NO_DETECT = cv::Scalar(0, 165, 255);  // Orange
+    // Compact annotations designed for 320x240 stream frames.
+    // Uses thin lines and small fonts to keep drawing fast.
+    const cv::Scalar GREEN(0, 255, 0);
+    const cv::Scalar CYAN(255, 255, 0);
+    const cv::Scalar RED(0, 0, 255);
+    const cv::Scalar WHITE(255, 255, 255);
+    const cv::Scalar MAGENTA(255, 0, 255);
+    const cv::Scalar ORANGE(0, 165, 255);
 
-    // Always show camera ID and detection count (helps verify stream is working)
-    std::string cam_str = "CAM" + std::to_string(detections.camera_id);
-    cv::putText(image, cam_str, cv::Point(10, image.rows - 15),
-               cv::FONT_HERSHEY_SIMPLEX, 0.7, COLOR_TEXT, 2);
-
-    // Show detection count
     int num_dets = static_cast<int>(detections.detections.size());
-    std::string det_str = "Tags: " + std::to_string(num_dets);
-    cv::Scalar det_color = num_dets > 0 ? COLOR_CORNER : COLOR_NO_DETECT;
-    cv::putText(image, det_str, cv::Point(image.cols - 100, image.rows - 15),
-               cv::FONT_HERSHEY_SIMPLEX, 0.6, det_color, 2);
 
-    // If no detections, show helpful message
-    if (num_dets == 0) {
-        cv::putText(image, "No AprilTags detected", cv::Point(10, 25),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_NO_DETECT, 2);
-    }
+    // Camera ID + tag count (bottom of frame)
+    std::string cam_str = "C" + std::to_string(detections.camera_id) + " " +
+                          std::to_string(num_dets) + "t";
+    cv::putText(image, cam_str, cv::Point(3, image.rows - 4),
+               cv::FONT_HERSHEY_SIMPLEX, 0.35, WHITE, 1);
 
     for (const auto& det : detections.detections) {
-        // Draw corners
+        // Draw tag outline (thin lines only - skip corner circles for speed)
         for (int i = 0; i < 4; i++) {
-            cv::Point2d p1(det.corners.corners[i].x, det.corners.corners[i].y);
-            cv::Point2d p2(det.corners.corners[(i + 1) % 4].x,
-                          det.corners.corners[(i + 1) % 4].y);
-
-            cv::circle(image, p1, 4, COLOR_CORNER, -1);
-            cv::line(image, p1, p2, COLOR_EDGE, 2);
+            cv::Point p1(static_cast<int>(det.corners.corners[i].x),
+                         static_cast<int>(det.corners.corners[i].y));
+            cv::Point p2(static_cast<int>(det.corners.corners[(i + 1) % 4].x),
+                         static_cast<int>(det.corners.corners[(i + 1) % 4].y));
+            cv::line(image, p1, p2, GREEN, 1);
         }
 
-        // Draw center
+        // ID + distance label
         auto center = det.corners.center();
-        cv::circle(image, cv::Point2d(center.x, center.y), 3, COLOR_CENTER, -1);
+        int cx = static_cast<int>(center.x);
+        int cy = static_cast<int>(center.y);
 
-        // Draw ID and margin
         std::string label = std::to_string(det.id);
-        cv::putText(image, label,
-                   cv::Point(center.x + 10, center.y - 10),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_TEXT, 2);
-
-        // Draw margin and distance
-        std::string margin_str = "M:" + std::to_string(static_cast<int>(det.decision_margin));
-        cv::putText(image, margin_str,
-                   cv::Point(center.x + 10, center.y + 15),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_TEXT, 1);
-
-        // Distance on screen
         if (det.distance_m > 0.01) {
-            std::string dist_str = std::to_string(det.distance_m).substr(0, 4) + "m";
-            cv::putText(image, dist_str,
-                       cv::Point(center.x + 10, center.y + 30),
-                       cv::FONT_HERSHEY_SIMPLEX, 0.4, COLOR_CORNER, 1);
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1fm", det.distance_m);
+            label += " " + std::string(buf);
         }
+        cv::putText(image, label, cv::Point(cx + 5, cy - 3),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.3, WHITE, 1);
     }
 
-    // Draw robot pose if valid
+    // Robot pose (top-left, compact)
     if (detections.multi_tag_pose_valid) {
-        // Draw background rectangle for better visibility
-        cv::rectangle(image, cv::Point(5, 5), cv::Point(350, 55), cv::Scalar(0, 0, 0), -1);
+        cv::rectangle(image, cv::Point(0, 0), cv::Point(180, 24), cv::Scalar(0, 0, 0), -1);
 
-        std::string pose_str = "Robot: (" +
-            std::to_string(detections.robot_pose_field.x).substr(0, 5) + ", " +
-            std::to_string(detections.robot_pose_field.y).substr(0, 5) + ", " +
-            std::to_string(detections.robot_pose_field.theta * 180.0 / M_PI).substr(0, 5) + " deg)";
-        cv::putText(image, pose_str, cv::Point(10, 25),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_POSE, 2);
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "(%.2f,%.2f,%.0f) %dt",
+            detections.robot_pose_field.x, detections.robot_pose_field.y,
+            detections.robot_pose_field.theta * 180.0 / M_PI,
+            detections.tags_used_for_pose);
+        cv::putText(image, buf, cv::Point(2, 10),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.3, MAGENTA, 1);
 
-        std::string tags_str = "Using " + std::to_string(detections.tags_used_for_pose) +
-            " tags | Err: " + std::to_string(detections.multi_tag_reproj_error).substr(0, 4) + "px";
-        cv::putText(image, tags_str, cv::Point(10, 48),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.5, COLOR_CORNER, 1);
+        char buf2[32];
+        std::snprintf(buf2, sizeof(buf2), "err:%.1fpx", detections.multi_tag_reproj_error);
+        cv::putText(image, buf2, cv::Point(2, 20),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.28, GREEN, 1);
     }
 
-    // Draw latency and FPS info in top right
+    // Latency (top-right)
     double latency = detections.timestamps.total_pipeline_ms();
-    std::string latency_str = std::to_string(static_cast<int>(latency)) + "ms";
-    cv::putText(image, latency_str, cv::Point(image.cols - 60, 25),
-               cv::FONT_HERSHEY_SIMPLEX, 0.6, COLOR_TEXT, 2);
+    char lat_buf[16];
+    std::snprintf(lat_buf, sizeof(lat_buf), "%dms", static_cast<int>(latency));
+    cv::putText(image, lat_buf, cv::Point(image.cols - 35, 10),
+               cv::FONT_HERSHEY_SIMPLEX, 0.3, WHITE, 1);
 }
 
 FusedPose VisionPipeline::get_fused_pose() {

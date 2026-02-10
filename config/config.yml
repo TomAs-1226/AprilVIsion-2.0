@@ -65,8 +65,8 @@ apriltag:
   family: tag36h11
   decimation: 2
   sigma: 0.0
-  nthreads: 4                # 4 threads leaves CPU headroom for capture+encode
-  refine_edges: true
+  nthreads: 2                # 2 threads per detector × 3 cameras = 6 threads total
+  refine_edges: true         # Keep for accuracy (small cost)
   max_hamming: 1
   min_margin: 15.0
   max_tags_per_frame: 32
@@ -102,6 +102,6 @@ outputs:
 # Performance Tuning
 # ==============================================================================
 performance:
-  jpeg_quality: 50             # Lower quality = less CPU for streaming
+  jpeg_quality: 25             # Minimal quality - streaming is 320x240 grayscale anyway
   enable_annotations: true
-  annotation_line_width: 2
+  annotation_line_width: 1     # Thinner lines = less drawing overhead

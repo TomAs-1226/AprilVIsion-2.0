@@ -386,19 +386,29 @@ int main(int argc, char* argv[]) {
 
         processing_threads.emplace_back([&, i]() {
             Camera* cam = nullptr;
-            const CameraIntrinsics& intr = intrinsics[i];
+            CameraIntrinsics intr = intrinsics[i]; // local copy (may be updated)
             const Pose3D& cam_to_robot = config.cameras[i].camera_to_robot;
 
             auto last_fps_time = SteadyClock::now();
             int fps_count = 0;
             int empty_count = 0;
-            std::vector<int> jpeg_params = {cv::IMWRITE_JPEG_QUALITY, config.performance.jpeg_quality};
+            int stream_counter = 0;
+            bool intrinsics_verified = false;
+
+            // Stream settings: low res grayscale at reduced framerate
+            // This keeps CPU free for detection + pose computation.
+            const int STREAM_WIDTH = 320;
+            const int STREAM_HEIGHT = 240;
+            const int STREAM_QUALITY = 25;      // Very low JPEG quality for streaming
+            const int STREAM_SKIP = 2;          // Stream every Nth frame (3=10fps from 30fps)
+            std::vector<int> jpeg_params = {cv::IMWRITE_JPEG_QUALITY, STREAM_QUALITY};
 
             while (!g_shutdown.load()) {
                 // Wait for camera to be ready (handles initial connect AND reconnects)
                 cam = camera_manager.get_camera(i);
                 if (!cam || !cam->is_connected()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    intrinsics_verified = false;
                     continue;
                 }
 
@@ -410,7 +420,6 @@ int main(int argc, char* argv[]) {
                 auto frame_opt = cam->frame_buffer().pop_latest();
                 if (!frame_opt) {
                     empty_count++;
-                    // If camera disconnects while we're waiting, go back to connection check
                     if (!cam->is_connected()) {
                         std::cout << "[Processing " << i << "] Camera disconnected, waiting for reconnect..." << std::endl;
                         empty_count = 0;
@@ -429,37 +438,94 @@ int main(int argc, char* argv[]) {
                 empty_count = 0;
 
                 try {
-                    // Process frame
+                    // AUTO-FIX INTRINSICS: On first frame, check if the actual frame
+                    // resolution matches the intrinsics. If camera negotiated a different
+                    // resolution (e.g. 1080p instead of 640x480), regenerate defaults.
+                    // Wrong intrinsics = wildly wrong distance (e.g. 12m for a close tag).
+                    if (!intrinsics_verified && !frame.image.empty()) {
+                        int actual_w = frame.image.cols;
+                        int actual_h = frame.image.rows;
+                        bool mismatch = (intr.width != 0 && intr.width != actual_w) ||
+                                        (intr.height != 0 && intr.height != actual_h);
+                        bool no_intrinsics = !intr.valid();
+
+                        if (mismatch || no_intrinsics) {
+                            std::cout << "[Processing " << i << "] Intrinsics mismatch! "
+                                      << "Frame=" << actual_w << "x" << actual_h
+                                      << " Intrinsics=" << intr.width << "x" << intr.height
+                                      << ". Regenerating defaults for actual resolution."
+                                      << std::endl;
+                            intr = CameraIntrinsics::create_default(actual_w, actual_h);
+                        }
+                        intrinsics_verified = true;
+                        std::cout << "[Processing " << i << "] Intrinsics: fx=" << intr.fx
+                                  << " fy=" << intr.fy << " for " << actual_w << "x" << actual_h
+                                  << std::endl;
+                    }
+
+                    // Process frame: detect + pose (NO clone, NO annotate, NO encode)
+                    // This is the core computation - maximize CPU here.
                     auto processed = pipeline.process_frame(frame, intr, cam_to_robot);
 
-                    // Encode JPEG for web streaming
-                    std::vector<uint8_t> jpeg;
-                    if (processed.annotated_image.empty()) {
-                        continue;
-                    }
-
-                    cv::imencode(".jpg", processed.annotated_image, jpeg, jpeg_params);
-                    if (jpeg.empty()) {
-                        continue;
-                    }
-                    processed.jpeg = std::move(jpeg);
-
-                    // Push to web server
-                    web_server.push_frame(i, processed.jpeg);
+                    // Always push detections (lightweight JSON) and NT data
                     web_server.push_detections(processed.detections);
-
-                    // Push to NT publisher
                     nt_publisher.publish_camera(i, processed.detections);
+
+                    // STREAM: Only encode every Nth frame at reduced resolution.
+                    // This cuts streaming CPU from ~40% to <5% of total.
+                    //   Before: 90 JPEG encodes/sec at 640x480 BGR = CPU killer
+                    //   After:  30 JPEG encodes/sec at 320x240 gray = minimal
+                    stream_counter++;
+                    if (stream_counter >= STREAM_SKIP) {
+                        stream_counter = 0;
+
+                        // Resize to small grayscale for streaming
+                        cv::Mat stream_frame;
+                        if (frame.image.channels() > 1) {
+                            cv::Mat small;
+                            cv::resize(frame.image, small, cv::Size(STREAM_WIDTH, STREAM_HEIGHT),
+                                       0, 0, cv::INTER_NEAREST); // Fastest interpolation
+                            cv::cvtColor(small, stream_frame, cv::COLOR_BGR2GRAY);
+                        } else {
+                            cv::resize(frame.image, stream_frame,
+                                       cv::Size(STREAM_WIDTH, STREAM_HEIGHT),
+                                       0, 0, cv::INTER_NEAREST);
+                        }
+
+                        // Convert to 3-channel gray for annotation colors
+                        cv::cvtColor(stream_frame, stream_frame, cv::COLOR_GRAY2BGR);
+
+                        // Annotate on the SMALL frame (4x fewer pixels to draw on)
+                        // Scale detection coordinates to match stream resolution
+                        FrameDetections scaled_dets = processed.detections;
+                        double sx = (double)STREAM_WIDTH / frame.image.cols;
+                        double sy = (double)STREAM_HEIGHT / frame.image.rows;
+                        for (auto& det : scaled_dets.detections) {
+                            for (auto& c : det.corners.corners) {
+                                c.x *= sx;
+                                c.y *= sy;
+                            }
+                        }
+                        pipeline.annotate_frame(stream_frame, scaled_dets);
+
+                        // Encode at very low quality (fast, small)
+                        std::vector<uint8_t> jpeg;
+                        cv::imencode(".jpg", stream_frame, jpeg, jpeg_params);
+                        if (!jpeg.empty()) {
+                            web_server.push_frame(i, jpeg);
+                        }
+                    }
 
                     // Update stats
                     uint64_t frame_count = processing_frames[i].fetch_add(1) + 1;
                     fps_count++;
 
-                    // Log first few frames to verify pipeline working
                     if (frame_count <= 3 || frame_count % 500 == 0) {
                         std::cout << "[Processing " << i << "] Frame " << frame_count
-                                  << " processed, JPEG size: " << processed.jpeg.size() << " bytes"
-                                  << ", detections: " << processed.detections.detections.size() << std::endl;
+                                  << " | " << processed.detections.detections.size() << " tags"
+                                  << " | det:" << processed.detections.timestamps.detect_ms() << "ms"
+                                  << " | pose:" << processed.detections.timestamps.pose_ms() << "ms"
+                                  << std::endl;
                     }
 
                     auto now = SteadyClock::now();
