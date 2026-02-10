@@ -808,6 +808,7 @@ void WebServer::push_detections(const FrameDetections& detections) {
         auto center = det.corners.center();
         tag["center"] = {center.x, center.y};
 
+        tag["ambiguity"] = det.ambiguity;
         if (det.pose_valid) {
             tag["reproj_error"] = det.reprojection_error;
             tag["distance_m"] = det.distance_m;

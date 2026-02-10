@@ -129,6 +129,11 @@ private:
 
     // Local tag corners for single-tag PnP
     std::vector<cv::Point3d> tag_corners_local_;
+
+    // PhotonVision-style ambiguity threshold for single-tag poses.
+    // Reject if best_reproj_err / alt_reproj_err > this value.
+    // 0.2 = strict (PhotonVision default), higher = more permissive.
+    static constexpr double MAX_SINGLE_TAG_AMBIGUITY = 0.2;
 };
 
 } // namespace frc_vision

@@ -400,12 +400,15 @@ class VisionDashboard {
             const dist = tag.distance_m ? tag.distance_m.toFixed(2) + 'm' : '--';
             const reproj = tag.reproj_error ? tag.reproj_error.toFixed(1) + 'px' : '--';
             const pxSize = tag.pixel_size ? tag.pixel_size.toFixed(0) + 'px' : '--';
+            const ambig = (tag.ambiguity !== undefined) ? tag.ambiguity.toFixed(2) : '--';
+            const ambigClass = (tag.ambiguity < 0.2) ? 'good' : (tag.ambiguity < 0.5) ? 'warn' : 'bad';
 
             html += `<div class="debug-tag-row">
                 <span class="tag-id">Tag ${tag.id}</span>
                 <span class="tag-dist">${dist}</span>
                 <span class="tag-px">${pxSize}</span>
                 <span class="tag-reproj">${reproj}</span>
+                <span class="tag-ambig ${ambigClass}">A:${ambig}</span>
                 <span class="tag-margin">M:${tag.margin.toFixed(0)}</span>
             </div>`;
         }

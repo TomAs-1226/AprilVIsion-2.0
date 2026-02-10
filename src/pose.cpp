@@ -44,33 +44,90 @@ TagDetection PoseEstimator::estimate_single_tag(
         image_points.push_back(corner.to_cv());
     }
 
-    // Solve PnP (tag-local frame to camera frame)
-    cv::Vec3d rvec, tvec;
-    bool success = cv::solvePnP(
+    // Use solvePnPGeneric with IPPE_SQUARE to get BOTH solutions.
+    // IPPE always returns exactly 2 solutions for a planar target.
+    // The ambiguity ratio (best_err / alt_err) tells us how confident
+    // we are in the pose - PhotonVision rejects ambiguity > 0.2.
+    std::vector<cv::Mat> rvecs, tvecs;
+    cv::Mat reprojErrors;
+    int num_solutions = cv::solvePnPGeneric(
         tag_corners_local_,
         image_points,
         intrinsics.camera_matrix,
         intrinsics.dist_coeffs,
-        rvec, tvec,
+        rvecs, tvecs,
         false,
-        cv::SOLVEPNP_IPPE_SQUARE  // Best for square markers
+        cv::SOLVEPNP_IPPE_SQUARE,
+        cv::noArray(), cv::noArray(),
+        reprojErrors
     );
 
-    if (!success) {
+    if (num_solutions == 0) {
         result.pose_valid = false;
         return result;
     }
 
-    // Calculate reprojection error
+    // Pick best solution (lowest reprojection error)
+    // solvePnPGeneric returns each rvec/tvec as a 3x1 CV_64F Mat
+    auto mat_to_vec3d = [](const cv::Mat& m) -> cv::Vec3d {
+        return cv::Vec3d(m.at<double>(0), m.at<double>(1), m.at<double>(2));
+    };
+    cv::Vec3d best_rvec = mat_to_vec3d(rvecs[0]);
+    cv::Vec3d best_tvec = mat_to_vec3d(tvecs[0]);
+    double best_err = calculate_reprojection_error(
+        image_points, tag_corners_local_, best_rvec, best_tvec, intrinsics);
+
+    // Compute ambiguity from both solutions
+    double alt_err = std::numeric_limits<double>::max();
+    if (num_solutions >= 2) {
+        cv::Vec3d alt_rvec = mat_to_vec3d(rvecs[1]);
+        cv::Vec3d alt_tvec = mat_to_vec3d(tvecs[1]);
+        alt_err = calculate_reprojection_error(
+            image_points, tag_corners_local_, alt_rvec, alt_tvec, intrinsics);
+
+        // If alternate solution is actually better, swap
+        if (alt_err < best_err) {
+            std::swap(best_rvec, alt_rvec);
+            std::swap(best_tvec, alt_tvec);
+            std::swap(best_err, alt_err);
+        }
+
+        // Ambiguity = best / alt. Close to 1.0 = very ambiguous (both solutions equally good).
+        // Close to 0.0 = unambiguous (one solution clearly better).
+        result.ambiguity = (alt_err > 1e-6) ? (best_err / alt_err) : 0.0;
+    } else {
+        result.ambiguity = 0.0;  // Only one solution = unambiguous
+    }
+
+    // Refine the best IPPE solution with iterative PnP (like PhotonVision does).
+    // This converges to a more precise local minimum.
+    cv::solvePnP(
+        tag_corners_local_,
+        image_points,
+        intrinsics.camera_matrix,
+        intrinsics.dist_coeffs,
+        best_rvec, best_tvec,
+        true,  // useExtrinsicGuess = true (refine from IPPE result)
+        cv::SOLVEPNP_ITERATIVE
+    );
+
+    // Recalculate reprojection error after refinement
     result.reprojection_error = calculate_reprojection_error(
-        image_points, tag_corners_local_, rvec, tvec, intrinsics);
+        image_points, tag_corners_local_, best_rvec, best_tvec, intrinsics);
 
     // Store pose (tag frame to camera frame)
-    result.tag_to_camera = Pose3D::from_rvec_tvec(rvec, tvec);
+    result.tag_to_camera = Pose3D::from_rvec_tvec(best_rvec, best_tvec);
     result.pose_valid = true;
 
     // Distance from PnP solution (more accurate than pinhole approximation)
-    result.distance_m = cv::norm(tvec);
+    result.distance_m = cv::norm(best_tvec);
+
+    // Sanity check: reject unreasonable distances (> 10m for FRC field)
+    // and unreasonable reprojection errors
+    if (result.distance_m > 10.0 || result.distance_m < 0.05 ||
+        result.reprojection_error > 10.0) {
+        result.pose_valid = false;
+    }
 
     return result;
 }
@@ -113,14 +170,31 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
     }
 
     if (tag_ids.size() == 1) {
-        // Single tag - use single tag estimation with field transform
-        auto det_with_pose = estimate_single_tag(detections[0], intrinsics);
-        if (!det_with_pose.pose_valid || !field_.has_tag(det_with_pose.id)) {
+        // Single tag - use single tag estimation with field transform.
+        // Find the detection that matched a known field tag.
+        const TagDetection* known_det = nullptr;
+        for (const auto& det : detections) {
+            if (field_.has_tag(det.id)) {
+                known_det = &det;
+                break;
+            }
+        }
+        if (!known_det) return result;
+
+        auto det_with_pose = estimate_single_tag(*known_det, intrinsics);
+        if (!det_with_pose.pose_valid) {
             return result;
         }
 
-        // Transform: camera = tag_to_camera * tag^-1 * field
-        // We want: camera_to_field = field_to_tag * tag_to_camera^-1
+        // Ambiguity filter (PhotonVision approach):
+        // Reject single-tag poses where the two IPPE solutions are too similar.
+        // High ambiguity = both solutions are equally valid = pose is unreliable.
+        // Threshold of 0.2 from PhotonVision (lower = stricter).
+        if (det_with_pose.ambiguity > MAX_SINGLE_TAG_AMBIGUITY) {
+            return result;
+        }
+
+        // Transform: camera_to_field = tag_to_field * camera_to_tag
         const auto& field_tag = field_.get_tag(det_with_pose.id);
         Pose3D camera_to_tag = det_with_pose.tag_to_camera.inverse();
         result.camera_to_field = field_tag.pose_field.compose(camera_to_tag);
@@ -318,31 +392,48 @@ PoseQuality PoseEstimator::compute_quality(
 
     double margin_sum = 0;
     double distance_sum = 0;
+    double max_ambiguity = 0;
     for (const auto& det : detections) {
         margin_sum += det.decision_margin;
-        distance_sum += compute_tag_distance(det, intrinsics);
+        // Use PnP distance if available, fallback to pinhole
+        if (det.pose_valid && det.distance_m > 0.01) {
+            distance_sum += det.distance_m;
+        } else {
+            distance_sum += compute_tag_distance(det, intrinsics);
+        }
+        max_ambiguity = std::max(max_ambiguity, det.ambiguity);
     }
 
     quality.avg_margin = margin_sum / detections.size();
     double avg_distance = distance_sum / detections.size();
 
     // Compute confidence (0-1)
-    // More tags, better margins, lower reproj error, closer distance = higher confidence
+    // More tags, better margins, lower reproj error, closer distance, low ambiguity = higher confidence
     double tag_factor = std::min(1.0, quality.tag_count / 4.0);
     double margin_factor = std::min(1.0, quality.avg_margin / 100.0);
     double error_factor = std::max(0.0, 1.0 - reproj_error / 5.0);
-    // Distance confidence: linearly drops from 1.0 at 0m to 0.0 at 8m
     double distance_factor = std::clamp(1.0 - avg_distance / 8.0, 0.0, 1.0);
+    // Ambiguity factor: 1.0 if unambiguous, drops toward 0 if highly ambiguous
+    double ambiguity_factor = std::clamp(1.0 - max_ambiguity, 0.0, 1.0);
 
-    quality.confidence = tag_factor * 0.3 + margin_factor * 0.2 +
-                        error_factor * 0.3 + distance_factor * 0.2;
+    quality.confidence = tag_factor * 0.25 + margin_factor * 0.15 +
+                        error_factor * 0.25 + distance_factor * 0.15 +
+                        ambiguity_factor * 0.20;
 
     // Estimate standard deviations for the RoboRIO pose estimator.
     // These directly control how much the robot trusts vision vs wheel odometry.
     auto std_devs = estimate_std_devs(quality.tag_count, avg_distance, reproj_error);
-    quality.std_dev_x = std_devs.std_dev_x;
-    quality.std_dev_y = std_devs.std_dev_y;
-    quality.std_dev_theta = std_devs.std_dev_theta;
+
+    // Inflate std devs for ambiguous single-tag detections
+    double ambiguity_inflation = 1.0 + max_ambiguity * 2.0;
+    quality.std_dev_x = std_devs.std_dev_x * ambiguity_inflation;
+    quality.std_dev_y = std_devs.std_dev_y * ambiguity_inflation;
+    quality.std_dev_theta = std_devs.std_dev_theta * ambiguity_inflation;
+
+    // Clamp to useful range
+    quality.std_dev_x = std::clamp(quality.std_dev_x, 0.01, 3.0);
+    quality.std_dev_y = std::clamp(quality.std_dev_y, 0.01, 3.0);
+    quality.std_dev_theta = std::clamp(quality.std_dev_theta, 0.01, 1.5);
 
     return quality;
 }

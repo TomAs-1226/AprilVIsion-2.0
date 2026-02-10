@@ -406,19 +406,23 @@ void VisionPipeline::annotate_frame(cv::Mat& image, const FrameDetections& detec
             cv::line(image, p1, p2, GREEN, 1);
         }
 
-        // ID + distance label
+        // ID + distance + ambiguity label
         auto center = det.corners.center();
         int cx = static_cast<int>(center.x);
         int cy = static_cast<int>(center.y);
 
-        std::string label = std::to_string(det.id);
+        char label_buf[32];
         if (det.distance_m > 0.01) {
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.1fm", det.distance_m);
-            label += " " + std::string(buf);
+            std::snprintf(label_buf, sizeof(label_buf), "%d %.1fm a%.2f",
+                         det.id, det.distance_m, det.ambiguity);
+        } else {
+            std::snprintf(label_buf, sizeof(label_buf), "%d", det.id);
         }
-        cv::putText(image, label, cv::Point(cx + 5, cy - 3),
-                   cv::FONT_HERSHEY_SIMPLEX, 0.3, WHITE, 1);
+        // Color based on ambiguity: green=good, orange=ok, red=bad
+        cv::Scalar label_color = (det.ambiguity < 0.2) ? GREEN :
+                                 (det.ambiguity < 0.5) ? ORANGE : RED;
+        cv::putText(image, label_buf, cv::Point(cx + 5, cy - 3),
+                   cv::FONT_HERSHEY_SIMPLEX, 0.3, label_color, 1);
     }
 
     // Robot pose (top-left, compact)

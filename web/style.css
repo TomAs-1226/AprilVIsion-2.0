@@ -420,6 +420,10 @@ footer {
 .debug-tag-row .tag-dist { color: var(--accent-green); min-width: 50px; }
 .debug-tag-row .tag-px { color: var(--text-secondary); min-width: 40px; }
 .debug-tag-row .tag-reproj { color: var(--warning); min-width: 50px; }
+.debug-tag-row .tag-ambig { min-width: 45px; }
+.debug-tag-row .tag-ambig.good { color: var(--accent-green); }
+.debug-tag-row .tag-ambig.warn { color: var(--warning); }
+.debug-tag-row .tag-ambig.bad { color: var(--error); }
 .debug-tag-row .tag-margin { color: var(--text-secondary); }
 
 .debug-pose-row {

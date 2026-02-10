@@ -175,6 +175,7 @@ struct TagDetection {
     Pose3D tag_to_camera;        // Transform from tag frame to camera frame
     double reprojection_error = std::numeric_limits<double>::max();
     double distance_m = 0.0;     // Distance to tag in meters (from PnP or pinhole)
+    double ambiguity = 1.0;      // Pose ambiguity ratio (0=unambiguous, 1=highly ambiguous)
 
     // For tracking
     int track_id = -1;           // Persistent track ID
