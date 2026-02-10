@@ -513,9 +513,9 @@ public class AlignToTagCommand extends Command {
 ```java
 // In RobotContainer.java
 
-// Align to tag 5 at 0.5 meters
-Command alignToSpeaker = new AlignToTagCommand(
-    visionSubsystem, driveSubsystem, 5, 0.5
+// Align to hub tag 20 at 0.5 meters (FRC 2026 REBUILT)
+Command alignToHub = new AlignToTagCommand(
+    visionSubsystem, driveSubsystem, 20, 0.5
 );
 
 // Bind to button

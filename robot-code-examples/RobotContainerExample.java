@@ -25,11 +25,15 @@ public class RobotContainerExample {
     private final CommandXboxController driver = new CommandXboxController(0);
     private final CommandXboxController operator = new CommandXboxController(1);
 
-    // Tag IDs for FRC 2024 (update for your game!)
-    private static final int BLUE_SPEAKER_TAG = 7;
-    private static final int RED_SPEAKER_TAG = 4;
-    private static final int BLUE_AMP_TAG = 6;
-    private static final int RED_AMP_TAG = 5;
+    // Tag IDs for FRC 2026 REBUILT
+    // Hub tags (scoring): Red 2-5,8-11 / Blue 18-21,24-27
+    // Tower wall tags: Red 15,16 / Blue 31,32
+    // Outpost tags: Red 13,14 / Blue 29,30
+    // Trench tags: Red 1,6,7,12 / Blue 17,22,23,28
+    private static final int BLUE_HUB_TAG = 20;    // Blue hub face D (near upper)
+    private static final int RED_HUB_TAG = 10;     // Red hub face D (near upper)
+    private static final int BLUE_TOWER_TAG = 31;   // Blue tower wall (bottom)
+    private static final int RED_TOWER_TAG = 15;    // Red tower wall (top)
 
     public RobotContainerExample() {
         // Connect vision to drive's pose estimator
@@ -43,22 +47,22 @@ public class RobotContainerExample {
         // Driver Controls - Auto-Alignment
         // ====================================================================
 
-        // A button - Align to speaker (uses alliance color)
+        // A button - Align to hub (uses alliance color)
         driver.a().whileTrue(
             Commands.either(
                 // Blue alliance
-                new AlignToTagCommand(vision, drive, BLUE_SPEAKER_TAG, 0.5),
+                new AlignToTagCommand(vision, drive, BLUE_HUB_TAG, 0.5),
                 // Red alliance
-                new AlignToTagCommand(vision, drive, RED_SPEAKER_TAG, 0.5),
+                new AlignToTagCommand(vision, drive, RED_HUB_TAG, 0.5),
                 () -> isBlueAlliance()
             )
         );
 
-        // B button - Align to amp
+        // B button - Align to tower wall
         driver.b().whileTrue(
             Commands.either(
-                new AlignToTagCommand(vision, drive, BLUE_AMP_TAG, 0.3),
-                new AlignToTagCommand(vision, drive, RED_AMP_TAG, 0.3),
+                new AlignToTagCommand(vision, drive, BLUE_TOWER_TAG, 0.3),
+                new AlignToTagCommand(vision, drive, RED_TOWER_TAG, 0.3),
                 () -> isBlueAlliance()
             )
         );
@@ -136,8 +140,8 @@ public class RobotContainerExample {
             // Drive towards scoring position
             drive.driveDistanceCommand(2.0, 0.0),
 
-            // Align to speaker tag
-            new AlignToTagCommand(vision, drive, BLUE_SPEAKER_TAG, 0.5)
+            // Align to hub tag
+            new AlignToTagCommand(vision, drive, BLUE_HUB_TAG, 0.5)
                 .withTimeout(3.0),
 
             // Check alignment

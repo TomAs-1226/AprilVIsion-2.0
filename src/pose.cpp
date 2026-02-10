@@ -139,8 +139,8 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
             intrinsics.dist_coeffs,
             rvec, tvec,
             false,
-            100,    // iterations
-            8.0,    // reprojection threshold
+            200,    // iterations (more for better convergence)
+            3.0,    // reprojection threshold (tighter for competition accuracy)
             0.99,   // confidence
             inliers,
             cv::SOLVEPNP_SQPNP  // More robust for multiple points
@@ -162,6 +162,17 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
         if (!success) {
             return result;
         }
+
+        // Refine with iterative PnP using the RANSAC result as initial guess
+        cv::solvePnP(
+            object_points,
+            image_points,
+            intrinsics.camera_matrix,
+            intrinsics.dist_coeffs,
+            rvec, tvec,
+            true,  // use extrinsic guess from RANSAC
+            cv::SOLVEPNP_ITERATIVE
+        );
 
         // This gives us field_to_camera (world points in field frame)
         // We want camera_to_field

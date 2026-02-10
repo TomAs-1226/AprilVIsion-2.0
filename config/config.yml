@@ -69,7 +69,7 @@ apriltag:
   refine_edges: true
   max_hamming: 1
   min_margin: 15.0
-  max_tags_per_frame: 16
+  max_tags_per_frame: 32
 
 # ==============================================================================
 # Tracking Settings
@@ -85,7 +85,7 @@ tracking:
 # Field Layout
 # ==============================================================================
 field:
-  name: FRC 2026
+  name: FRC 2026 REBUILT
   tag_size_m: 0.1651
 
 # ==============================================================================

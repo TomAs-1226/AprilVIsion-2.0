@@ -169,6 +169,17 @@ void Camera::configure_camera() {
     // Configure camera controls via v4l2-ctl for reliable control
     std::string device_path = "/dev/video" + std::to_string(opened_device_index_);
 
+    // Autofocus FIRST - enable before other controls
+    {
+        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=focus_auto=1 2>/dev/null";
+        if (std::system(cmd.c_str()) != 0) {
+            cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=focus_automatic_continuous=1 2>/dev/null";
+            if (std::system(cmd.c_str()) != 0) {
+                cap_.set(cv::CAP_PROP_AUTOFOCUS, 1);
+            }
+        }
+    }
+
     if (config_.exposure > 0) {
         // Manual exposure mode
         std::string cmd = "v4l2-ctl -d " + device_path +
@@ -180,7 +191,7 @@ void Camera::configure_camera() {
         }
         std::cout << "[Camera " << id_ << "] Manual exposure: " << config_.exposure << std::endl;
     } else {
-        // Auto exposure
+        // Auto exposure - set APERTURE_PRIORITY mode (auto exposure, manual other)
         std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=auto_exposure=3 2>/dev/null";
         if (std::system(cmd.c_str()) != 0) {
             cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=exposure_auto=3 2>/dev/null";
@@ -193,18 +204,11 @@ void Camera::configure_camera() {
         cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=white_balance_automatic=1 2>/dev/null";
         std::system(cmd.c_str());
 
-        std::cout << "[Camera " << id_ << "] Auto exposure enabled" << std::endl;
-    }
+        // Auto white balance temperature (let camera decide)
+        cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=white_balance_temperature_auto=1 2>/dev/null";
+        std::system(cmd.c_str());
 
-    // Autofocus
-    {
-        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=focus_auto=1 2>/dev/null";
-        if (std::system(cmd.c_str()) != 0) {
-            cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=focus_automatic_continuous=1 2>/dev/null";
-            if (std::system(cmd.c_str()) != 0) {
-                cap_.set(cv::CAP_PROP_AUTOFOCUS, 1);
-            }
-        }
+        std::cout << "[Camera " << id_ << "] Auto exposure enabled" << std::endl;
     }
 
     // Disable backlight compensation to prevent white-out
@@ -213,10 +217,11 @@ void Camera::configure_camera() {
         std::system(cmd.c_str());
     }
 
-    // Balanced brightness/contrast/saturation
+    // Let the camera's auto algorithms handle brightness/contrast/saturation.
+    // Do NOT set fixed values - they override auto-exposure and cause wonky brightness.
+    // Only set power_line_frequency to reduce flicker (1=50Hz, 2=60Hz).
     {
-        std::string cmd = "v4l2-ctl -d " + device_path +
-            " --set-ctrl=brightness=128 --set-ctrl=contrast=128 --set-ctrl=saturation=128 2>/dev/null";
+        std::string cmd = "v4l2-ctl -d " + device_path + " --set-ctrl=power_line_frequency=2 2>/dev/null";
         std::system(cmd.c_str());
     }
 
@@ -256,11 +261,12 @@ void Camera::capture_loop() {
 
         configure_camera();
 
-        // Warm up - let auto-exposure and autofocus settle
-        std::cout << "[Camera " << id_ << "] Warming up (auto-exposure + autofocus)..." << std::endl;
-        for (int i = 0; i < 30 && !should_stop_.load(); i++) {
+        // Warm up - read and discard frames to flush stale buffers and
+        // let auto-exposure settle. Short warmup = faster startup.
+        std::cout << "[Camera " << id_ << "] Warming up..." << std::endl;
+        for (int i = 0; i < 15 && !should_stop_.load(); i++) {
             cap_.read(warmup_frame);
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(33));
         }
 
         connected_.store(true);

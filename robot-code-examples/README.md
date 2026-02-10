@@ -48,14 +48,14 @@ Pose2d robotPose = drive.getPose();  // Includes vision corrections
 ### 4. Add Auto-Align Commands
 
 ```java
-// Simple alignment
-driver.a().whileTrue(new AlignToTagCommand(vision, drive, 5, 0.5));
+// Simple alignment to hub tag 20 (Blue hub, near upper)
+driver.a().whileTrue(new AlignToTagCommand(vision, drive, 20, 0.5));
 
-// Custom distance and timeout
-driver.b().whileTrue(new AlignToTagCommand(vision, drive, 7, 0.3, 0.0, 5.0));
+// Custom distance and timeout for tower wall
+driver.b().whileTrue(new AlignToTagCommand(vision, drive, 31, 0.3, 0.0, 5.0));
 
-// Static factory methods
-driver.x().whileTrue(AlignToTagCommand.alignToSpeaker(vision, drive, 7));
+// Static factory methods for FRC 2026 REBUILT
+driver.x().whileTrue(AlignToTagCommand.alignToHub(vision, drive, 20));
 ```
 
 ## NetworkTables Topics

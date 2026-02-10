@@ -197,33 +197,36 @@ public class AlignToTagCommand extends Command {
     }
 
     // ========================================================================
-    // Static factory methods for common alignments
+    // Static factory methods for FRC 2026 REBUILT common alignments
     // ========================================================================
 
     /**
-     * Creates an alignment command for speaker scoring (close range).
+     * Creates an alignment command for hub scoring (close range).
+     * Hub tags: Red 2-5,8-11 / Blue 18-21,24-27
      */
-    public static AlignToTagCommand alignToSpeaker(VisionSubsystem vision,
+    public static AlignToTagCommand alignToHub(VisionSubsystem vision,
+                                                DriveSubsystem drive,
+                                                int hubTagId) {
+        return new AlignToTagCommand(vision, drive, hubTagId, 0.5, 0.0, 5.0);
+    }
+
+    /**
+     * Creates an alignment command for tower wall approach.
+     * Tower wall tags: Red 15,16 / Blue 31,32
+     */
+    public static AlignToTagCommand alignToTowerWall(VisionSubsystem vision,
+                                                      DriveSubsystem drive,
+                                                      int towerTagId) {
+        return new AlignToTagCommand(vision, drive, towerTagId, 0.3, 0.0, 5.0);
+    }
+
+    /**
+     * Creates an alignment command for outpost approach.
+     * Outpost tags: Red 13,14 / Blue 29,30
+     */
+    public static AlignToTagCommand alignToOutpost(VisionSubsystem vision,
                                                     DriveSubsystem drive,
-                                                    int speakerTagId) {
-        return new AlignToTagCommand(vision, drive, speakerTagId, 0.5, 0.0, 5.0);
-    }
-
-    /**
-     * Creates an alignment command for amp scoring.
-     */
-    public static AlignToTagCommand alignToAmp(VisionSubsystem vision,
-                                               DriveSubsystem drive,
-                                               int ampTagId) {
-        return new AlignToTagCommand(vision, drive, ampTagId, 0.3, 0.0, 5.0);
-    }
-
-    /**
-     * Creates an alignment command for source pickup.
-     */
-    public static AlignToTagCommand alignToSource(VisionSubsystem vision,
-                                                  DriveSubsystem drive,
-                                                  int sourceTagId) {
-        return new AlignToTagCommand(vision, drive, sourceTagId, 0.6, 0.0, 5.0);
+                                                    int outpostTagId) {
+        return new AlignToTagCommand(vision, drive, outpostTagId, 0.6, 0.0, 5.0);
     }
 }

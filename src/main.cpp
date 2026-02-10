@@ -415,52 +415,60 @@ int main(int argc, char* argv[]) {
                 Frame& frame = *frame_opt;
                 empty_count = 0;
 
-                // Process frame
-                auto processed = pipeline.process_frame(frame, intr, cam_to_robot);
+                try {
+                    // Process frame
+                    auto processed = pipeline.process_frame(frame, intr, cam_to_robot);
 
-                // Encode JPEG for web streaming
-                std::vector<uint8_t> jpeg;
-                if (processed.annotated_image.empty()) {
+                    // Encode JPEG for web streaming
+                    std::vector<uint8_t> jpeg;
+                    if (processed.annotated_image.empty()) {
+                        continue;
+                    }
+
+                    cv::imencode(".jpg", processed.annotated_image, jpeg, jpeg_params);
+                    if (jpeg.empty()) {
+                        continue;
+                    }
+                    processed.jpeg = std::move(jpeg);
+
+                    // Push to web server
+                    web_server.push_frame(i, processed.jpeg);
+                    web_server.push_detections(processed.detections);
+
+                    // Push to NT publisher
+                    nt_publisher.publish_camera(i, processed.detections);
+
+                    // Update stats
+                    uint64_t frame_count = processing_frames[i].fetch_add(1) + 1;
+                    fps_count++;
+
+                    // Log first few frames to verify pipeline working
+                    if (frame_count <= 3 || frame_count % 500 == 0) {
+                        std::cout << "[Processing " << i << "] Frame " << frame_count
+                                  << " processed, JPEG size: " << processed.jpeg.size() << " bytes"
+                                  << ", detections: " << processed.detections.detections.size() << std::endl;
+                    }
+
+                    auto now = SteadyClock::now();
+                    auto elapsed = std::chrono::duration<double>(now - last_fps_time).count();
+                    if (elapsed >= 1.0) {
+                        processing_fps[i].store(fps_count / elapsed);
+                        fps_count = 0;
+                        last_fps_time = now;
+                    }
+
+                    // Check for config reload
+                    if (config_manager.reload_requested()) {
+                        pipeline.update_config(config_manager.get().detector,
+                                              config_manager.get().tracker);
+                        config_manager.clear_reload_flag();
+                    }
+                } catch (const cv::Exception& e) {
+                    std::cerr << "[Processing " << i << "] OpenCV error: " << e.what() << std::endl;
                     continue;
-                }
-
-                cv::imencode(".jpg", processed.annotated_image, jpeg, jpeg_params);
-                if (jpeg.empty()) {
+                } catch (const std::exception& e) {
+                    std::cerr << "[Processing " << i << "] Error: " << e.what() << std::endl;
                     continue;
-                }
-                processed.jpeg = std::move(jpeg);
-
-                // Push to web server
-                web_server.push_frame(i, processed.jpeg);
-                web_server.push_detections(processed.detections);
-
-                // Push to NT publisher
-                nt_publisher.publish_camera(i, processed.detections);
-
-                // Update stats
-                uint64_t frame_count = processing_frames[i].fetch_add(1) + 1;
-                fps_count++;
-
-                // Log first few frames to verify pipeline working
-                if (frame_count <= 3 || frame_count % 500 == 0) {
-                    std::cout << "[Processing " << i << "] Frame " << frame_count
-                              << " processed, JPEG size: " << processed.jpeg.size() << " bytes"
-                              << ", detections: " << processed.detections.detections.size() << std::endl;
-                }
-
-                auto now = SteadyClock::now();
-                auto elapsed = std::chrono::duration<double>(now - last_fps_time).count();
-                if (elapsed >= 1.0) {
-                    processing_fps[i].store(fps_count / elapsed);
-                    fps_count = 0;
-                    last_fps_time = now;
-                }
-
-                // Check for config reload
-                if (config_manager.reload_requested()) {
-                    pipeline.update_config(config_manager.get().detector,
-                                          config_manager.get().tracker);
-                    config_manager.clear_reload_flag();
                 }
             }
         });

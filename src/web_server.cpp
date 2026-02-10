@@ -99,7 +99,8 @@ bool WebServer::initialize(int port, const std::string& web_root,
                 [this, i](size_t /*offset*/, httplib::DataSink& sink) {
                     int frames_sent = 0;
                     int wait_count = 0;
-                    const int MAX_WAIT = 300;  // 10 seconds at 33ms intervals
+                    const int MAX_WAIT = 600;  // 30 seconds at 50ms intervals
+                    uint64_t last_version = 0;
 
                     // Wait for first frame with timeout
                     while (!should_stop_.load() && wait_count < MAX_WAIT) {
@@ -108,10 +109,10 @@ bool WebServer::initialize(int port, const std::string& web_root,
                             break;
                         }
                         wait_count++;
-                        if (wait_count % 30 == 0) {
+                        if (wait_count % 20 == 0) {
                             std::cout << "[WebServer] MJPEG cam" << i << " waiting for frames..." << std::endl;
                         }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     }
 
                     if (wait_count >= MAX_WAIT) {
@@ -122,37 +123,51 @@ bool WebServer::initialize(int port, const std::string& web_root,
                     std::cout << "[WebServer] MJPEG cam" << i << " starting stream" << std::endl;
 
                     while (!should_stop_.load()) {
-                        // Try to get latest frame
-                        auto frame_opt = impl_->latest_frames[i]->get();
+                        try {
+                            // Get latest frame only if changed (avoids sending duplicates)
+                            auto frame_changed = impl_->latest_frames[i]->get_if_changed(last_version);
 
-                        if (frame_opt && !frame_opt->empty()) {
-                            const auto& frame = *frame_opt;
+                            if (frame_changed) {
+                                const auto& [frame, version] = *frame_changed;
+                                last_version = version;
 
-                            // Build MJPEG frame
-                            std::string header = "--frame\r\n"
-                                "Content-Type: image/jpeg\r\n"
-                                "Content-Length: " + std::to_string(frame.size()) + "\r\n\r\n";
+                                if (!frame.empty()) {
+                                    // Build MJPEG frame
+                                    std::string header = "--frame\r\n"
+                                        "Content-Type: image/jpeg\r\n"
+                                        "Content-Length: " + std::to_string(frame.size()) + "\r\n\r\n";
 
-                            if (!sink.write(header.data(), header.size())) {
-                                std::cout << "[WebServer] MJPEG cam" << i << " client disconnected after "
-                                          << frames_sent << " frames" << std::endl;
-                                return false;
-                            }
-                            if (!sink.write(reinterpret_cast<const char*>(frame.data()), frame.size())) {
-                                return false;
-                            }
-                            if (!sink.write("\r\n", 2)) {
-                                return false;
+                                    if (!sink.write(header.data(), header.size())) {
+                                        break;
+                                    }
+                                    if (!sink.write(reinterpret_cast<const char*>(frame.data()), frame.size())) {
+                                        break;
+                                    }
+                                    if (!sink.write("\r\n", 2)) {
+                                        break;
+                                    }
+
+                                    frames_sent++;
+                                    if (frames_sent == 1) {
+                                        std::cout << "[WebServer] MJPEG cam" << i << " first frame sent" << std::endl;
+                                    }
+                                }
                             }
 
-                            frames_sent++;
-                            if (frames_sent == 1) {
-                                std::cout << "[WebServer] MJPEG cam" << i << " first frame sent" << std::endl;
-                            }
+                            // Tight polling for smooth streaming (~60fps max)
+                            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                        } catch (const std::exception& e) {
+                            std::cerr << "[WebServer] MJPEG cam" << i << " error: " << e.what() << std::endl;
+                            break;
+                        } catch (...) {
+                            std::cerr << "[WebServer] MJPEG cam" << i << " unknown error" << std::endl;
+                            break;
                         }
+                    }
 
-                        // Rate limit to ~30fps
-                        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+                    if (frames_sent > 0) {
+                        std::cout << "[WebServer] MJPEG cam" << i << " ended after "
+                                  << frames_sent << " frames" << std::endl;
                     }
                     return false;
                 });

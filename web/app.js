@@ -427,9 +427,9 @@ class VisionDashboard {
         const width = this.fieldCanvas.width;
         const height = this.fieldCanvas.height;
 
-        // Field dimensions (meters)
-        const FIELD_LENGTH = 16.54;
-        const FIELD_WIDTH = 8.21;
+        // FRC 2026 REBUILT field dimensions (meters, welded variant)
+        const FIELD_LENGTH = 16.541;
+        const FIELD_WIDTH = 8.069;
 
         // Scale
         const scale = Math.min(width / FIELD_LENGTH, height / FIELD_WIDTH);

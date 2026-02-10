@@ -1,200 +1,424 @@
 {
-  "name": "FRC 2026 Field Layout",
+  "name": "FRC 2026 REBUILT (Welded)",
   "tag_size_m": 0.1651,
-  "field_length_m": 16.54,
-  "field_width_m": 8.21,
+  "field_length_m": 16.541,
+  "field_width_m": 8.069,
   "tags": [
     {
       "id": 1,
       "pose": {
-        "x": 15.08,
-        "y": 0.98,
-        "z": 1.45,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 180
+        "x": 11.8780,
+        "y": 7.4248,
+        "z": 0.889,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
       },
-      "description": "Red source right"
+      "description": "Red trench (near red wall, top)"
     },
     {
       "id": 2,
       "pose": {
-        "x": 15.08,
-        "y": 2.66,
-        "z": 1.45,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 180
+        "x": 11.9154,
+        "y": 4.6380,
+        "z": 1.124,
+        "qw": 0.7071068,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.7071068
       },
-      "description": "Red source left"
+      "description": "Red hub face A (right)"
     },
     {
       "id": 3,
       "pose": {
-        "x": 16.54,
-        "y": 4.10,
-        "z": 1.45,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 180
+        "x": 11.3119,
+        "y": 4.3902,
+        "z": 1.124,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
       },
-      "description": "Red speaker center"
+      "description": "Red hub face B (far upper)"
     },
     {
       "id": 4,
       "pose": {
-        "x": 16.54,
-        "y": 5.55,
-        "z": 1.45,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 180
+        "x": 11.3119,
+        "y": 4.0346,
+        "z": 1.124,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
       },
-      "description": "Red speaker side"
+      "description": "Red hub face B (far lower)"
     },
     {
       "id": 5,
       "pose": {
-        "x": 1.46,
-        "y": 0.98,
-        "z": 1.45,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 0
+        "x": 11.9154,
+        "y": 3.4312,
+        "z": 1.124,
+        "qw": -0.7071068,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.7071068
       },
-      "description": "Blue source right"
+      "description": "Red hub face C (left)"
     },
     {
       "id": 6,
       "pose": {
-        "x": 1.46,
-        "y": 2.66,
-        "z": 1.45,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 0
+        "x": 11.8780,
+        "y": 0.6445,
+        "z": 0.889,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
       },
-      "description": "Blue source left"
+      "description": "Red trench (near red wall, bottom)"
     },
     {
       "id": 7,
       "pose": {
-        "x": 0.0,
-        "y": 4.10,
-        "z": 1.45,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 0
+        "x": 11.9529,
+        "y": 0.6445,
+        "z": 0.889,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
       },
-      "description": "Blue speaker center"
+      "description": "Red trench (near center, bottom)"
     },
     {
       "id": 8,
       "pose": {
-        "x": 0.0,
-        "y": 5.55,
-        "z": 1.45,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 0
+        "x": 12.2710,
+        "y": 3.4312,
+        "z": 1.124,
+        "qw": -0.7071068,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.7071068
       },
-      "description": "Blue speaker side"
+      "description": "Red hub face D (near left)"
     },
     {
       "id": 9,
       "pose": {
-        "x": 4.64,
-        "y": 4.50,
-        "z": 1.32,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 120
+        "x": 12.5192,
+        "y": 3.6790,
+        "z": 1.124,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
       },
-      "description": "Blue stage left"
+      "description": "Red hub face D (near lower)"
     },
     {
       "id": 10,
       "pose": {
-        "x": 4.64,
-        "y": 3.71,
-        "z": 1.32,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 60
+        "x": 12.5192,
+        "y": 4.0346,
+        "z": 1.124,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
       },
-      "description": "Blue stage right"
+      "description": "Red hub face D (near upper)"
     },
     {
       "id": 11,
       "pose": {
-        "x": 5.32,
-        "y": 4.10,
-        "z": 1.32,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 0
+        "x": 12.2710,
+        "y": 4.6380,
+        "z": 1.124,
+        "qw": 0.7071068,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.7071068
       },
-      "description": "Blue stage center"
+      "description": "Red hub face A (near right)"
     },
     {
       "id": 12,
       "pose": {
-        "x": 11.90,
-        "y": 4.50,
-        "z": 1.32,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 60
+        "x": 11.9529,
+        "y": 7.4248,
+        "z": 0.889,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
       },
-      "description": "Red stage left"
+      "description": "Red trench (near center, top)"
     },
     {
       "id": 13,
       "pose": {
-        "x": 11.90,
-        "y": 3.71,
-        "z": 1.32,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 120
+        "x": 16.5333,
+        "y": 7.4033,
+        "z": 0.552,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
       },
-      "description": "Red stage right"
+      "description": "Red outpost (top)"
     },
     {
       "id": 14,
       "pose": {
-        "x": 11.22,
-        "y": 4.10,
-        "z": 1.32,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 180
+        "x": 16.5333,
+        "y": 6.9715,
+        "z": 0.552,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
       },
-      "description": "Red stage center"
+      "description": "Red outpost (bottom)"
     },
     {
       "id": 15,
       "pose": {
-        "x": 0.0,
-        "y": 7.62,
-        "z": 1.30,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 90
+        "x": 16.5330,
+        "y": 4.3236,
+        "z": 0.552,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
       },
-      "description": "Blue amp"
+      "description": "Red tower wall (top)"
     },
     {
       "id": 16,
       "pose": {
-        "x": 16.54,
-        "y": 7.62,
-        "z": 1.30,
-        "roll": 0,
-        "pitch": 0,
-        "yaw": 270
+        "x": 16.5330,
+        "y": 3.8918,
+        "z": 0.552,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
       },
-      "description": "Red amp"
+      "description": "Red tower wall (bottom)"
+    },
+    {
+      "id": 17,
+      "pose": {
+        "x": 4.6631,
+        "y": 0.6445,
+        "z": 0.889,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
+      },
+      "description": "Blue trench (near center, bottom)"
+    },
+    {
+      "id": 18,
+      "pose": {
+        "x": 4.6256,
+        "y": 3.4312,
+        "z": 1.124,
+        "qw": -0.7071068,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.7071068
+      },
+      "description": "Blue hub face C (left)"
+    },
+    {
+      "id": 19,
+      "pose": {
+        "x": 5.2292,
+        "y": 3.6790,
+        "z": 1.124,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
+      },
+      "description": "Blue hub face D (near lower)"
+    },
+    {
+      "id": 20,
+      "pose": {
+        "x": 5.2292,
+        "y": 4.0346,
+        "z": 1.124,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
+      },
+      "description": "Blue hub face D (near upper)"
+    },
+    {
+      "id": 21,
+      "pose": {
+        "x": 4.6256,
+        "y": 4.6380,
+        "z": 1.124,
+        "qw": 0.7071068,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.7071068
+      },
+      "description": "Blue hub face A (right)"
+    },
+    {
+      "id": 22,
+      "pose": {
+        "x": 4.6631,
+        "y": 7.4248,
+        "z": 0.889,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
+      },
+      "description": "Blue trench (near center, top)"
+    },
+    {
+      "id": 23,
+      "pose": {
+        "x": 4.5882,
+        "y": 7.4248,
+        "z": 0.889,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
+      },
+      "description": "Blue trench (near blue wall, top)"
+    },
+    {
+      "id": 24,
+      "pose": {
+        "x": 4.2700,
+        "y": 4.6380,
+        "z": 1.124,
+        "qw": 0.7071068,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.7071068
+      },
+      "description": "Blue hub face A (far right)"
+    },
+    {
+      "id": 25,
+      "pose": {
+        "x": 4.0219,
+        "y": 4.3902,
+        "z": 1.124,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
+      },
+      "description": "Blue hub face B (far upper)"
+    },
+    {
+      "id": 26,
+      "pose": {
+        "x": 4.0219,
+        "y": 4.0346,
+        "z": 1.124,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
+      },
+      "description": "Blue hub face B (far lower)"
+    },
+    {
+      "id": 27,
+      "pose": {
+        "x": 4.2700,
+        "y": 3.4312,
+        "z": 1.124,
+        "qw": -0.7071068,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.7071068
+      },
+      "description": "Blue hub face C (far left)"
+    },
+    {
+      "id": 28,
+      "pose": {
+        "x": 4.5882,
+        "y": 0.6445,
+        "z": 0.889,
+        "qw": 0.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 1.0
+      },
+      "description": "Blue trench (near blue wall, bottom)"
+    },
+    {
+      "id": 29,
+      "pose": {
+        "x": 0.0077,
+        "y": 0.6660,
+        "z": 0.552,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
+      },
+      "description": "Blue outpost (bottom)"
+    },
+    {
+      "id": 30,
+      "pose": {
+        "x": 0.0077,
+        "y": 1.0978,
+        "z": 0.552,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
+      },
+      "description": "Blue outpost (top)"
+    },
+    {
+      "id": 31,
+      "pose": {
+        "x": 0.0081,
+        "y": 3.7457,
+        "z": 0.552,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
+      },
+      "description": "Blue tower wall (bottom)"
+    },
+    {
+      "id": 32,
+      "pose": {
+        "x": 0.0081,
+        "y": 4.1775,
+        "z": 0.552,
+        "qw": 1.0,
+        "qx": 0.0,
+        "qy": 0.0,
+        "qz": 0.0
+      },
+      "description": "Blue tower wall (top)"
     }
   ]
 }

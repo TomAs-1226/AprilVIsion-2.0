@@ -122,58 +122,76 @@ FieldLayout load_field_layout(const std::string& path, double tag_size_m) {
 
 FieldLayout create_default_field_layout(double tag_size_m) {
     FieldLayout layout;
-    layout.name = "FRC 2026 Default";
+    layout.name = "FRC 2026 REBUILT (Welded)";
     layout.tag_size_m = tag_size_m;
 
     auto corners_local = get_tag_corners_local(tag_size_m);
 
-    // FRC 2026 field dimensions (approximate - update with actual values)
-    // Field is 16.54m x 8.21m (54'3.25" x 26'11.25")
-    constexpr double FIELD_LENGTH = 16.54;
-    constexpr double FIELD_WIDTH = 8.21;
-
-    // Speaker tags (Red Alliance - IDs 1-4)
-    // These are on the scoring structure
-    std::vector<std::tuple<int, double, double, double, double>> tag_positions = {
-        // ID, X, Y, Z, Yaw (degrees, 0 = facing +X)
-        // Red Alliance (right side when standing at red driver station)
-        {1,  15.08, 0.98, 1.45, 180},  // Red source right
-        {2,  15.08, 2.66, 1.45, 180},  // Red source left
-        {3,  16.54, 4.10, 1.45, 0},    // Red speaker center
-        {4,  16.54, 5.55, 1.45, 0},    // Red speaker side
-
-        // Blue Alliance (left side when standing at blue driver station)
-        {5,  1.46, 0.98, 1.45, 0},     // Blue source right
-        {6,  1.46, 2.66, 1.45, 0},     // Blue source left
-        {7,  0.0, 4.10, 1.45, 180},    // Blue speaker center
-        {8,  0.0, 5.55, 1.45, 180},    // Blue speaker side
-
-        // Stage tags (center field)
-        {9,  4.64, 4.50, 1.32, 120},   // Blue stage left
-        {10, 4.64, 3.71, 1.32, 60},    // Blue stage right
-        {11, 5.32, 4.10, 1.32, 0},     // Blue stage center
-
-        {12, 11.90, 4.50, 1.32, 60},   // Red stage left
-        {13, 11.90, 3.71, 1.32, 120},  // Red stage right
-        {14, 11.22, 4.10, 1.32, 180},  // Red stage center
-
-        // Amp tags
-        {15, 0.0, 7.62, 1.30, 90},     // Blue amp
-        {16, 16.54, 7.62, 1.30, 270},  // Red amp
+    // FRC 2026 REBUILT field - 32 tags total
+    // Welded field variant: 16.541m x 8.069m
+    // Quaternion format: (W, X, Y, Z) for tag facing direction
+    struct TagDef {
+        int id;
+        double x, y, z;
+        double qw, qx, qy, qz;
     };
 
-    for (const auto& [id, x, y, z, yaw_deg] : tag_positions) {
-        FieldTag tag;
-        tag.id = id;
-        tag.center_field = {x, y, z};
+    std::vector<TagDef> tag_defs = {
+        // Red trench (8 trench tags total, 4 per alliance)
+        { 1, 11.8780, 7.4248, 0.889,  0.0, 0.0, 0.0, 1.0},
+        { 6, 11.8780, 0.6445, 0.889,  0.0, 0.0, 0.0, 1.0},
+        { 7, 11.9529, 0.6445, 0.889,  1.0, 0.0, 0.0, 0.0},
+        {12, 11.9529, 7.4248, 0.889,  1.0, 0.0, 0.0, 0.0},
 
-        // Convert yaw to quaternion (rotation around Z axis)
-        double yaw = yaw_deg * M_PI / 180.0;
+        // Red hub (16 hub tags total, 8 per alliance, 2 per face)
+        { 2, 11.9154, 4.6380, 1.124,  0.7071068, 0.0, 0.0, 0.7071068},
+        { 3, 11.3119, 4.3902, 1.124,  0.0, 0.0, 0.0, 1.0},
+        { 4, 11.3119, 4.0346, 1.124,  0.0, 0.0, 0.0, 1.0},
+        { 5, 11.9154, 3.4312, 1.124, -0.7071068, 0.0, 0.0, 0.7071068},
+        { 8, 12.2710, 3.4312, 1.124, -0.7071068, 0.0, 0.0, 0.7071068},
+        { 9, 12.5192, 3.6790, 1.124,  1.0, 0.0, 0.0, 0.0},
+        {10, 12.5192, 4.0346, 1.124,  1.0, 0.0, 0.0, 0.0},
+        {11, 12.2710, 4.6380, 1.124,  0.7071068, 0.0, 0.0, 0.7071068},
+
+        // Red outpost & tower wall (8 wall tags total, 4 per alliance)
+        {13, 16.5333, 7.4033, 0.552,  0.0, 0.0, 0.0, 1.0},
+        {14, 16.5333, 6.9715, 0.552,  0.0, 0.0, 0.0, 1.0},
+        {15, 16.5330, 4.3236, 0.552,  0.0, 0.0, 0.0, 1.0},
+        {16, 16.5330, 3.8918, 0.552,  0.0, 0.0, 0.0, 1.0},
+
+        // Blue trench
+        {17,  4.6631, 0.6445, 0.889,  1.0, 0.0, 0.0, 0.0},
+        {22,  4.6631, 7.4248, 0.889,  1.0, 0.0, 0.0, 0.0},
+        {23,  4.5882, 7.4248, 0.889,  0.0, 0.0, 0.0, 1.0},
+        {28,  4.5882, 0.6445, 0.889,  0.0, 0.0, 0.0, 1.0},
+
+        // Blue hub
+        {18,  4.6256, 3.4312, 1.124, -0.7071068, 0.0, 0.0, 0.7071068},
+        {19,  5.2292, 3.6790, 1.124,  1.0, 0.0, 0.0, 0.0},
+        {20,  5.2292, 4.0346, 1.124,  1.0, 0.0, 0.0, 0.0},
+        {21,  4.6256, 4.6380, 1.124,  0.7071068, 0.0, 0.0, 0.7071068},
+        {24,  4.2700, 4.6380, 1.124,  0.7071068, 0.0, 0.0, 0.7071068},
+        {25,  4.0219, 4.3902, 1.124,  0.0, 0.0, 0.0, 1.0},
+        {26,  4.0219, 4.0346, 1.124,  0.0, 0.0, 0.0, 1.0},
+        {27,  4.2700, 3.4312, 1.124, -0.7071068, 0.0, 0.0, 0.7071068},
+
+        // Blue outpost & tower wall
+        {29,  0.0077, 0.6660, 0.552,  1.0, 0.0, 0.0, 0.0},
+        {30,  0.0077, 1.0978, 0.552,  1.0, 0.0, 0.0, 0.0},
+        {31,  0.0081, 3.7457, 0.552,  1.0, 0.0, 0.0, 0.0},
+        {32,  0.0081, 4.1775, 0.552,  1.0, 0.0, 0.0, 0.0},
+    };
+
+    for (const auto& def : tag_defs) {
+        FieldTag tag;
+        tag.id = def.id;
+        tag.center_field = {def.x, def.y, def.z};
+
         tag.pose_field.position = tag.center_field;
-        tag.pose_field.orientation.w = std::cos(yaw / 2.0);
-        tag.pose_field.orientation.x = 0;
-        tag.pose_field.orientation.y = 0;
-        tag.pose_field.orientation.z = std::sin(yaw / 2.0);
+        tag.pose_field.orientation.w = def.qw;
+        tag.pose_field.orientation.x = def.qx;
+        tag.pose_field.orientation.y = def.qy;
+        tag.pose_field.orientation.z = def.qz;
 
         // Transform corners to field frame
         cv::Mat R;
@@ -192,7 +210,7 @@ FieldLayout create_default_field_layout(double tag_size_m) {
         layout.tags[tag.id] = tag;
     }
 
-    std::cout << "[FieldLayout] Created default layout with "
+    std::cout << "[FieldLayout] Created FRC 2026 REBUILT default layout with "
               << layout.tags.size() << " tags" << std::endl;
 
     return layout;

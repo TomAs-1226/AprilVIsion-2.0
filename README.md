@@ -153,7 +153,7 @@ apriltag:
   family: tag36h11
   decimation: 2      # 1=full res, 2=half (faster), 4=quarter
   min_margin: 20     # Detection quality threshold
-  max_tags_per_frame: 16
+  max_tags_per_frame: 32
 
 tracking:
   enable: true
@@ -179,7 +179,7 @@ For fast robot motion:
 
 Edit `config/field_layout.json` with your field's AprilTag positions.
 
-Default includes FRC 2024/2025-style tags. Update for 2026 when official layout is released.
+Includes the official FRC 2026 REBUILT field layout with all 32 AprilTag positions (welded field variant).
 
 ## Service Installation
 
