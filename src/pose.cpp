@@ -4,10 +4,12 @@
  */
 
 #include "pose.hpp"
+#include "pose_utils.hpp"  // Phase 1/2: Enhanced coordinate transforms
 #include <opencv2/calib3d.hpp>
 #include <iostream>
 #include <cmath>
 #include <set>
+#include <deque>
 
 namespace frc_vision {
 
@@ -130,6 +132,9 @@ TagDetection PoseEstimator::estimate_single_tag(
         result.distance_estimate.confidence > 0.7) {
         result.distance_m = result.distance_estimate.distance_fused;
     }
+
+    // Phase 2: Estimate per-tag accuracy based on viewing conditions
+    result.accuracy_estimate = estimate_tag_accuracy(result, result.distance_m);
 
     // Sanity check: reject unreasonable distances (> 10m for FRC field)
     // and unreasonable reprojection errors
@@ -366,23 +371,20 @@ Pose2D PoseEstimator::camera_to_robot_pose(
     const Pose3D& camera_to_field,
     const Pose3D& camera_to_robot)
 {
+    // Phase 1/2: Enhanced coordinate system handling with proper FRC transforms
     // robot_to_field = camera_to_field * robot_to_camera
     // where robot_to_camera = camera_to_robot^-1
     Pose3D robot_to_camera = camera_to_robot.inverse();
-    Pose3D robot_to_field = camera_to_field.compose(robot_to_camera);
+    Pose3D robot_to_field_opencv = camera_to_field.compose(robot_to_camera);
 
-    // Extract 2D pose (x, y, yaw)
-    Pose2D result;
-    result.x = robot_to_field.position.x;
-    result.y = robot_to_field.position.y;
+    // Transform from OpenCV coordinates to FRC field coordinates
+    // This is CRITICAL for correct angle measurements!
+    // OpenCV: X-right, Y-down, Z-forward
+    // FRC: X-downfield, Y-left, Z-up
+    Pose3D robot_to_field_frc = pose_utils::opencv_camera_to_frc_field(robot_to_field_opencv);
 
-    // Extract yaw from rotation
-    // For a rotation matrix R, yaw = atan2(R21, R11) for ZYX convention
-    cv::Mat R;
-    cv::Rodrigues(robot_to_field.rvec(), R);
-
-    // Assuming robot Z is up, we want rotation around Z
-    result.theta = std::atan2(R.at<double>(1, 0), R.at<double>(0, 0));
+    // Extract 2D pose with robust angle extraction and gimbal lock handling
+    Pose2D result = pose_utils::extract_robot_pose_2d(robot_to_field_frc);
 
     return result;
 }
@@ -538,6 +540,87 @@ DistanceEstimate PoseEstimator::compute_distance_estimate(
                         (vert_horiz_diff < 0.5) &&
                         (detection.pose_valid ?
                          std::abs(est.distance_pnp - est.distance_pinhole) < 0.5 : true);
+
+    return est;
+}
+
+TagAccuracyEstimate PoseEstimator::estimate_tag_accuracy(
+    const TagDetection& detection,
+    double distance)
+{
+    // Phase 2: Per-tag accuracy estimation based on viewing conditions
+    TagAccuracyEstimate est;
+
+    if (distance < 0.01 || distance > 20.0) {
+        est.confidence_level = "low";
+        est.estimated_error_m = 1.0;  // Very uncertain
+        est.estimated_angle_error_deg = 45.0;
+        return est;
+    }
+
+    // Base error model: error increases quadratically with distance
+    // At 1m: ~1cm, at 2m: ~4cm, at 3m: ~9cm (without other factors)
+    est.base_error = 0.01 * distance * distance;
+
+    // Reprojection error contribution
+    // Higher reprojection = less confident pose
+    est.reprojection_contribution = detection.reprojection_error * 0.005 * distance;
+
+    // Viewing angle contribution (estimate from edge ratio)
+    double viewing_angle_factor = 0.0;
+    if (detection.corners.corners.size() >= 4) {
+        const auto& c = detection.corners.corners;
+
+        // Compute edge lengths
+        double edge0 = std::sqrt((c[1].x - c[0].x) * (c[1].x - c[0].x) +
+                                 (c[1].y - c[0].y) * (c[1].y - c[0].y));
+        double edge1 = std::sqrt((c[2].x - c[1].x) * (c[2].x - c[1].x) +
+                                 (c[2].y - c[1].y) * (c[2].y - c[1].y));
+        double edge2 = std::sqrt((c[3].x - c[2].x) * (c[3].x - c[2].x) +
+                                 (c[3].y - c[2].y) * (c[3].y - c[2].y));
+        double edge3 = std::sqrt((c[0].x - c[3].x) * (c[0].x - c[3].x) +
+                                 (c[0].y - c[3].y) * (c[0].y - c[3].y));
+
+        // Aspect ratio deviation from 1.0 indicates viewing angle
+        double vert_avg = (edge1 + edge3) / 2.0;
+        double horiz_avg = (edge0 + edge2) / 2.0;
+
+        if (vert_avg > 0.0 && horiz_avg > 0.0) {
+            double aspect_ratio = std::max(vert_avg, horiz_avg) / std::min(vert_avg, horiz_avg);
+            // aspect_ratio of 1.0 = frontal view (good)
+            // aspect_ratio of 2.0+ = oblique view (poor)
+            viewing_angle_factor = (aspect_ratio - 1.0) * 0.5;  // Clamp later
+        }
+    }
+    viewing_angle_factor = std::clamp(viewing_angle_factor, 0.0, 2.0);
+    est.viewing_angle_contribution = viewing_angle_factor * 0.01 * distance;
+
+    // Ambiguity contribution (from IPPE)
+    est.ambiguity_contribution = detection.ambiguity * 0.02 * distance;
+
+    // Total estimated error (meters)
+    est.estimated_error_m = est.base_error +
+                            est.reprojection_contribution +
+                            est.viewing_angle_contribution +
+                            est.ambiguity_contribution;
+
+    // Clamp to reasonable range
+    est.estimated_error_m = std::clamp(est.estimated_error_m, 0.005, 2.0);
+
+    // Angle error estimation (increases with distance, reprojection error)
+    // At close range (<1m) with good reprojection: ~1°
+    // At far range (>3m) with poor reprojection: ~10°
+    est.estimated_angle_error_deg = (2.0 / distance) * (1.0 + detection.reprojection_error);
+    est.estimated_angle_error_deg = std::clamp(est.estimated_angle_error_deg, 0.5, 45.0);
+
+    // Confidence level classification
+    if (est.estimated_error_m < 0.05 && detection.ambiguity < 0.1) {
+        est.confidence_level = "high";
+    } else if (est.estimated_error_m < 0.15 && detection.ambiguity < 0.3) {
+        est.confidence_level = "medium";
+    } else {
+        est.confidence_level = "low";
+    }
 
     return est;
 }

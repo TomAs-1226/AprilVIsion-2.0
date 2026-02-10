@@ -106,6 +106,16 @@ public:
         const CameraIntrinsics& intrinsics);
 
     /**
+     * @brief Estimate per-tag accuracy based on viewing conditions (Phase 2).
+     * @param detection Tag detection with pose and quality metrics
+     * @param distance Measured distance to tag
+     * @return Accuracy estimate with predicted errors
+     */
+    static TagAccuracyEstimate estimate_tag_accuracy(
+        const TagDetection& detection,
+        double distance);
+
+    /**
      * @brief Get quality metrics for pose estimate.
      * Includes standard deviations for WPILib SwerveDrivePoseEstimator fusion.
      * @param detections Detected tags
