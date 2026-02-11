@@ -162,6 +162,31 @@ struct TagCorners {
 };
 
 /**
+ * @brief Multi-method distance estimation results (Phase 1)
+ */
+struct DistanceEstimate {
+    double distance_pnp = 0.0;        // Distance from PnP solve
+    double distance_pinhole = 0.0;    // Distance from pinhole model
+    double distance_edge = 0.0;       // Distance from tag edge length
+    double distance_fused = 0.0;      // Weighted fusion of methods
+    bool is_consistent = false;       // All methods agree within threshold
+    double confidence = 0.0;          // Overall confidence (0-1)
+    double stddev = 0.0;              // Standard deviation of estimates
+};
+
+/**
+ * @brief Per-tag accuracy prediction (Phase 2)
+ */
+struct TagAccuracyEstimate {
+    double estimated_error_m = 0.0;           // Predicted position error (meters)
+    double confidence = 1.0;                   // Confidence in this tag (0-1)
+    double reprojection_contribution = 0.0;    // Error from reprojection
+    double viewing_angle_contribution = 0.0;   // Error from viewing angle
+    double ambiguity_contribution = 0.0;       // Error from pose ambiguity
+    double distance_contribution = 0.0;        // Error from distance
+};
+
+/**
  * @brief Single AprilTag detection
  */
 struct TagDetection {
