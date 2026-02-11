@@ -9,15 +9,15 @@
 <body>
     <!-- Compact Header -->
     <header>
-        <h1>🎯 AprilVision 3.1</h1>
+        <h1>AprilVision 3.1</h1>
         <div class="status-bar">
-            <span id="status-uptime">⏱ --</span>
-            <span id="status-temp">🌡 --°C</span>
+            <span id="status-uptime">Uptime: --</span>
+            <span id="status-temp">CPU: --</span>
             <span id="status-nt" class="status-indicator disconnected">
                 NT: <span id="nt-status-text">Disconnected</span>
                 <span id="nt-server-ip" style="font-size:0.8em;"></span>
             </span>
-            <span id="status-clients">👥 0</span>
+            <span id="status-clients">Clients: 0</span>
         </div>
     </header>
 
@@ -28,7 +28,7 @@
             <!-- Camera 0 -->
             <div class="camera-panel" data-cam="0">
                 <div class="camera-header">
-                    <h3>📷 Camera 0</h3>
+                    <h3>Camera 0</h3>
                     <span class="cam-stats">
                         <span class="fps" data-cam="0">-- fps</span>
                         <span class="latency" data-cam="0">-- ms</span>
@@ -44,7 +44,7 @@
             <!-- Camera 1 -->
             <div class="camera-panel" data-cam="1">
                 <div class="camera-header">
-                    <h3>📷 Camera 1</h3>
+                    <h3>Camera 1</h3>
                     <span class="cam-stats">
                         <span class="fps" data-cam="1">-- fps</span>
                         <span class="latency" data-cam="1">-- ms</span>
@@ -60,7 +60,7 @@
             <!-- Camera 2 -->
             <div class="camera-panel" data-cam="2">
                 <div class="camera-header">
-                    <h3>📷 Camera 2</h3>
+                    <h3>Camera 2</h3>
                     <span class="cam-stats">
                         <span class="fps" data-cam="2">-- fps</span>
                         <span class="latency" data-cam="2">-- ms</span>
@@ -81,7 +81,7 @@
         <aside class="side-panels">
             <!-- Robot Pose -->
             <div class="panel">
-                <h3>🤖 Robot Pose</h3>
+                <h3>Robot Pose</h3>
                 <div class="pose-values">
                     <div class="pose-row">
                         <label>X</label>
@@ -94,9 +94,9 @@
                         <span class="unit">m</span>
                     </div>
                     <div class="pose-row">
-                        <label>θ</label>
+                        <label>&theta;</label>
                         <span id="pose-theta">--.--</span>
-                        <span class="unit">°</span>
+                        <span class="unit">&deg;</span>
                     </div>
                 </div>
                 <div class="confidence-bar">
@@ -109,7 +109,7 @@
 
             <!-- Stats -->
             <div class="panel">
-                <h3>📊 Stats</h3>
+                <h3>Stats</h3>
                 <div class="stats-grid">
                     <div class="stat-item">
                         <span class="stat-label">Tags:</span>
@@ -132,7 +132,7 @@
 
             <!-- Auto-Align -->
             <div class="panel">
-                <h3>🎯 Auto-Align</h3>
+                <h3>Auto-Align</h3>
                 <div class="auto-align-controls">
                     <input type="number" id="target-tag-id" value="7" placeholder="Tag ID" style="width: 60px;">
                     <button id="set-align-target">Set Target</button>
@@ -155,23 +155,62 @@
 
         <!-- Bottom Controls -->
         <section class="bottom-controls">
+            <!-- Calibration -->
             <div class="control-group">
-                <label>Test:</label>
-                <button id="start-calibration-mode">Calibration</button>
-                <button id="start-validation-mode">Validation</button>
-                <button id="start-diagnostics">Diagnostics</button>
-                <button id="stop-test-mode" class="danger" style="display:none;">Stop</button>
+                <label>Calibration:</label>
+                <select id="cal-camera" style="width:70px;">
+                    <option value="0">Cam 0</option>
+                    <option value="1">Cam 1</option>
+                    <option value="2">Cam 2</option>
+                </select>
+                <button id="btn-cal-start">Start</button>
+                <button id="btn-cal-capture" disabled>Capture</button>
+                <button id="btn-cal-compute" disabled>Compute</button>
+                <button id="btn-cal-reset" style="display:none;" class="danger">Reset</button>
+                <span id="cal-status" style="color:#8b949e; font-size:0.85em; margin-left:4px;">Idle</span>
             </div>
+
+            <!-- Diagnostics -->
+            <div class="control-group">
+                <label>Diagnostics:</label>
+                <button id="btn-run-diagnostics">Run Diagnostics</button>
+            </div>
+
+            <!-- Validation -->
+            <div class="control-group">
+                <label>Validation:</label>
+                <button id="btn-run-validation">Test at 1.5m</button>
+            </div>
+
+            <!-- Config -->
             <div class="control-group">
                 <label>Config:</label>
-                <button id="reload-config">Reload Config</button>
-            </div>
-            <div class="control-group">
-                <label for="overlay-toggle">
+                <button id="reload-config">Reload</button>
+                <label for="overlay-toggle" style="margin-left:8px;">
                     <input type="checkbox" id="overlay-toggle" checked> Overlays
                 </label>
             </div>
         </section>
+
+        <!-- Diagnostics Results Panel (hidden by default) -->
+        <div id="diagnostics-results" style="display:none; background:#0d1117; border:1px solid #30363d; padding:10px; margin:4px 0; border-radius:4px; font-size:0.85em;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <strong style="color:#58a6ff;">System Diagnostics</strong>
+                <button id="btn-close-diag" style="background:none; border:none; color:#8b949e; cursor:pointer;">close</button>
+            </div>
+            <div id="diag-content" style="color:#c9d1d9; white-space:pre-wrap; font-family:monospace; max-height:200px; overflow-y:auto;">
+                Running...
+            </div>
+        </div>
+
+        <!-- Calibration Results Panel (hidden by default) -->
+        <div id="calibration-results" style="display:none; background:#0d1117; border:1px solid #30363d; padding:10px; margin:4px 0; border-radius:4px; font-size:0.85em;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <strong style="color:#3fb950;">Calibration Result</strong>
+                <button id="btn-close-cal" style="background:none; border:none; color:#8b949e; cursor:pointer;">close</button>
+            </div>
+            <div id="cal-result-content" style="color:#c9d1d9; font-family:monospace;"></div>
+        </div>
     </main>
 
     <script src="app.js"></script>

@@ -186,45 +186,9 @@ inline DistanceEstimate compute_robust_distance(
         est.pnp_pinhole_agreement = std::exp(-diff / 0.5);
     }
 
-    // Weighted fusion using all 4 methods with adaptive weighting
-    double total_weight = 0.0;
-    double weighted_sum = 0.0;
-
-    // Method 1: PnP (primary, 60% base weight)
-    if (est.distance_pnp > 0.05 && est.distance_pnp < 12.0) {
-        weighted_sum += est.distance_pnp * 0.6;
-        total_weight += 0.6;
-    }
-
-    // Method 2: Pinhole average edge (25% weight)
-    if (est.distance_pinhole > 0.05 && est.distance_pinhole < 12.0) {
-        weighted_sum += est.distance_pinhole * 0.25;
-        total_weight += 0.25;
-    }
-
-    // Method 3: Vertical edges (adaptive weight)
-    if (est.distance_vertical_edges > 0.05 && est.distance_vertical_edges < 12.0) {
-        double horiz_foreshortening = (est.distance_pinhole > 0.05) ?
-            std::abs(est.distance_horizontal_edges - est.distance_pinhole) / est.distance_pinhole : 0.0;
-        double vert_weight = 0.1 + 0.1 * std::min(1.0, horiz_foreshortening * 5.0);
-        weighted_sum += est.distance_vertical_edges * vert_weight;
-        total_weight += vert_weight;
-    }
-
-    // Method 4: Horizontal edges (adaptive weight)
-    if (est.distance_horizontal_edges > 0.05 && est.distance_horizontal_edges < 12.0) {
-        double vert_foreshortening = (est.distance_pinhole > 0.05) ?
-            std::abs(est.distance_vertical_edges - est.distance_pinhole) / est.distance_pinhole : 0.0;
-        double horiz_weight = 0.1 + 0.1 * std::min(1.0, vert_foreshortening * 5.0);
-        weighted_sum += est.distance_horizontal_edges * horiz_weight;
-        total_weight += horiz_weight;
-    }
-
-    if (total_weight > 0.0) {
-        est.distance_fused = weighted_sum / total_weight;
-    } else {
-        est.distance_fused = est.distance_pnp > 0.05 ? est.distance_pnp : 10.0;
-    }
+    // PhotonVision approach: PnP translation norm is the authoritative distance.
+    // Other methods are for diagnostics/cross-validation only.
+    est.distance_fused = est.distance_pnp > 0.05 ? est.distance_pnp : est.distance_pinhole;
 
     est.confidence = est.pnp_pinhole_agreement * 0.5 + est.edge_consistency * 0.3;
     if (est.pnp_pinhole_agreement > 0.8 && est.edge_consistency > 0.8) {

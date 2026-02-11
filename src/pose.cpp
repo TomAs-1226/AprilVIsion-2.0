@@ -121,17 +121,14 @@ TagDetection PoseEstimator::estimate_single_tag(
     result.tag_to_camera = Pose3D::from_rvec_tvec(best_rvec, best_tvec);
     result.pose_valid = true;
 
-    // Distance from PnP solution (more accurate than pinhole approximation)
+    // Distance from PnP translation vector norm - this is the proven approach
+    // used by PhotonVision, Limelight, and all accurate FRC vision systems.
+    // The translation vector directly encodes camera-to-tag distance in 3D.
+    // Do NOT override with pinhole/edge fusion which adds noise.
     result.distance_m = cv::norm(best_tvec);
 
-    // Phase 1: Compute multi-method distance estimate with consistency checking
+    // Compute multi-method estimate for diagnostics display only (not used for distance_m)
     result.distance_estimate = compute_distance_estimate(result, intrinsics);
-
-    // Use fused distance if it's more consistent
-    if (result.distance_estimate.is_consistent &&
-        result.distance_estimate.confidence > 0.7) {
-        result.distance_m = result.distance_estimate.distance_fused;
-    }
 
     // Phase 2: Estimate per-tag accuracy based on viewing conditions
     result.accuracy_estimate = estimate_tag_accuracy(result, result.distance_m);
@@ -518,74 +515,19 @@ DistanceEstimate PoseEstimator::compute_distance_estimate(
         est.pnp_pinhole_agreement = 0.5;  // Neutral if no PnP
     }
 
-    // Fuse ALL distance methods with adaptive weighting.
-    // PhotonVision-style: PnP is primary, cross-validated with geometric methods.
-    double total_weight = 0.0;
-    double weighted_sum = 0.0;
+    // PhotonVision approach: PnP translation norm IS the distance.
+    // The fused value is just PnP (or pinhole fallback for diagnostics).
+    // Do NOT blend with edge methods - it degrades accuracy.
+    est.distance_fused = (detection.pose_valid && est.distance_pnp > 0.05) ?
+        est.distance_pnp : (est.distance_pinhole > 0.05 ? est.distance_pinhole : 10.0);
 
-    // Method 1: PnP distance (most accurate when reprojection error is low)
-    if (detection.pose_valid && est.distance_pnp > 0.05 && est.distance_pnp < 12.0) {
-        // Weight decreases with reprojection error
-        double reproj_quality = std::exp(-detection.reprojection_error * 0.5);
-        double pnp_weight = 0.6 * reproj_quality;
-        pnp_weight *= (1.0 - 0.5 * detection.ambiguity);
-        pnp_weight = std::max(0.05, pnp_weight);
-        weighted_sum += est.distance_pnp * pnp_weight;
-        total_weight += pnp_weight;
-    }
-
-    // Method 2: Pinhole model from average edge (robust, always available)
-    if (est.distance_pinhole > 0.05 && est.distance_pinhole < 12.0) {
-        weighted_sum += est.distance_pinhole * 0.25;
-        total_weight += 0.25;
-    }
-
-    // Method 3: Vertical edges (robust to horizontal viewing angle)
-    if (est.distance_vertical_edges > 0.05 && est.distance_vertical_edges < 12.0) {
-        double horiz_foreshortening = (est.distance_pinhole > 0.05) ?
-            std::abs(est.distance_horizontal_edges - est.distance_pinhole) / est.distance_pinhole : 0.0;
-        double vert_weight = 0.1 + 0.1 * std::min(1.0, horiz_foreshortening * 5.0);
-        weighted_sum += est.distance_vertical_edges * vert_weight;
-        total_weight += vert_weight;
-    }
-
-    // Method 4: Horizontal edges (robust to vertical viewing angle)
-    if (est.distance_horizontal_edges > 0.05 && est.distance_horizontal_edges < 12.0) {
-        double vert_foreshortening = (est.distance_pinhole > 0.05) ?
-            std::abs(est.distance_vertical_edges - est.distance_pinhole) / est.distance_pinhole : 0.0;
-        double horiz_weight = 0.1 + 0.1 * std::min(1.0, vert_foreshortening * 5.0);
-        weighted_sum += est.distance_horizontal_edges * horiz_weight;
-        total_weight += horiz_weight;
-    }
-
-    if (total_weight > 0.0) {
-        est.distance_fused = weighted_sum / total_weight;
-    } else {
-        est.distance_fused = est.distance_pinhole > 0.05 ? est.distance_pinhole : 10.0;
-    }
-
-    // Overall confidence: agreement between all methods
+    // Confidence: how well do the cross-validation methods agree with PnP
     est.confidence = est.pnp_pinhole_agreement * 0.5 + est.edge_consistency * 0.3;
     if (est.pnp_pinhole_agreement > 0.8 && est.edge_consistency > 0.8) {
         est.confidence = std::min(1.0, est.confidence + 0.2);
     }
 
-    // Consistency check using spread across all valid methods
-    std::vector<double> valid_distances;
-    if (est.distance_pnp > 0.05) valid_distances.push_back(est.distance_pnp);
-    if (est.distance_pinhole > 0.05) valid_distances.push_back(est.distance_pinhole);
-    if (est.distance_vertical_edges > 0.05) valid_distances.push_back(est.distance_vertical_edges);
-    if (est.distance_horizontal_edges > 0.05) valid_distances.push_back(est.distance_horizontal_edges);
-
-    double max_method_spread = 0.0;
-    if (valid_distances.size() >= 2) {
-        double min_d = *std::min_element(valid_distances.begin(), valid_distances.end());
-        double max_d = *std::max_element(valid_distances.begin(), valid_distances.end());
-        max_method_spread = max_d - min_d;
-    }
-
-    est.is_consistent = (est.confidence > 0.5) &&
-                        (max_method_spread < std::max(0.5, est.distance_fused * 0.2));
+    est.is_consistent = (detection.pose_valid && est.confidence > 0.4);
 
     return est;
 }

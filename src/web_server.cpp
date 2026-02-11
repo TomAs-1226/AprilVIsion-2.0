@@ -449,6 +449,14 @@ bool WebServer::initialize(int port, const std::string& web_root,
             response["pose_valid"] = j["fused_valid"];
         }
 
+        // NT connection status
+        if (j.contains("nt_connected")) {
+            response["nt_connected"] = j["nt_connected"];
+        }
+        if (j.contains("fused_valid")) {
+            response["fused_valid"] = j["fused_valid"];
+        }
+
         // Detailed camera status
         response["cameras"] = json::array();
         if (j.contains("cameras") && j["cameras"].is_array()) {
@@ -456,7 +464,8 @@ bool WebServer::initialize(int port, const std::string& web_root,
                 response["cameras"].push_back({
                     {"id", cam.value("id", -1)},
                     {"connected", cam.value("connected", false)},
-                    {"fps", cam.value("fps", 0.0)}
+                    {"fps", cam.value("fps", 0.0)},
+                    {"tags_detected", cam.value("tags_detected", 0)}
                 });
             }
         }

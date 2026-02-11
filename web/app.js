@@ -775,100 +775,208 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // =========================================================================
-// Phase 3: Testing Modes & Auto-Align
+// Calibration Workflow (calls /api/calibration/* endpoints)
 // =========================================================================
 
-// Testing mode controls
-document.getElementById('start-calibration-mode')?.addEventListener('click', async () => {
+document.getElementById('btn-cal-start')?.addEventListener('click', async () => {
+    const statusEl = document.getElementById('cal-status');
     try {
-        const response = await fetch('/api/mode/calibration', { method: 'POST' });
+        const response = await fetch('/api/calibration/start', { method: 'POST' });
+        const data = await response.json();
         if (response.ok) {
-            showTestMode('Calibration Mode', 'Point camera at ChArUco board from various angles. Press SPACE to capture frames. Press C to compute calibration. Press Q to quit.');
+            if (statusEl) { statusEl.textContent = `Started (need ${data.min_frames}+ frames)`; statusEl.style.color = '#3fb950'; }
+            const captureBtn = document.getElementById('btn-cal-capture');
+            const resetBtn = document.getElementById('btn-cal-reset');
+            if (captureBtn) captureBtn.disabled = false;
+            if (resetBtn) resetBtn.style.display = 'inline-block';
+            await fetch('/api/mode/calibration', { method: 'POST' });
+            showTestMode('Calibration', 'Point camera at ChArUco board from different angles, click Capture for each view.');
         } else {
-            alert('Failed to start calibration mode');
+            if (statusEl) { statusEl.textContent = 'Error: ' + (data.error || 'Failed'); statusEl.style.color = '#f85149'; }
         }
     } catch (err) {
-        console.error('Error starting calibration:', err);
-        alert('Error starting calibration mode');
+        if (statusEl) { statusEl.textContent = 'Connection error'; statusEl.style.color = '#f85149'; }
     }
 });
 
-document.getElementById('start-validation-mode')?.addEventListener('click', async () => {
+document.getElementById('btn-cal-capture')?.addEventListener('click', async () => {
+    const statusEl = document.getElementById('cal-status');
+    const camId = document.getElementById('cal-camera')?.value || '0';
     try {
-        const response = await fetch('/api/mode/validation', { method: 'POST' });
-        if (response.ok) {
-            showTestMode('Validation Mode', 'Place AprilTag EXACTLY 1.5m from camera, facing straight on. System will measure accuracy. Target: <2cm distance error, <2° angle error.');
+        const response = await fetch('/api/calibration/capture', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ camera_id: parseInt(camId) })
+        });
+        const data = await response.json();
+        if (data.success) {
+            if (statusEl) { statusEl.textContent = `${data.frames_captured}/${data.frames_needed} frames`; statusEl.style.color = '#3fb950'; }
+            const computeBtn = document.getElementById('btn-cal-compute');
+            if (computeBtn && data.frames_captured >= data.frames_needed) computeBtn.disabled = false;
         } else {
-            alert('Failed to start validation mode');
+            if (statusEl) { statusEl.textContent = `Rejected (bad detection). ${data.frames_captured || 0} frames.`; statusEl.style.color = '#d29922'; }
         }
     } catch (err) {
-        console.error('Error starting validation:', err);
-        alert('Error starting validation mode');
+        if (statusEl) { statusEl.textContent = 'Capture failed'; statusEl.style.color = '#f85149'; }
     }
 });
 
-document.getElementById('start-diagnostics')?.addEventListener('click', async () => {
+document.getElementById('btn-cal-compute')?.addEventListener('click', async () => {
+    const statusEl = document.getElementById('cal-status');
+    const resultPanel = document.getElementById('calibration-results');
+    const resultContent = document.getElementById('cal-result-content');
+    if (statusEl) { statusEl.textContent = 'Computing...'; statusEl.style.color = '#d29922'; }
     try {
-        const response = await fetch('/api/mode/diagnostics', { method: 'POST' });
-        if (response.ok) {
-            showTestMode('Diagnostics Mode', 'Running comprehensive diagnostics. Check console for detailed output.');
-        } else {
-            alert('Failed to start diagnostics');
-        }
-    } catch (err) {
-        console.error('Error starting diagnostics:', err);
-        alert('Error starting diagnostics');
-    }
-});
-
-document.getElementById('stop-test-mode')?.addEventListener('click', async () => {
-    try {
-        const response = await fetch('/api/mode/normal', { method: 'POST' });
-        if (response.ok) {
+        const response = await fetch('/api/calibration/compute', { method: 'POST' });
+        const data = await response.json();
+        if (data.success && resultContent && resultPanel) {
+            const q = data.rms_error < 0.3 ? 'EXCELLENT' : data.rms_error < 0.5 ? 'GOOD' : data.rms_error < 1.0 ? 'OK' : 'POOR';
+            resultContent.innerHTML =
+                `RMS Error: ${data.rms_error.toFixed(4)} px  [${q}]\n` +
+                `Frames Used: ${data.frames_used}\n` +
+                (data.intrinsics ? `fx: ${data.intrinsics.fx.toFixed(1)}  fy: ${data.intrinsics.fy.toFixed(1)}\n` +
+                `cx: ${data.intrinsics.cx.toFixed(1)}  cy: ${data.intrinsics.cy.toFixed(1)}\n` +
+                `Resolution: ${data.intrinsics.width}x${data.intrinsics.height}\n` : '') +
+                (data.saved_to ? `Saved to: ${data.saved_to}` : '');
+            resultPanel.style.display = 'block';
+            if (statusEl) { statusEl.textContent = `Done! RMS=${data.rms_error.toFixed(3)}px`; statusEl.style.color = '#3fb950'; }
+            await fetch('/api/mode/normal', { method: 'POST' });
             hideTestMode();
         } else {
-            alert('Failed to stop test mode');
+            if (statusEl) { statusEl.textContent = 'Error: ' + (data.error || 'Failed'); statusEl.style.color = '#f85149'; }
         }
     } catch (err) {
-        console.error('Error stopping test mode:', err);
-        alert('Error stopping test mode');
+        if (statusEl) { statusEl.textContent = 'Compute failed'; statusEl.style.color = '#f85149'; }
     }
 });
+
+document.getElementById('btn-cal-reset')?.addEventListener('click', async () => {
+    const statusEl = document.getElementById('cal-status');
+    await fetch('/api/calibration/reset', { method: 'POST' }).catch(() => {});
+    if (statusEl) { statusEl.textContent = 'Idle'; statusEl.style.color = '#8b949e'; }
+    const captureBtn = document.getElementById('btn-cal-capture');
+    const computeBtn = document.getElementById('btn-cal-compute');
+    const resetBtn = document.getElementById('btn-cal-reset');
+    if (captureBtn) captureBtn.disabled = true;
+    if (computeBtn) computeBtn.disabled = true;
+    if (resetBtn) resetBtn.style.display = 'none';
+    await fetch('/api/mode/normal', { method: 'POST' }).catch(() => {});
+    hideTestMode();
+});
+
+document.getElementById('btn-close-cal')?.addEventListener('click', () => {
+    const panel = document.getElementById('calibration-results');
+    if (panel) panel.style.display = 'none';
+});
+
+// =========================================================================
+// Diagnostics (fetches real data from multiple API endpoints)
+// =========================================================================
+
+document.getElementById('btn-run-diagnostics')?.addEventListener('click', async () => {
+    const panel = document.getElementById('diagnostics-results');
+    const content = document.getElementById('diag-content');
+    if (panel) panel.style.display = 'block';
+    if (content) content.textContent = 'Running diagnostics...';
+
+    try {
+        const [statusRes, calRes, modeRes] = await Promise.all([
+            fetch('/api/status').catch(() => null),
+            fetch('/api/calibration/status').catch(() => null),
+            fetch('/api/mode').catch(() => null)
+        ]);
+
+        let output = '=== SYSTEM ===\n';
+        if (statusRes && statusRes.ok) {
+            const s = await statusRes.json();
+            output += `Uptime: ${Math.floor((s.uptime || 0) / 60)}m ${Math.floor((s.uptime || 0) % 60)}s\n`;
+            output += `CPU Temp: ${(s.cpu_temp || 0).toFixed(1)}C\n`;
+            output += `NT: ${s.nt_connected ? 'CONNECTED' : 'DISCONNECTED'}\n`;
+            output += `Fused Pose: ${s.fused_valid ? 'VALID' : 'INVALID'}\n\n`;
+            output += '=== CAMERAS ===\n';
+            (s.cameras || []).forEach((cam, i) => {
+                output += `Cam ${i}: ${cam.connected ? 'OK' : 'DISCONNECTED'}`;
+                if (cam.connected) output += ` | ${(cam.fps || 0).toFixed(1)} fps | ${cam.tags_detected || 0} tags`;
+                output += '\n';
+            });
+        } else {
+            output += 'Status API unavailable\n';
+        }
+
+        output += '\n=== CALIBRATION ===\n';
+        if (calRes && calRes.ok) {
+            const c = await calRes.json();
+            output += c.active
+                ? `Active: ${c.frames_captured}/${c.min_frames} frames, ready=${c.ready}\n`
+                : 'No active session\n';
+        }
+
+        output += '\n=== MODE ===\n';
+        if (modeRes && modeRes.ok) {
+            const m = await modeRes.json();
+            output += `${m.mode}\n`;
+        }
+
+        output += '\n=== LIVE DETECTIONS ===\n';
+        if (window.dashboard && window.dashboard.latestData) {
+            const dets = window.dashboard.latestData.detections;
+            for (const [camId, data] of Object.entries(dets)) {
+                output += `Cam ${camId}: ${data.tags.length} tags\n`;
+                data.tags.forEach(tag => {
+                    output += `  Tag ${tag.id}: ${(tag.distance_m || 0).toFixed(3)}m reproj=${(tag.reproj_error || 0).toFixed(2)}px ambig=${(tag.ambiguity || 0).toFixed(3)} margin=${(tag.margin || 0).toFixed(0)}\n`;
+                });
+            }
+            const fused = window.dashboard.latestData.fused;
+            if (fused && fused.valid) {
+                output += `\nFused: (${fused.pose_filtered.x.toFixed(3)}, ${fused.pose_filtered.y.toFixed(3)}, ${fused.pose_filtered.theta_deg.toFixed(1)}deg)`;
+                output += ` conf=${(fused.quality.confidence * 100).toFixed(0)}%\n`;
+            }
+        } else {
+            output += 'No detection data available\n';
+        }
+
+        if (content) content.textContent = output;
+        await fetch('/api/mode/diagnostics', { method: 'POST' }).catch(() => {});
+    } catch (err) {
+        if (content) content.textContent = 'Diagnostics failed: ' + err.message;
+    }
+});
+
+document.getElementById('btn-close-diag')?.addEventListener('click', async () => {
+    const panel = document.getElementById('diagnostics-results');
+    if (panel) panel.style.display = 'none';
+    await fetch('/api/mode/normal', { method: 'POST' }).catch(() => {});
+});
+
+// =========================================================================
+// Validation
+// =========================================================================
+
+document.getElementById('btn-run-validation')?.addEventListener('click', async () => {
+    try {
+        await fetch('/api/mode/validation', { method: 'POST' });
+        showTestMode('Validation', 'Place AprilTag EXACTLY 1.5m from camera, facing straight on. Watch distance readings. Target: <2cm error, <2deg angle error.');
+    } catch (err) {
+        console.error('Validation error:', err);
+    }
+});
+
+// =========================================================================
+// Test Mode Banner Helpers
+// =========================================================================
 
 function showTestMode(modeName, instructions) {
     const statusEl = document.getElementById('test-mode-status');
     const modeEl = document.getElementById('current-test-mode');
     const instrEl = document.getElementById('test-instructions');
-    const stopBtn = document.getElementById('stop-test-mode');
-
     if (modeEl) modeEl.textContent = modeName;
     if (instrEl) instrEl.textContent = instructions;
     if (statusEl) statusEl.style.display = 'block';
-    if (stopBtn) stopBtn.style.display = 'inline-block';
-
-    // Hide start buttons
-    const calBtn = document.getElementById('start-calibration-mode');
-    const valBtn = document.getElementById('start-validation-mode');
-    const diagBtn = document.getElementById('start-diagnostics');
-    if (calBtn) calBtn.style.display = 'none';
-    if (valBtn) valBtn.style.display = 'none';
-    if (diagBtn) diagBtn.style.display = 'none';
 }
 
 function hideTestMode() {
     const statusEl = document.getElementById('test-mode-status');
-    const stopBtn = document.getElementById('stop-test-mode');
-
     if (statusEl) statusEl.style.display = 'none';
-    if (stopBtn) stopBtn.style.display = 'none';
-
-    // Show start buttons
-    const calBtn = document.getElementById('start-calibration-mode');
-    const valBtn = document.getElementById('start-validation-mode');
-    const diagBtn = document.getElementById('start-diagnostics');
-    if (calBtn) calBtn.style.display = 'inline-block';
-    if (valBtn) valBtn.style.display = 'inline-block';
-    if (diagBtn) diagBtn.style.display = 'inline-block';
 }
 
 // Auto-align controls
