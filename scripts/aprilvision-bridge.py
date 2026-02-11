@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-AprilVision 2.0 - Reverse Proxy with Custom Branding
+AprilVision 2.0 - FRC Competition Vision System
+Reverse proxy with custom branding and system monitoring
 
-This script runs as a reverse proxy in front of PhotonVision's web server.
-It passes all requests through to PhotonVision but rewrites HTML responses
-to replace PhotonVision branding with custom AprilVision branding.
+Built by Team 1226. Detection engine: PhotonVision.
 
 Architecture:
-  - PhotonVision runs on port 5800 (internal, detection + native UI)
-  - This proxy runs on port 5801 (the port teams access)
-  - All requests are forwarded to PhotonVision
-  - HTML/JS responses get branding replaced
-  - Camera streams are proxied transparently
+  - PhotonVision runs on port 5800 (internal detection engine)
+  - This proxy runs on port 5801 (team-facing dashboard)
+  - All requests are forwarded to PhotonVision transparently
+  - HTML/JS/CSS responses get AprilVision branding injected
+  - Camera MJPEG streams are proxied without modification
 
 Usage:
   python3 aprilvision-bridge.py [--pv-port 5800] [--port 5801]
@@ -45,18 +44,34 @@ BRANDING_REPLACEMENTS = [
 # CSS injection for custom styling
 CUSTOM_CSS = b"""
 <style id="aprilvision-custom">
-  /* AprilVision 2.0 Custom Branding */
+  /* AprilVision 2.0 - FRC Competition Vision System */
+  /* Custom branding overlay by Team 1226 */
   .photonvision-header, [class*="header"] {
     position: relative;
   }
-  /* Subtle branding indicator in bottom-right */
   body::after {
-    content: "Custom Vision System | AprilVision 2.0";
+    content: "AprilVision 2.0 | Team 1226 | FRC 2026";
     position: fixed;
     bottom: 4px;
     right: 8px;
     font-size: 10px;
-    color: rgba(255,255,255,0.3);
+    color: rgba(0,255,136,0.4);
+    z-index: 99999;
+    pointer-events: none;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    letter-spacing: 0.3px;
+  }
+  /* Health indicator dot */
+  body::before {
+    content: "";
+    position: fixed;
+    bottom: 8px;
+    left: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #00ff88;
+    box-shadow: 0 0 4px rgba(0,255,136,0.5);
     z-index: 99999;
     pointer-events: none;
   }
@@ -231,16 +246,16 @@ class ReverseProxyHandler(http.server.BaseHTTPRequestHandler):
         except ConnectionRefusedError:
             self._send_error_page(
                 503,
-                "PhotonVision Not Running",
+                "Detection Engine Offline",
                 "The PhotonVision detection engine is not responding. "
-                "Check that the photonvision service is running: "
-                "sudo systemctl status photonvision"
+                "Run the health check: <code>./scripts/health_check.sh</code> "
+                "or check the service: <code>sudo systemctl status photonvision</code>"
             )
         except Exception as e:
             self._send_error_page(
                 502,
                 "Proxy Error",
-                f"Failed to connect to PhotonVision backend: {e}"
+                f"Failed to connect to the detection engine: {e}"
             )
 
     def _send_error_page(self, code, title, message):
@@ -287,7 +302,7 @@ class ReverseProxyHandler(http.server.BaseHTTPRequestHandler):
         <h2>{title}</h2>
         <p>{message}</p>
         <p style="color:#666;font-size:0.85em;">This page will auto-refresh in 5 seconds.</p>
-        <div class="brand">AprilVision 2.0 - Custom Vision System</div>
+        <div class="brand">AprilVision 2.0 - FRC Competition Vision System | Team 1226</div>
     </div>
 </body>
 </html>""".encode("utf-8")
@@ -362,15 +377,14 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 def main():
     print("=" * 60)
-    print("  AprilVision 2.0 - Custom Vision System")
-    print("  Reverse proxy with custom branding")
+    print("  AprilVision 2.0 - FRC Competition Vision System")
+    print("  Built by Team 1226 | Detection: PhotonVision")
     print("=" * 60)
-    print(f"  Proxy port:     {PROXY_PORT}")
-    print(f"  PhotonVision:   http://{PHOTONVISION_HOST}:{PHOTONVISION_PORT}")
     print(f"  Dashboard:      http://0.0.0.0:{PROXY_PORT}")
+    print(f"  Engine:         http://{PHOTONVISION_HOST}:{PHOTONVISION_PORT}")
     print()
-    print("  All PhotonVision features available through this proxy.")
-    print("  PhotonVision branding is replaced with AprilVision 2.0.")
+    print("  Full PhotonVision features available through this proxy.")
+    print("  Custom branding + health monitoring injected.")
     print("=" * 60)
     print()
 

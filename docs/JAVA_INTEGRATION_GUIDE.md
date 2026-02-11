@@ -1,10 +1,14 @@
 # AprilVision 2.0 - PhotonLib Java Integration Guide
 
+> Step-by-step guide to integrating AprilVision 2.0 vision data into your FRC robot code using PhotonLib.
+
+---
+
 ## Overview
 
-**AprilVision 2.0** uses PhotonVision as its detection engine. Robot code uses **PhotonLib** - the official Java library from PhotonVision - to receive vision data via NetworkTables.
+AprilVision 2.0 uses **PhotonVision** as its detection engine. Your robot code uses **PhotonLib** (PhotonVision's official Java library) to receive AprilTag detection data over NetworkTables.
 
-This guide covers everything needed to integrate AprilVision 2.0 into your Java robot code.
+This guide walks through everything from initial setup to multi-camera pose estimation.
 
 ---
 
@@ -14,6 +18,11 @@ This guide covers everything needed to integrate AprilVision 2.0 into your Java 
 Run the one-script setup on your coprocessor:
 ```bash
 ./setup.sh --team YOUR_TEAM_NUMBER
+```
+
+Verify everything is running:
+```bash
+./scripts/health_check.sh
 ```
 
 ### Robot Project Dependencies
@@ -34,11 +43,13 @@ Open `http://<coprocessor-ip>:5801` and configure:
 - Camera names: `front`, `left`, `right` (must match robot code)
 - Pipeline: AprilTag with tag36h11
 - Resolution: 640x480 @ 30 FPS
-- Run camera calibration
+- Run camera calibration for accurate poses
 
 ---
 
 ## 2. Basic Vision Subsystem
+
+Start with a single-camera subsystem:
 
 ```java
 package frc.robot.subsystems;
@@ -60,7 +71,7 @@ public class VisionSubsystem extends SubsystemBase {
     private final PhotonCamera frontCamera;
     private final PhotonPoseEstimator poseEstimator;
 
-    // Camera mounting relative to robot center
+    // Camera mounting relative to robot center (meters, radians)
     private static final Transform3d ROBOT_TO_CAMERA = new Transform3d(
         new Translation3d(0.25, 0.0, 0.50), // 25cm forward, 50cm up
         new Rotation3d(0, 0, 0)               // facing forward
@@ -129,7 +140,7 @@ public void updateVisionPose() {
 
 ## 4. Standard Deviation Calculation
 
-Scale trust based on distance to tags and tag count:
+Scale trust based on distance to tags and tag count. Closer tags and multi-tag results get more trust:
 
 ```java
 public Matrix<N3, N1> getEstimationStdDevs(EstimatedRobotPose estimate) {
@@ -167,7 +178,7 @@ public Matrix<N3, N1> getEstimationStdDevs(EstimatedRobotPose estimate) {
 
 ## 5. Auto-Align Command
 
-Align the robot to a specific AprilTag:
+Align the robot to a specific AprilTag using PID control:
 
 ```java
 public class AlignToTagCommand extends Command {
@@ -223,7 +234,7 @@ public class AlignToTagCommand extends Command {
 
 ## 6. Multi-Camera Setup
 
-For 3-camera configurations:
+For 3-camera configurations, each camera gets its own pose estimator:
 
 ```java
 private final PhotonCamera frontCamera = new PhotonCamera("front");
@@ -245,23 +256,34 @@ See `robot-code-examples/VisionSubsystem.java` for the complete multi-camera imp
 
 ---
 
-## 7. Troubleshooting
+## 7. Competition Day Checklist
+
+Before your match:
+1. Run `./scripts/health_check.sh` on the coprocessor
+2. Enable match mode: `./scripts/match_mode.sh enable`
+3. Open `:5801` and verify cameras are detecting tags
+4. Deploy robot code and check SmartDashboard for `Vision/FrontConnected: true`
+
+---
+
+## 8. Troubleshooting
 
 ### Camera not connecting
-- Verify camera name in code matches PhotonVision UI
+- Verify camera name in code matches the AprilVision dashboard
 - Check `SmartDashboard.putBoolean("Vision/Connected", camera.isConnected())`
 
 ### No pose estimates
-- Ensure AprilTag pipeline is selected in PhotonVision UI
+- Ensure AprilTag pipeline is selected in the dashboard
 - Verify field layout matches current season
-- Check for pose ambiguity filtering
+- Check for pose ambiguity filtering (>0.2 is rejected)
 
 ### High latency
 - Use 640x480 resolution instead of higher
 - Reduce FPS to 30 if at 60
 - Check USB bandwidth (use USB 3.0 ports)
+- Enable match mode for lowest latency: `./scripts/match_mode.sh enable`
 
 ### Inaccurate poses
-- Run camera calibration in PhotonVision UI
-- Verify camera mounting Transform3d values
+- Run camera calibration in the dashboard
+- Verify camera mounting Transform3d values match physical measurements
 - Ensure multi-tag strategy is selected

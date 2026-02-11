@@ -1,20 +1,35 @@
 #!/bin/bash
-# AprilVision 2.0 - Detect available cameras
-# Lists all video devices and their capabilities
+#===============================================================================
+# AprilVision 2.0 - Camera Detection Utility
+#
+# Lists all connected video devices and their capabilities.
+# Use this to verify cameras are detected before configuring in the dashboard.
+#
+# Usage: ./scripts/detect_cameras.sh
+#===============================================================================
 
-echo "AprilVision 2.0 - Camera Detection"
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo ""
+echo -e "${CYAN}AprilVision 2.0 - Camera Detection${NC}"
 echo "==================================="
 echo ""
 
 # Check if v4l-utils is installed
 if ! command -v v4l2-ctl &> /dev/null; then
-    echo "v4l2-ctl not found. Install with: sudo apt-get install v4l-utils"
+    echo -e "${YELLOW}v4l2-ctl not found. Install with: sudo apt-get install v4l-utils${NC}"
     exit 1
 fi
 
-# List all video devices
-echo "Video Devices:"
+# Count devices
+CAM_COUNT=$(ls /dev/video* 2>/dev/null | wc -l)
+echo -e "Video Devices Found: ${GREEN}${CAM_COUNT}${NC}"
 echo "--------------"
+
+# List all video devices
 v4l2-ctl --list-devices 2>/dev/null || echo "No video devices found"
 
 echo ""
@@ -40,5 +55,7 @@ for dev in /dev/video*; do
 done
 
 echo ""
-echo "Tip: Configure cameras through the PhotonVision web UI at :5801"
-echo "     PhotonVision will auto-detect connected USB cameras."
+echo -e "${GREEN}Tip:${NC} Configure cameras through the AprilVision dashboard at :5801"
+echo "     Camera names in the dashboard must match your robot code."
+echo "     Default names: \"front\", \"left\", \"right\""
+echo ""

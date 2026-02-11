@@ -1,26 +1,54 @@
-# AprilVision 2.0 - Custom FRC Vision System
+<p align="center">
+  <img src="https://img.shields.io/badge/FRC-2026-blue?style=for-the-badge" alt="FRC 2026">
+  <img src="https://img.shields.io/badge/PhotonVision-v2026.2.2-orange?style=for-the-badge" alt="PhotonVision v2026.2.2">
+  <img src="https://img.shields.io/badge/Platform-ARM64%20%7C%20x86__64-green?style=for-the-badge" alt="Platform">
+  <img src="https://img.shields.io/badge/License-MIT-purple?style=for-the-badge" alt="License">
+</p>
 
-**Custom vision system built on PhotonVision libraries. One-script setup, zero hassle.**
+# AprilVision 2.0
 
-AprilVision 2.0 replaces the original C++ detection pipeline with PhotonVision as the detection engine, wrapped in a custom-branded interface with one-script deployment for FRC teams.
+**The FRC vision system that sets up in 60 seconds and just works.**
+
+One command. Full AprilTag detection. Custom dashboard. Ready for competition.
+
+```bash
+./setup.sh --team 1226
+```
+
+That's it. Your coprocessor is now a competition-ready vision system.
 
 ---
 
-## What is AprilVision 2.0?
+## Why AprilVision 2.0?
 
-AprilVision 2.0 is a custom FRC vision system that uses **PhotonVision** as its detection backbone. It provides:
+Most FRC teams spend hours wrestling with vision setup, debugging NetworkTables connections, and fighting service configurations. AprilVision 2.0 eliminates all of that.
 
-- **PhotonVision detection engine** - AprilTag detection, multi-tag PnP, camera calibration
-- **Custom branded web dashboard** - PhotonVision's full UI rebranded as AprilVision via reverse proxy
-- **One-script setup** - `./setup.sh --team 1234` handles everything
-- **PhotonLib robot code examples** - Ready-to-use Java code for WPILib integration
-- **Systemd services** - Auto-start on boot, auto-recovery
+| Problem | AprilVision 2.0 Solution |
+|---------|--------------------------|
+| Complex multi-step installs | Single `./setup.sh` command |
+| Services don't survive reboot | Systemd auto-start + auto-recovery |
+| Raw PhotonVision UI is confusing | Custom branded dashboard at `:5801` |
+| No robot code examples | Complete Java examples with multi-camera support |
+| Manual network configuration | Auto-detects team number and roboRIO IP |
+| No health monitoring | Built-in health check + match mode scripts |
+| Debugging during competition | Camera snapshot diagnostics for post-match review |
+
+### What's Under the Hood
+
+AprilVision 2.0 runs **PhotonVision v2026.2.2** as its detection engine - the same battle-tested library used by thousands of FRC teams. On top of that, it adds:
+
+- **One-script deployment** - Installs Java 17, downloads PhotonVision, configures services, sets up cameras
+- **Custom reverse proxy** - Rebrands the web UI, injects monitoring overlays, adds system health indicators
+- **Match mode** - Competition-optimized settings that reduce latency and prioritize detection accuracy
+- **Health monitoring** - Pre-match diagnostic script that checks every component in seconds
+- **Camera snapshot tool** - Save diagnostic frames for post-match analysis
+- **Complete robot code** - Drop-in Java subsystem, auto-align command, and full integration example
 
 ---
 
 ## Quick Start
 
-### Step 1: Install on Coprocessor
+### 1. Deploy to Coprocessor
 
 ```bash
 git clone https://github.com/TomAs-1226/AprilVIsion-2.0
@@ -28,66 +56,72 @@ cd AprilVIsion-2.0
 ./setup.sh --team YOUR_TEAM_NUMBER
 ```
 
-This automatically:
-1. Installs Java 17
-2. Downloads PhotonVision v2026.2.2
-3. Creates system user with camera permissions
-4. Configures NetworkTables for your team's roboRIO
-5. Installs and starts systemd services
-6. Sets up the custom-branded reverse proxy
+**What this does (in ~2 minutes):**
 
-### Step 2: Configure Cameras
+| Step | Action |
+|------|--------|
+| 1 | Detects ARM64 or x86_64 architecture |
+| 2 | Installs system packages (`curl`, `wget`, `v4l-utils`, `python3`) |
+| 3 | Installs Java 17 JDK |
+| 4 | Downloads PhotonVision v2026.2.2 JAR (~115 MB) with retry logic |
+| 5 | Creates `photonvision` system user with camera permissions |
+| 6 | Configures NetworkTables for your team's roboRIO |
+| 7 | Installs the custom dashboard reverse proxy |
+| 8 | Installs + enables two systemd services |
+| 9 | Starts everything and verifies it's running |
 
-Open the dashboard in a browser:
+### 2. Configure Cameras
+
+Open the dashboard:
 ```
 http://<coprocessor-ip>:5801
 ```
 
-This opens the PhotonVision interface (rebranded as AprilVision 2.0):
-- Add your USB cameras
-- Set resolution (640x480 recommended) and FPS (30)
-- Select AprilTag pipeline with tag36h11 family
-- Run camera calibration for best accuracy
+| Setting | Recommended | Why |
+|---------|-------------|-----|
+| Resolution | 640x480 | Best speed-to-accuracy ratio |
+| FPS | 30 | Reliable detection without overloading USB |
+| Pipeline | AprilTag | For fiducial detection |
+| Tag Family | tag36h11 | FRC standard |
+| Decimation | 2 | Half-res processing for faster cycles |
 
-### Step 3: Add PhotonLib to Robot Code
+Then run **camera calibration** - this is critical for accurate pose estimation.
+
+### 3. Add PhotonLib to Robot Code
 
 In your robot project's `build.gradle`:
 
 ```gradle
+repositories {
+    maven { url "https://maven.photonvision.org/repository/internal" }
+}
+
 dependencies {
     implementation 'org.photonvision:photonlib-java:v2026.2.2'
 }
 ```
 
-### Step 4: Copy Robot Code Examples
+### 4. Drop In the Robot Code
 
-Copy from `robot-code-examples/`:
+Copy from `robot-code-examples/` into your project:
 
 ```java
-// VisionSubsystem.java - manages 3 PhotonVision cameras
-public class VisionSubsystem extends SubsystemBase {
-    private final PhotonCamera frontCamera = new PhotonCamera("front");
-    private final PhotonPoseEstimator frontPoseEstimator;
+// VisionSubsystem.java - Manages 3 PhotonVision cameras with pose estimation
+PhotonCamera frontCamera = new PhotonCamera("front");
+PhotonPoseEstimator poseEstimator = new PhotonPoseEstimator(
+    fieldLayout,
+    PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+    FRONT_ROBOT_TO_CAM
+);
 
-    public VisionSubsystem() {
-        AprilTagFieldLayout fieldLayout = AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
-        frontPoseEstimator = new PhotonPoseEstimator(
-            fieldLayout,
-            PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
-            FRONT_ROBOT_TO_CAM
-        );
-    }
-
-    public Optional<EstimatedRobotPose> getFrontCameraPose() {
-        return frontPoseEstimator.update(frontCamera.getLatestResult());
-    }
-}
+// In periodic():
+Optional<EstimatedRobotPose> pose = poseEstimator.update(frontCamera.getLatestResult());
 ```
 
-### Step 5: Fuse Vision with Odometry
+### 5. Fuse Vision with Odometry
 
 ```java
-// In RobotContainer or DriveSubsystem periodic()
+// Feed vision into SwerveDrivePoseEstimator
 Optional<EstimatedRobotPose> pose = vision.getFrontCameraPose();
 if (pose.isPresent()) {
     var estimate = pose.get();
@@ -101,63 +135,120 @@ if (pose.isPresent()) {
 
 ---
 
+## Custom Tools
+
+### Health Check
+
+Run before every match to verify your vision system is ready:
+
+```bash
+./scripts/health_check.sh
+```
+
+```
+AprilVision 2.0 - System Health Check
+======================================
+  PhotonVision Service .... RUNNING
+  Dashboard Proxy ......... RUNNING
+  Java 17 ................ OK (17.0.x)
+  PhotonVision JAR ....... OK (114M)
+  Camera Devices ......... 3 found
+  Network (roboRIO) ...... REACHABLE
+  Disk Space ............. OK (2.1G free)
+  Memory ................. OK (412M / 4096M)
+--------------------------------------
+  RESULT: ALL SYSTEMS GO
+```
+
+### Match Mode
+
+Activate competition-optimized settings before a match:
+
+```bash
+./scripts/match_mode.sh enable
+```
+
+This:
+- Sets CPU governor to `performance` for lowest latency
+- Increases Java heap to 768MB for smoother processing
+- Disables non-essential system services to free resources
+- Enables real-time thread priority for PhotonVision
+- Logs the change so you can review post-match
+
+Disable after practice:
+```bash
+./scripts/match_mode.sh disable
+```
+
+### Camera Detection
+
+List all connected cameras and their capabilities:
+```bash
+./scripts/detect_cameras.sh
+```
+
+### Update PhotonVision
+
+Upgrade to a newer PhotonVision release:
+```bash
+./scripts/update_photonvision.sh v2026.3.0
+```
+
+---
+
 ## Architecture
 
 ```
-+--------------------------------------------------+
-|              COPROCESSOR (Orange Pi / RPi)         |
-|                                                    |
-|  +---------------------------------------------+  |
-|  |  PhotonVision (Port 5800, internal)          |  |
-|  |  - AprilTag detection (tag36h11)             |  |
-|  |  - Multi-tag PnP on coprocessor              |  |
-|  |  - Camera calibration                        |  |
-|  |  - MJPEG camera streams                      |  |
-|  |  - NetworkTables publisher                   |  |
-|  +---------------------------------------------+  |
-|                       |                            |
-|  +---------------------------------------------+  |
-|  |  AprilVision Reverse Proxy (Port 5801)       |  |
-|  |  - Proxies PhotonVision web UI               |  |
-|  |  - Replaces PhotonVision branding            |  |
-|  |  - Injects custom CSS/JS                     |  |
-|  |  - Streams camera feeds through              |  |
-|  +---------------------------------------------+  |
-+--------------------------------------------------+
-         |                    |
-    NetworkTables         Port 5801
-         |                    |
-+------------------+   +------------------+
-|    roboRIO       |   |  Driver Laptop   |
-|  (Robot Code)    |   |  (Dashboard)     |
-|  - PhotonLib     |   |  Browser @ :5801 |
-|  - Pose Estimator|   |                  |
-+------------------+   +------------------+
++----------------------------------------------------------+
+|              COPROCESSOR (Orange Pi / RPi / x86)          |
+|                                                           |
+|  +----------------------------------------------------+  |
+|  |  PhotonVision Engine (Port 5800, internal)          |  |
+|  |  - AprilTag detection (tag36h11)                    |  |
+|  |  - Multi-tag PnP on coprocessor                     |  |
+|  |  - Camera calibration + MJPEG streams               |  |
+|  |  - NetworkTables 4.0 publisher                      |  |
+|  +----------------------------------------------------+  |
+|                          |                                |
+|  +----------------------------------------------------+  |
+|  |  AprilVision Proxy (Port 5801, team-facing)         |  |
+|  |  - Custom branded UI overlay                        |  |
+|  |  - System health indicators                         |  |
+|  |  - Camera feed passthrough                          |  |
+|  |  - Error pages with diagnostics                     |  |
+|  +----------------------------------------------------+  |
++----------------------------------------------------------+
+         |                         |
+    NetworkTables              Port 5801
+         |                         |
++------------------+       +------------------+
+|    roboRIO       |       |  Driver Station  |
+|  - PhotonLib     |       |  Browser @ :5801 |
+|  - Pose Fusion   |       |  Health + Config |
+|  - Auto-Align    |       |                  |
++------------------+       +------------------+
 ```
-
-**Key point:** PhotonVision does all the heavy lifting. AprilVision 2.0 wraps it with custom branding and a streamlined setup experience.
 
 ---
 
 ## Service Management
 
 ```bash
-# Start everything
+# Start / Stop / Restart
 sudo systemctl start photonvision aprilvision-dashboard
-
-# Stop everything
 sudo systemctl stop photonvision aprilvision-dashboard
+sudo systemctl restart photonvision
 
-# Check status
+# Status
 sudo systemctl status photonvision
 sudo systemctl status aprilvision-dashboard
 
-# View logs
+# Logs (live)
 journalctl -u photonvision -f
 journalctl -u aprilvision-dashboard -f
 
-# Restart after config changes
-sudo systemctl restart photonvision
+# Full health check
+./scripts/health_check.sh
 ```
 
 ---
@@ -166,33 +257,35 @@ sudo systemctl restart photonvision
 
 ### Team Number
 
-Set during `./setup.sh --team XXXX` or edit manually:
+Set during setup or edit manually:
+```bash
+# Re-run setup with new team number
+./setup.sh --team 1226
 
-- `config/config.yml` - team number and roboRIO IP
-- `/opt/photonvision/photonvision_config/network/networkSettings.json` - PhotonVision NT config
-
-### Camera Configuration
-
-All camera settings are managed through the PhotonVision web UI at `:5801`:
-
-| Setting | Recommended | Notes |
-|---------|-------------|-------|
-| Resolution | 640x480 | Balance of speed and accuracy |
-| FPS | 30 | Reliable detection rate |
-| Pipeline | AprilTag | For fiducial detection |
-| Tag Family | tag36h11 | FRC standard |
-| Decimation | 2 | Half-res processing (faster) |
+# Or edit directly
+nano config/config.yml
+```
 
 ### Camera Mounting
 
-Define camera positions in your robot code `VisionSubsystem.java`:
+Define camera positions in `VisionSubsystem.java`:
 
 ```java
+// x = forward, y = left, z = up (meters from robot center)
 private static final Transform3d FRONT_ROBOT_TO_CAM = new Transform3d(
-    new Translation3d(0.25, 0.0, 0.50),    // x=forward, y=left, z=up (meters)
-    new Rotation3d(0, 0, 0)                  // roll, pitch, yaw (radians)
+    new Translation3d(0.25, 0.0, 0.50),
+    new Rotation3d(0, 0, 0)
 );
 ```
+
+### Setup Options
+
+| Flag | Description |
+|------|-------------|
+| `--team XXXX` | Set team number |
+| `--install-only` | Reinstall services without downloading PhotonVision |
+| `--dev` | Development mode (no service install) |
+| `--clean` | Clean install (re-downloads everything) |
 
 ---
 
@@ -200,27 +293,29 @@ private static final Transform3d FRONT_ROBOT_TO_CAM = new Transform3d(
 
 ```
 AprilVIsion-2.0/
-+-- setup.sh                             # One-command setup
-+-- README.md                            # This file
++-- setup.sh                             # One-command full setup
++-- README.md                            # You are here
 +-- config/
-|   +-- config.yml                       # Team and dashboard config
+|   +-- config.yml                       # Team + dashboard config
 +-- web/
-|   +-- index.html                       # Landing page
-|   +-- app.js                           # Landing page logic
-|   +-- style.css                        # Landing page styles
+|   +-- index.html                       # Custom landing page
+|   +-- app.js                           # Dashboard status logic
+|   +-- style.css                        # Dark theme styles
 +-- scripts/
 |   +-- aprilvision-bridge.py            # Reverse proxy with branding
-|   +-- detect_cameras.sh               # List camera devices
-|   +-- update_photonvision.sh          # Update PhotonVision JAR
+|   +-- detect_cameras.sh               # Camera detection utility
+|   +-- update_photonvision.sh          # PhotonVision version updater
+|   +-- health_check.sh                 # Pre-match system diagnostics
+|   +-- match_mode.sh                   # Competition optimization toggle
 +-- deploy/
-|   +-- photonvision.service            # systemd for PhotonVision
-|   +-- aprilvision-dashboard.service   # systemd for reverse proxy
+|   +-- photonvision.service            # Systemd: PhotonVision engine
+|   +-- aprilvision-dashboard.service   # Systemd: Dashboard proxy
 +-- robot-code-examples/
-|   +-- VisionSubsystem.java           # PhotonLib multi-camera subsystem
+|   +-- VisionSubsystem.java           # Multi-camera subsystem
 |   +-- AlignToTagCommand.java         # Auto-align to AprilTag
-|   +-- RobotContainerExample.java     # Full integration example
+|   +-- RobotContainerExample.java     # Full wiring example
 +-- docs/
-    +-- JAVA_INTEGRATION_GUIDE.md       # Detailed PhotonLib guide
+    +-- JAVA_INTEGRATION_GUIDE.md       # Step-by-step PhotonLib guide
 ```
 
 ---
@@ -228,124 +323,72 @@ AprilVIsion-2.0/
 ## Robot Code Examples
 
 ### VisionSubsystem.java
-Multi-camera PhotonVision subsystem with:
-- 3 PhotonCamera instances (front, left, right)
-- PhotonPoseEstimator per camera with MULTI_TAG_PNP_ON_COPROCESSOR
-- Distance-based standard deviation scaling
-- Tag visibility queries
+Multi-camera subsystem managing 3 PhotonVision cameras with:
+- `PhotonPoseEstimator` per camera using `MULTI_TAG_PNP_ON_COPROCESSOR`
+- Distance-based standard deviation scaling (trusts closer tags more)
+- Tag visibility queries across all cameras
+- Camera connection status telemetry
 
 ### AlignToTagCommand.java
-PID-based alignment command that:
-- Searches for a specific AprilTag ID
-- Uses camera-to-target Transform3d for 3D positioning
-- PID control on forward, strafe, and rotation axes
-- Factory methods for common alignment distances
+PID-based alignment command:
+- Targets a specific AprilTag ID
+- Uses `getBestCameraToTarget()` Transform3d for 3D positioning
+- 3-axis PID control (forward, strafe, rotation)
+- Factory methods: `alignClose()` (0.4m) and `alignMedium()` (1.0m)
 
 ### RobotContainerExample.java
 Full integration showing:
-- Vision + odometry fusion with SwerveDrivePoseEstimator
-- Ambiguity filtering for single-tag results
+- Vision + odometry fusion with `SwerveDrivePoseEstimator`
+- Ambiguity filtering (rejects single-tag results with >0.2 ambiguity)
 - Button bindings for auto-align commands
-- Vision-assisted teleop driving
-
----
-
-## PhotonLib Dependency
-
-Add to your robot project's `build.gradle`:
-
-```gradle
-repositories {
-    maven { url "https://maven.photonvision.org/repository/internal" }
-}
-
-dependencies {
-    implementation 'org.photonvision:photonlib-java:v2026.2.2'
-}
-```
-
-Required PhotonLib imports:
-```java
-import org.photonvision.PhotonCamera;
-import org.photonvision.PhotonPoseEstimator;
-import org.photonvision.PhotonPoseEstimator.PoseStrategy;
-import org.photonvision.EstimatedRobotPose;
-import org.photonvision.targeting.PhotonPipelineResult;
-import org.photonvision.targeting.PhotonTrackedTarget;
-```
-
----
-
-## Updating PhotonVision
-
-```bash
-# Download new version
-sudo systemctl stop photonvision
-sudo wget -O /opt/photonvision/photonvision.jar \
-    https://github.com/PhotonVision/photonvision/releases/download/vX.X.X/photonvision-vX.X.X-linuxarm64.jar
-sudo systemctl start photonvision
-```
-
-Or use the provided script:
-```bash
-./scripts/update_photonvision.sh vX.X.X
-```
+- Vision-assisted teleop (blends driver input with tag tracking)
+- Autonomous routine with vision waypoints
 
 ---
 
 ## Troubleshooting
 
-### PhotonVision not starting
+### PhotonVision won't start
 ```bash
-# Check Java
-java -version  # Should show 17.x
-
-# Check logs
-journalctl -u photonvision -n 50
-
-# Try running manually
-sudo java -jar /opt/photonvision/photonvision.jar
+java -version                            # Must show 17.x
+journalctl -u photonvision -n 50         # Check error logs
+sudo java -jar /opt/photonvision/photonvision.jar  # Run manually to see errors
 ```
 
 ### Cameras not detected
 ```bash
-# List video devices
-v4l2-ctl --list-devices
-
-# Check permissions
-ls -la /dev/video*
-
-# Re-run setup
-./setup.sh --install-only
+./scripts/detect_cameras.sh              # List video devices
+ls -la /dev/video*                       # Check permissions
+./setup.sh --install-only                # Re-apply permissions
 ```
 
-### Dashboard proxy not working
+### Dashboard proxy not loading
 ```bash
-# Check if PhotonVision is running first
-curl http://localhost:5800
-
-# Check proxy logs
-journalctl -u aprilvision-dashboard -f
-
-# Restart proxy
+curl http://localhost:5800               # Is PhotonVision itself running?
+journalctl -u aprilvision-dashboard -f   # Check proxy logs
 sudo systemctl restart aprilvision-dashboard
 ```
 
 ### NetworkTables not connecting
-1. Verify team number in config
-2. Check roboRIO is on the network: `ping 10.XX.YY.2`
-3. Verify in PhotonVision UI (Settings > Network)
+1. Verify team number: `cat config/config.yml`
+2. Ping roboRIO: `ping 10.XX.YY.2`
+3. Check PhotonVision network settings at `:5801` > Settings > Network
+
+### Run the full diagnostic
+```bash
+./scripts/health_check.sh               # Checks everything at once
+```
 
 ---
 
 ## Credits
 
-- **PhotonVision** - Core detection engine and web interface
-- **WPILib** - FRC robotics framework and NetworkTables
-- **PhotonLib** - Java library for PhotonVision integration
+- **[PhotonVision](https://photonvision.org)** - Detection engine and PhotonLib
+- **[WPILib](https://wpilib.org)** - FRC framework and NetworkTables
+- **Team 1226** - AprilVision 2.0 development and testing
 
 ---
 
 ## License
 
-MIT License - Free for FRC teams and educational use.
+MIT License - Free for all FRC teams and educational use.

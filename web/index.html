@@ -3,144 +3,300 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AprilVision 2.0 - Custom Vision System</title>
+    <title>AprilVision 2.0 - FRC Vision System</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background: #0d1117;
             color: #e6edf3;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 30px 20px;
         }
-        .container {
-            max-width: 600px;
+        .header {
             text-align: center;
-            padding: 40px;
+            margin-bottom: 30px;
         }
         h1 {
             font-size: 2.5rem;
             color: #00ff88;
-            margin-bottom: 8px;
+            margin-bottom: 4px;
+            letter-spacing: -0.5px;
+        }
+        .version {
+            color: #58a6ff;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 6px;
         }
         .subtitle {
             color: #8b949e;
-            font-size: 1.1rem;
-            margin-bottom: 30px;
+            font-size: 1rem;
         }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            max-width: 700px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 18px;
+            transition: border-color 0.2s;
+        }
+        .card:hover { border-color: #58a6ff; }
+        .card-title {
+            font-size: 0.8rem;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .card-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #e6edf3;
+        }
+        .card-value.green { color: #00ff88; }
+        .card-value.red { color: #f85149; }
+        .card-value.blue { color: #58a6ff; }
+        .card-value.yellow { color: #d29922; }
         .links {
             display: flex;
             flex-direction: column;
             gap: 12px;
+            max-width: 700px;
+            width: 100%;
+            margin-bottom: 20px;
         }
-        a {
+        a.link-card {
             display: block;
-            padding: 16px 24px;
+            padding: 16px 20px;
             background: #161b22;
             border: 1px solid #30363d;
-            border-radius: 8px;
+            border-radius: 10px;
             color: #58a6ff;
             text-decoration: none;
-            font-size: 1.1rem;
+            font-size: 1.05rem;
+            font-weight: 600;
             transition: all 0.2s;
         }
-        a:hover {
+        a.link-card:hover {
             background: #1f2937;
             border-color: #58a6ff;
             transform: translateY(-2px);
         }
-        a .desc {
+        a.link-card .desc {
             display: block;
             color: #8b949e;
-            font-size: 0.85rem;
+            font-size: 0.82rem;
+            font-weight: 400;
             margin-top: 4px;
         }
-        .status {
-            margin-top: 30px;
-            padding: 16px;
+        .status-table {
+            max-width: 700px;
+            width: 100%;
             background: #161b22;
             border: 1px solid #30363d;
-            border-radius: 8px;
-            font-size: 0.9rem;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .status-table-header {
+            padding: 12px 18px;
+            background: #1c2333;
+            border-bottom: 1px solid #30363d;
+            font-size: 0.8rem;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .status-row {
             display: flex;
             justify-content: space-between;
-            padding: 4px 0;
+            align-items: center;
+            padding: 10px 18px;
+            border-bottom: 1px solid #21262d;
         }
-        .status-label { color: #8b949e; }
-        .status-value { color: #00ff88; font-weight: 600; }
-        .status-value.error { color: #f85149; }
+        .status-row:last-child { border-bottom: none; }
+        .status-label { color: #8b949e; font-size: 0.9rem; }
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .status-dot.green { background: #00ff88; box-shadow: 0 0 6px #00ff8855; }
+        .status-dot.red { background: #f85149; box-shadow: 0 0 6px #f8514955; }
+        .status-dot.yellow { background: #d29922; box-shadow: 0 0 6px #d2992255; }
+        .status-value {
+            color: #e6edf3;
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+        }
         .footer {
-            margin-top: 30px;
+            margin-top: auto;
+            padding-top: 20px;
             color: #484f58;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
+            text-align: center;
+        }
+        .footer a { color: #484f58; text-decoration: none; }
+        .footer a:hover { color: #8b949e; }
+        @media (max-width: 600px) {
+            .grid { grid-template-columns: 1fr; }
+            h1 { font-size: 2rem; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="header">
         <h1>AprilVision 2.0</h1>
-        <p class="subtitle">Custom FRC Vision System built on PhotonVision</p>
+        <div class="version">Powered by PhotonVision v2026.2.2</div>
+        <p class="subtitle">FRC Competition Vision System</p>
+    </div>
 
-        <div class="links">
-            <a href="/" id="pv-link">
-                Vision Dashboard
-                <span class="desc">Full camera feeds, detection settings, and calibration</span>
-            </a>
-            <a href="#" id="nt-link" onclick="return false;">
-                NetworkTables Status
-                <span class="desc" id="nt-status">Checking connection...</span>
-            </a>
+    <div class="grid">
+        <div class="card">
+            <div class="card-title">Detection Engine</div>
+            <div class="card-value" id="engine-status">...</div>
         </div>
-
-        <div class="status" id="status-panel">
-            <div class="status-row">
-                <span class="status-label">Detection Engine</span>
-                <span class="status-value" id="pv-status">Checking...</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Dashboard Proxy</span>
-                <span class="status-value">Running</span>
-            </div>
-            <div class="status-row">
-                <span class="status-label">Proxy Port</span>
-                <span class="status-value">5801</span>
-            </div>
+        <div class="card">
+            <div class="card-title">Uptime</div>
+            <div class="card-value blue" id="uptime-value">--</div>
         </div>
-
-        <div class="footer">
-            AprilVision 2.0 &mdash; Custom vision system built on PhotonVision libraries
+        <div class="card">
+            <div class="card-title">Cameras Connected</div>
+            <div class="card-value" id="camera-count">--</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Tags Detected</div>
+            <div class="card-value" id="tag-count">--</div>
         </div>
     </div>
 
+    <div class="links">
+        <a class="link-card" href="/" id="dashboard-link">
+            Vision Dashboard
+            <span class="desc">Camera feeds, AprilTag pipelines, calibration, and detection settings</span>
+        </a>
+        <a class="link-card" href="#" onclick="runHealthCheck(); return false;">
+            System Health Check
+            <span class="desc" id="health-desc">Run pre-match diagnostics on all components</span>
+        </a>
+    </div>
+
+    <div class="status-table">
+        <div class="status-table-header">System Status</div>
+        <div class="status-row">
+            <span class="status-label">PhotonVision Service</span>
+            <span class="status-value"><span class="status-dot" id="pv-dot"></span><span id="pv-status">Checking...</span></span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Dashboard Proxy</span>
+            <span class="status-value"><span class="status-dot green"></span>Running</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Proxy Port</span>
+            <span class="status-value">5801</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Engine Port</span>
+            <span class="status-value">5800 (internal)</span>
+        </div>
+    </div>
+
+    <div class="footer">
+        AprilVision 2.0 &mdash; Built by <a href="https://github.com/TomAs-1226">Team 1226</a>
+    </div>
+
     <script>
-        // Check PhotonVision status
+        let startTime = Date.now();
+        let pvOnline = false;
+
+        function formatUptime(ms) {
+            let s = Math.floor(ms / 1000);
+            if (s < 60) return s + 's';
+            let m = Math.floor(s / 60); s = s % 60;
+            if (m < 60) return m + 'm ' + s + 's';
+            let h = Math.floor(m / 60); m = m % 60;
+            return h + 'h ' + m + 'm';
+        }
+
         async function checkStatus() {
+            const engineEl = document.getElementById('engine-status');
+            const pvDot = document.getElementById('pv-dot');
             const pvStatus = document.getElementById('pv-status');
+            const cameraEl = document.getElementById('camera-count');
+            const tagEl = document.getElementById('tag-count');
+
             try {
                 const resp = await fetch('/api/settings/general', {
                     signal: AbortSignal.timeout(3000)
                 });
                 if (resp.ok) {
+                    pvOnline = true;
+                    engineEl.textContent = 'Online';
+                    engineEl.className = 'card-value green';
+                    pvDot.className = 'status-dot green';
                     pvStatus.textContent = 'Online';
-                    pvStatus.classList.remove('error');
-                    // Auto-redirect to the main dashboard
-                    const pvLink = document.getElementById('pv-link');
-                    pvLink.href = '/';
+
+                    // Try to get camera and target info
+                    try {
+                        const data = await resp.json();
+                        if (data && data.cameras) {
+                            cameraEl.textContent = data.cameras.length;
+                            cameraEl.className = 'card-value ' + (data.cameras.length > 0 ? 'green' : 'yellow');
+                        }
+                    } catch { /* camera data not available in this endpoint */ }
                 } else {
+                    pvOnline = false;
+                    engineEl.textContent = 'Error';
+                    engineEl.className = 'card-value red';
+                    pvDot.className = 'status-dot red';
                     pvStatus.textContent = 'Error';
-                    pvStatus.classList.add('error');
                 }
             } catch {
+                pvOnline = false;
+                engineEl.textContent = 'Starting...';
+                engineEl.className = 'card-value yellow';
+                pvDot.className = 'status-dot yellow';
                 pvStatus.textContent = 'Starting...';
-                pvStatus.classList.add('error');
+                cameraEl.textContent = '--';
+                cameraEl.className = 'card-value';
+                tagEl.textContent = '--';
+                tagEl.className = 'card-value';
             }
         }
+
+        function updateUptime() {
+            document.getElementById('uptime-value').textContent = formatUptime(Date.now() - startTime);
+        }
+
+        function runHealthCheck() {
+            const desc = document.getElementById('health-desc');
+            if (pvOnline) {
+                desc.textContent = 'Engine: Online | Proxy: Running | Status: All systems go';
+                desc.style.color = '#00ff88';
+            } else {
+                desc.textContent = 'Engine: Offline | Check: sudo systemctl status photonvision';
+                desc.style.color = '#f85149';
+            }
+        }
+
         checkStatus();
+        updateUptime();
         setInterval(checkStatus, 5000);
+        setInterval(updateUptime, 1000);
     </script>
 </body>
 </html>

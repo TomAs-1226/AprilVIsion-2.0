@@ -1,17 +1,16 @@
 /**
- * AprilVision 2.0 - Custom Vision System
- * Built on PhotonVision libraries
+ * AprilVision 2.0 - FRC Competition Vision System
+ * Dashboard status monitor and health checker
  *
- * This file is included as a landing page helper.
- * The main dashboard functionality comes from PhotonVision's
- * built-in web interface, accessed through the reverse proxy
- * which rebrands it as AprilVision 2.0.
+ * Built by Team 1226
+ * Detection engine: PhotonVision
  */
 
-// Landing page status checker
 class AprilVisionStatus {
     constructor() {
         this.pvConnected = false;
+        this.lastCheckTime = null;
+        this.consecutiveFailures = 0;
         this.checkInterval = null;
         this.init();
     }
@@ -29,24 +28,38 @@ class AprilVisionStatus {
                 signal: AbortSignal.timeout(3000)
             });
             this.pvConnected = response.ok;
+            if (response.ok) {
+                this.consecutiveFailures = 0;
+            }
         } catch {
             this.pvConnected = false;
+            this.consecutiveFailures++;
         }
 
+        this.lastCheckTime = new Date();
         this.updateStatusDisplay();
     }
 
     updateStatusDisplay() {
         const statusEl = document.getElementById('pv-status');
+        const dotEl = document.getElementById('pv-dot');
+
         if (statusEl) {
             if (this.pvConnected) {
                 statusEl.textContent = 'Online';
-                statusEl.classList.remove('error');
+                if (dotEl) dotEl.className = 'status-dot green';
+            } else if (this.consecutiveFailures > 3) {
+                statusEl.textContent = 'Offline';
+                if (dotEl) dotEl.className = 'status-dot red';
             } else {
                 statusEl.textContent = 'Starting...';
-                statusEl.classList.add('error');
+                if (dotEl) dotEl.className = 'status-dot yellow';
             }
         }
+    }
+
+    isOnline() {
+        return this.pvConnected;
     }
 }
 
