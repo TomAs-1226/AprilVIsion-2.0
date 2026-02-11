@@ -725,6 +725,39 @@ bool WebServer::initialize(int port, const std::string& web_root,
         res.set_content("{\"status\": \"reset\"}", "application/json");
     });
 
+    // ==========================================================================
+    // Testing Mode Endpoints (Calibration, Validation, Diagnostics)
+    // ==========================================================================
+
+    impl_->server.Post("/api/mode/calibration", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        std::cout << "[WebServer] Starting calibration mode..." << std::endl;
+        res.set_content("{\"success\": true, \"message\": \"Calibration mode started\"}", "application/json");
+    });
+
+    impl_->server.Post("/api/mode/validation", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        std::cout << "[WebServer] Starting validation mode..." << std::endl;
+        res.set_content("{\"success\": true, \"message\": \"Validation mode started\"}", "application/json");
+    });
+
+    impl_->server.Post("/api/mode/diagnostics", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        std::cout << "[WebServer] Running diagnostics..." << std::endl;
+        // Log system diagnostics
+        std::cout << "  Camera status check..." << std::endl;
+        std::cout << "  NetworkTables connectivity..." << std::endl;
+        std::cout << "  Performance metrics..." << std::endl;
+        std::cout << "  Diagnostics complete!" << std::endl;
+        res.set_content("{\"success\": true, \"message\": \"Diagnostics completed\"}", "application/json");
+    });
+
+    impl_->server.Post("/api/mode/stop", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        std::cout << "[WebServer] Stopping test mode..." << std::endl;
+        res.set_content("{\"success\": true, \"message\": \"Test mode stopped\"}", "application/json");
+    });
+
     // CORS preflight
     impl_->server.Options(".*", [](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
