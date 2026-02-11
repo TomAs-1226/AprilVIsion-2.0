@@ -1,128 +1,86 @@
-# FRC Vision Coprocessor Configuration
-# FRC 2026 Season - Orange Pi 5 (RK3588S)
+# AprilVision 2.0 - Custom FRC Vision System Configuration
+# Powered by PhotonVision
+# FRC 2026 Season
 
 # ==============================================================================
-# Camera Configuration
+# Team Configuration
 # ==============================================================================
-# NOTE: Each USB camera typically creates 2 /dev/video devices.
-# Use video0, video2, video4 for 3 cameras (skip the odd numbers)
+team_number: 0000
+nt_server: "10.00.00.2"
+
+# ==============================================================================
+# PhotonVision Settings
+# ==============================================================================
+# PhotonVision runs on port 5800 with its own web UI.
+# Camera configuration is done through the PhotonVision web interface.
+# This config file is used by the AprilVision custom dashboard only.
+photonvision:
+  port: 5800
+  config_dir: /opt/photonvision/photonvision_config
+
+# ==============================================================================
+# Dashboard Settings
+# ==============================================================================
+dashboard:
+  port: 5801
+  refresh_rate_ms: 500
+
+# ==============================================================================
+# Camera Configuration Reference
+# ==============================================================================
+# Cameras are configured through PhotonVision's web UI at :5800
+# Typical camera setup:
+#
+#   Camera Names (must match PhotonVision):
+#     - "front" : Forward-facing camera
+#     - "left"  : Left-side camera
+#     - "right" : Right-side camera
+#
+#   Recommended Settings (set in PhotonVision UI):
+#     Resolution: 640x480
+#     FPS: 30
+#     Pipeline: AprilTag
+#     Tag Family: tag36h11
+#     Decimation: 2 (balance of speed and accuracy)
+#
+#   Camera Mounting (set in robot code Transform3d):
+#     Front: x=0.25m forward, z=0.50m up, yaw=0
+#     Left:  y=0.20m left, z=0.50m up, yaw=90deg
+#     Right: y=-0.20m right, z=0.50m up, yaw=-90deg
 cameras:
   - name: front
-    device: /dev/video0
-    width: 640
-    height: 480
-    fps: 30                  # 30fps balances detection rate vs CPU load
-    exposure: -1            # -1 = auto exposure
-    gain: -1                # -1 = auto
-    format: MJPG
-    intrinsics: cam0_intrinsics.yml
+    photonvision_name: "front"
     extrinsics:
-      x: 0.25               # meters forward from robot center
-      y: 0.0                # meters left from robot center
-      z: 0.50               # meters up from floor
+      x: 0.25
+      y: 0.0
+      z: 0.50
       roll: 0.0
       pitch: 0.0
-      yaw: 0.0              # facing forward
+      yaw: 0.0
 
   - name: left
-    device: /dev/video2
-    width: 640
-    height: 480
-    fps: 30                  # 30fps balances detection rate vs CPU load
-    exposure: -1
-    gain: -1
-    format: MJPG
-    intrinsics: cam1_intrinsics.yml
+    photonvision_name: "left"
     extrinsics:
       x: 0.0
       y: 0.20
       z: 0.50
       roll: 0.0
       pitch: 0.0
-      yaw: 90.0             # facing left
+      yaw: 90.0
 
   - name: right
-    device: /dev/video4
-    width: 640
-    height: 480
-    fps: 30                  # 30fps balances detection rate vs CPU load
-    exposure: -1
-    gain: -1
-    format: MJPG
-    intrinsics: cam2_intrinsics.yml
+    photonvision_name: "right"
     extrinsics:
       x: 0.0
       y: -0.20
       z: 0.50
       roll: 0.0
       pitch: 0.0
-      yaw: -90.0            # facing right
-
-# ==============================================================================
-# AprilTag Detection Settings
-# ==============================================================================
-apriltag:
-  family: tag36h11
-  decimation: 2
-  sigma: 0.0
-  nthreads: 2                # 2 threads per detector × 3 cameras = 6 threads total
-  refine_edges: true         # AprilTag library edge refinement
-  subpixel_refine: true      # Phase 1: Additional OpenCV sub-pixel refinement (0.1-0.3px improvement)
-  max_hamming: 1
-  min_margin: 15.0
-  max_tags_per_frame: 32
-
-# ==============================================================================
-# Tracking Settings
-# ==============================================================================
-tracking:
-  enable: true
-  dropout_ms: 150
-  filter_alpha: 0.3
-  roi_enable: false
-  velocity_decay: 0.9
-
-# ==============================================================================
-# Calibration Quality & Validation (Phase 1)
-# ==============================================================================
-calibration:
-  # Quality thresholds (RMS reprojection error in pixels)
-  min_rms_for_excellent: 0.3   # <0.3px = excellent calibration
-  min_rms_for_good: 0.5         # <0.5px = good calibration
-  min_rms_for_acceptable: 1.0   # <1.0px = acceptable calibration
-
-  # Spatial coverage requirements
-  require_spatial_coverage: true  # Require corners in all image regions (3x3 grid)
-  min_samples_per_region: 3       # Minimum corner samples per grid region
-
-  # Validation mode from known distance (for testing accuracy)
-  validation_mode_enable: false   # Set to true to enable distance validation mode
-  validation_distance_m: 1.5      # Place tag exactly 1.5m away, facing camera straight on
-  validation_frames_required: 30  # Number of frames to collect for validation
-  max_distance_error_cm: 2.0      # Maximum acceptable distance error (cm)
-  max_angle_error_deg: 2.0        # Maximum acceptable angle error (degrees)
+      yaw: -90.0
 
 # ==============================================================================
 # Field Layout
 # ==============================================================================
 field:
-  name: FRC 2026 REBUILT
+  name: "FRC 2026"
   tag_size_m: 0.1651
-
-# ==============================================================================
-# Output Settings
-# ==============================================================================
-outputs:
-  nt_enable: true
-  nt_server: "10.58.5.2"
-  nt_table_root: "/FRCVision"
-  publish_rate_hz: 50
-  web_port: 5800
-
-# ==============================================================================
-# Performance Tuning
-# ==============================================================================
-performance:
-  jpeg_quality: 25             # Minimal quality - streaming is 320x240 grayscale anyway
-  enable_annotations: true
-  annotation_line_width: 1     # Thinner lines = less drawing overhead

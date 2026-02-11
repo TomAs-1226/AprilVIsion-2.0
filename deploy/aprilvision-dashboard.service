@@ -1,0 +1,21 @@
+[Unit]
+Description=AprilVision 2.0 - Custom Branding Reverse Proxy
+Documentation=https://github.com/TomAs-1226/AprilVIsion-2.0
+After=photonvision.service
+Requires=photonvision.service
+
+[Service]
+Type=simple
+User=photonvision
+Group=photonvision
+WorkingDirectory=/opt/aprilvision
+ExecStart=/usr/bin/python3 /opt/aprilvision/bridge.py --port 5801 --pv-port 5800
+Restart=always
+RestartSec=3
+TimeoutStartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aprilvision-dashboard
+
+[Install]
+WantedBy=multi-user.target

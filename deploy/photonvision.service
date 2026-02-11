@@ -1,0 +1,28 @@
+[Unit]
+Description=AprilVision 2.0 - PhotonVision Detection Engine
+Documentation=https://docs.photonvision.org
+After=network.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/photonvision
+ExecStart=/usr/bin/java \
+    -Xmx512m \
+    -jar /opt/photonvision/photonvision.jar \
+    -configDir /opt/photonvision/photonvision_config
+Restart=always
+RestartSec=2
+TimeoutStartSec=60
+TimeoutStopSec=10
+Nice=-5
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=photonvision
+
+[Install]
+WantedBy=multi-user.target

@@ -1,427 +1,279 @@
 package frc.robot.subsystems;
 
+import java.util.Optional;
+
+import org.photonvision.PhotonCamera;
+import org.photonvision.PhotonPoseEstimator;
+import org.photonvision.PhotonPoseEstimator.PoseStrategy;
+import org.photonvision.EstimatedRobotPose;
+import org.photonvision.targeting.PhotonPipelineResult;
+import org.photonvision.targeting.PhotonTrackedTarget;
+
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import edu.wpi.first.apriltag.AprilTagFields;
+import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
-import edu.wpi.first.math.estimator.SwerveDrivePoseEstimator;
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Rotation2d;
-import edu.wpi.first.networktables.*;
-import edu.wpi.first.wpilibj.Timer;
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Transform3d;
+import edu.wpi.first.math.geometry.Translation3d;
+import edu.wpi.first.math.numbers.N1;
+import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 /**
- * Vision subsystem for FRC AprilTag Vision Coprocessor integration.
+ * Vision subsystem using PhotonVision for AprilTag detection and pose estimation.
  *
- * This subsystem handles:
- * - Pose estimation fusion with robot odometry
- * - Auto-alignment to AprilTags
- * - Vision status monitoring
+ * AprilVision 2.0 - Custom Vision System built on PhotonVision libraries.
  *
- * NetworkTables Topics:
- * - /FRCVision/fused/pose          [x, y, theta] robot pose
- * - /FRCVision/fused/std_devs      [x, y, theta] standard deviations
- * - /FRCVision/fused/valid         boolean validity flag
- * - /FRCVision/auto_align/*        auto-alignment data
+ * This subsystem manages multiple PhotonVision cameras and provides
+ * pose estimates for robot localization. It uses PhotonVision's
+ * MULTI_TAG_PNP_ON_COPROCESSOR strategy for best accuracy.
+ *
+ * Camera names must match those configured in the PhotonVision web UI
+ * (accessed at http://coprocessor-ip:5801).
  */
 public class VisionSubsystem extends SubsystemBase {
 
-    // NetworkTables
-    private final NetworkTableInstance ntInstance;
-    private final NetworkTable visionTable;
+    // PhotonVision cameras - names must match PhotonVision config
+    private final PhotonCamera frontCamera;
+    private final PhotonCamera leftCamera;
+    private final PhotonCamera rightCamera;
 
-    // Fused pose subscribers
-    private final DoubleArraySubscriber poseSub;
-    private final DoubleArraySubscriber stdDevsSub;
-    private final BooleanSubscriber validSub;
-    private final DoubleSubscriber timestampSub;
-    private final DoubleSubscriber latencyMsSub;      // For odometry sync
-    private final DoubleSubscriber confidenceSub;
-    private final IntegerSubscriber tagCountSub;
-    private final IntegerSubscriber heartbeatSub;     // Connection check
+    // Pose estimators for each camera
+    private final PhotonPoseEstimator frontPoseEstimator;
+    private final PhotonPoseEstimator leftPoseEstimator;
+    private final PhotonPoseEstimator rightPoseEstimator;
 
-    // Auto-align publishers (robot -> vision)
-    private final IntegerPublisher targetTagIdPub;
-    private final DoubleArrayPublisher targetOffsetPub;
+    // Camera mounting positions relative to robot center (meters, radians)
+    // Adjust these Transform3d values to match your robot's camera mounting
+    private static final Transform3d FRONT_ROBOT_TO_CAM = new Transform3d(
+        new Translation3d(0.25, 0.0, 0.50),    // 25cm forward, 50cm up
+        new Rotation3d(0, 0, 0)                  // facing forward
+    );
 
-    // Auto-align subscribers (vision -> robot)
-    private final BooleanSubscriber alignTargetVisibleSub;
-    private final DoubleArraySubscriber alignTargetPoseSub;
-    private final DoubleArraySubscriber alignRobotPoseSub;
-    private final DoubleArraySubscriber alignErrorSub;
-    private final DoubleSubscriber alignDistanceSub;
-    private final BooleanSubscriber alignReadySub;
-    private final BooleanSubscriber alignHasTargetSub;
+    private static final Transform3d LEFT_ROBOT_TO_CAM = new Transform3d(
+        new Translation3d(0.0, 0.20, 0.50),     // 20cm left, 50cm up
+        new Rotation3d(0, 0, Math.toRadians(90))  // facing left
+    );
 
-    // Status subscribers
-    private final DoubleSubscriber uptimeSub;
-    private final BooleanSubscriber cam0ConnectedSub;
-    private final BooleanSubscriber cam1ConnectedSub;
-    private final BooleanSubscriber cam2ConnectedSub;
+    private static final Transform3d RIGHT_ROBOT_TO_CAM = new Transform3d(
+        new Translation3d(0.0, -0.20, 0.50),     // 20cm right, 50cm up
+        new Rotation3d(0, 0, Math.toRadians(-90)) // facing right
+    );
 
-    // Odometry publishers (robot -> vision coprocessor for innovation gating)
-    private final DoubleArrayPublisher rioOdomPosePub;
-    private final DoublePublisher rioOdomAngularVelPub;
+    // Standard deviation scaling factors
+    private static final double SINGLE_TAG_STD_DEV_X = 0.5;   // meters
+    private static final double SINGLE_TAG_STD_DEV_Y = 0.5;   // meters
+    private static final double SINGLE_TAG_STD_DEV_THETA = 0.9; // radians
+    private static final double MULTI_TAG_STD_DEV_X = 0.2;
+    private static final double MULTI_TAG_STD_DEV_Y = 0.2;
+    private static final double MULTI_TAG_STD_DEV_THETA = 0.5;
 
-    // Pose estimator reference (provided by drive subsystem)
-    private SwerveDrivePoseEstimator poseEstimator;
-
-    // State tracking
-    private boolean lastValidState = false;
-    private long lastHeartbeat = 0;
-    private int updateCount = 0;
-
-    // Configuration
-    private static final double MAX_POSE_AMBIGUITY = 0.2; // Max acceptable pose uncertainty
-    private static final double STALE_DATA_THRESHOLD = 0.5; // Seconds before data is stale
+    // State
+    private Optional<EstimatedRobotPose> latestFrontPose = Optional.empty();
+    private Optional<EstimatedRobotPose> latestLeftPose = Optional.empty();
+    private Optional<EstimatedRobotPose> latestRightPose = Optional.empty();
 
     /**
      * Creates a new VisionSubsystem.
+     * Camera names must match PhotonVision configuration.
      */
     public VisionSubsystem() {
-        ntInstance = NetworkTableInstance.getDefault();
-        visionTable = ntInstance.getTable("FRCVision");
+        // Initialize PhotonVision cameras
+        frontCamera = new PhotonCamera("front");
+        leftCamera = new PhotonCamera("left");
+        rightCamera = new PhotonCamera("right");
 
-        // Fused pose data
-        NetworkTable fusedTable = visionTable.getSubTable("fused");
-        poseSub = fusedTable.getDoubleArrayTopic("pose").subscribe(new double[]{});
-        stdDevsSub = fusedTable.getDoubleArrayTopic("std_devs").subscribe(new double[]{0.1, 0.1, 0.1});
-        validSub = fusedTable.getBooleanTopic("valid").subscribe(false);
-        timestampSub = fusedTable.getDoubleTopic("timestamp").subscribe(0.0);
-        latencyMsSub = fusedTable.getDoubleTopic("latency_ms").subscribe(0.0);
-        confidenceSub = fusedTable.getDoubleTopic("confidence").subscribe(0.0);
-        tagCountSub = fusedTable.getIntegerTopic("tag_count").subscribe(0);
-        heartbeatSub = fusedTable.getIntegerTopic("heartbeat").subscribe(0);
+        // Load the AprilTag field layout for the current FRC season
+        AprilTagFieldLayout fieldLayout = AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
 
-        // Auto-align topics
-        NetworkTable alignTable = visionTable.getSubTable("auto_align");
+        // Create pose estimators
+        // MULTI_TAG_PNP_ON_COPROCESSOR: PhotonVision computes multi-tag pose
+        // on the coprocessor for best performance. Falls back to LOWEST_AMBIGUITY
+        // when only one tag is visible.
+        frontPoseEstimator = new PhotonPoseEstimator(
+            fieldLayout,
+            PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+            FRONT_ROBOT_TO_CAM
+        );
+        frontPoseEstimator.setMultiTagFallbackStrategy(PoseStrategy.LOWEST_AMBIGUITY);
 
-        // Publishers - robot tells vision what to align to
-        targetTagIdPub = alignTable.getIntegerTopic("target_tag_id").publish();
-        targetOffsetPub = alignTable.getDoubleArrayTopic("target_offset").publish();
+        leftPoseEstimator = new PhotonPoseEstimator(
+            fieldLayout,
+            PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+            LEFT_ROBOT_TO_CAM
+        );
+        leftPoseEstimator.setMultiTagFallbackStrategy(PoseStrategy.LOWEST_AMBIGUITY);
 
-        // Subscribers - vision tells robot alignment status
-        alignTargetVisibleSub = alignTable.getBooleanTopic("target_visible").subscribe(false);
-        alignTargetPoseSub = alignTable.getDoubleArrayTopic("target_pose").subscribe(new double[]{});
-        alignRobotPoseSub = alignTable.getDoubleArrayTopic("robot_pose").subscribe(new double[]{});
-        alignErrorSub = alignTable.getDoubleArrayTopic("error").subscribe(new double[]{});
-        alignDistanceSub = alignTable.getDoubleTopic("distance_m").subscribe(0.0);
-        alignReadySub = alignTable.getBooleanTopic("ready").subscribe(false);
-        alignHasTargetSub = alignTable.getBooleanTopic("has_target").subscribe(false);
-
-        // Status
-        NetworkTable statusTable = visionTable.getSubTable("status");
-        uptimeSub = statusTable.getDoubleTopic("uptime").subscribe(0.0);
-        cam0ConnectedSub = statusTable.getBooleanTopic("cam0_connected").subscribe(false);
-        cam1ConnectedSub = statusTable.getBooleanTopic("cam1_connected").subscribe(false);
-        cam2ConnectedSub = statusTable.getBooleanTopic("cam2_connected").subscribe(false);
-
-        // Odometry publishers - send robot's odometry to coprocessor so it can
-        // reject vision measurements that disagree too much (innovation gating).
-        // This prevents false positive tag detections from corrupting the pose.
-        NetworkTable odomTable = visionTable.getSubTable("rio_odometry");
-        rioOdomPosePub = odomTable.getDoubleArrayTopic("pose").publish();
-        rioOdomAngularVelPub = odomTable.getDoubleTopic("angular_velocity").publish();
-
-        // Initialize alignment to no target
-        targetTagIdPub.set(-1);
-        targetOffsetPub.set(new double[]{0.5, 0.0});
-    }
-
-    /**
-     * Sets the pose estimator for vision fusion.
-     * Call this from RobotContainer after creating the drive subsystem.
-     */
-    public void setPoseEstimator(SwerveDrivePoseEstimator estimator) {
-        this.poseEstimator = estimator;
+        rightPoseEstimator = new PhotonPoseEstimator(
+            fieldLayout,
+            PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+            RIGHT_ROBOT_TO_CAM
+        );
+        rightPoseEstimator.setMultiTagFallbackStrategy(PoseStrategy.LOWEST_AMBIGUITY);
     }
 
     @Override
     public void periodic() {
-        publishOdometry();
-        updatePoseEstimator();
+        // Update pose estimates from each camera
+        latestFrontPose = frontPoseEstimator.update(frontCamera.getLatestResult());
+        latestLeftPose = leftPoseEstimator.update(leftCamera.getLatestResult());
+        latestRightPose = rightPoseEstimator.update(rightCamera.getLatestResult());
+
         updateTelemetry();
     }
 
-    /**
-     * Publishes robot odometry to the coprocessor for innovation gating.
-     * The coprocessor uses this to reject vision measurements that disagree
-     * too much with where the robot thinks it is (e.g., false tag detections).
-     */
-    private void publishOdometry() {
-        if (poseEstimator == null) return;
-
-        Pose2d currentPose = poseEstimator.getEstimatedPosition();
-        rioOdomPosePub.set(new double[]{
-            currentPose.getX(),
-            currentPose.getY(),
-            currentPose.getRotation().getRadians()
-        });
-
-        // Angular velocity should come from the gyro. If you have access to
-        // the drive subsystem's gyro rate, publish it here. For now, we use 0.0
-        // which disables the angular velocity rejection on the coprocessor.
-        // TODO: Replace with actual gyro rate from your drive subsystem:
-        //   rioOdomAngularVelPub.set(drive.getGyroRate());
-        rioOdomAngularVelPub.set(0.0);
-    }
-
-    /**
-     * Updates the pose estimator with vision measurements.
-     * Uses latency compensation for accurate odometry fusion.
-     */
-    private void updatePoseEstimator() {
-        if (poseEstimator == null) return;
-
-        boolean valid = validSub.get();
-        double[] pose = poseSub.get();
-        double[] stdDevs = stdDevsSub.get();
-        double latencyMs = latencyMsSub.get();
-        double confidence = confidenceSub.get();
-        long heartbeat = heartbeatSub.get();
-
-        // Check data validity
-        if (!valid || pose.length < 3 || stdDevs.length < 3) {
-            return;
-        }
-
-        // Check for stale data using heartbeat (if heartbeat hasn't changed, data is stale)
-        if (heartbeat <= lastHeartbeat) {
-            return;
-        }
-        lastHeartbeat = heartbeat;
-
-        // Check confidence threshold
-        if (confidence < 0.3) {
-            return;
-        }
-
-        // Calculate the FPGA timestamp when the image was captured
-        // Current FPGA time minus the processing latency
-        double captureTime = Timer.getFPGATimestamp() - (latencyMs / 1000.0);
-
-        // Don't use measurements from the future or too far in the past
-        if (captureTime < 0 || latencyMs > 500) {
-            return;
-        }
-
-        // Create pose from vision data
-        Pose2d visionPose = new Pose2d(
-            pose[0],
-            pose[1],
-            new Rotation2d(pose[2])
-        );
-
-        // The coprocessor computes distance-based standard deviations using
-        // the pinhole camera model: distance = (tag_size * focal_length) / pixel_size.
-        // These std_devs scale with distance^2 and 1/sqrt(tag_count), so they
-        // naturally weight close multi-tag readings higher than far single-tag ones.
-        // Just pass them through to the pose estimator - the coprocessor already
-        // did the hard work of computing proper values.
-        var scaledStdDevs = VecBuilder.fill(
-            stdDevs[0],
-            stdDevs[1],
-            stdDevs[2]
-        );
-
-        // Add vision measurement to pose estimator with latency-compensated timestamp
-        poseEstimator.addVisionMeasurement(
-            visionPose,
-            captureTime,
-            scaledStdDevs
-        );
-
-        updateCount++;
-    }
-
-    /**
-     * Updates SmartDashboard telemetry.
-     */
-    private void updateTelemetry() {
-        SmartDashboard.putBoolean("Vision/Valid", validSub.get());
-        SmartDashboard.putNumber("Vision/Confidence", confidenceSub.get());
-        SmartDashboard.putNumber("Vision/TagCount", tagCountSub.get());
-        SmartDashboard.putNumber("Vision/LatencyMs", latencyMsSub.get());
-        SmartDashboard.putNumber("Vision/UpdateCount", updateCount);
-        SmartDashboard.putNumber("Vision/Uptime", uptimeSub.get());
-        SmartDashboard.putNumber("Vision/Heartbeat", heartbeatSub.get());
-
-        // Camera status
-        SmartDashboard.putBoolean("Vision/Cam0", cam0ConnectedSub.get());
-        SmartDashboard.putBoolean("Vision/Cam1", cam1ConnectedSub.get());
-        SmartDashboard.putBoolean("Vision/Cam2", cam2ConnectedSub.get());
-
-        // Alignment status
-        SmartDashboard.putBoolean("Vision/AlignReady", alignReadySub.get());
-        SmartDashboard.putNumber("Vision/AlignDistance", alignDistanceSub.get());
-    }
-
     // ========================================================================
-    // Vision Pose Methods
+    // Pose Estimation Methods
     // ========================================================================
 
     /**
-     * Gets the current vision pose if valid.
-     * @return Vision pose or null if invalid
+     * Gets the latest estimated robot pose from the front camera.
+     * @return Estimated pose with timestamp, or empty if no valid estimate
      */
-    public Pose2d getVisionPose() {
-        if (!validSub.get()) return null;
-
-        double[] pose = poseSub.get();
-        if (pose.length < 3) return null;
-
-        return new Pose2d(pose[0], pose[1], new Rotation2d(pose[2]));
+    public Optional<EstimatedRobotPose> getFrontCameraPose() {
+        return latestFrontPose;
     }
 
     /**
-     * Checks if vision has a valid pose.
+     * Gets the latest estimated robot pose from the left camera.
      */
-    public boolean hasValidPose() {
-        return validSub.get();
+    public Optional<EstimatedRobotPose> getLeftCameraPose() {
+        return latestLeftPose;
     }
 
     /**
-     * Gets the vision confidence (0.0-1.0).
+     * Gets the latest estimated robot pose from the right camera.
      */
-    public double getConfidence() {
-        return confidenceSub.get();
+    public Optional<EstimatedRobotPose> getRightCameraPose() {
+        return latestRightPose;
     }
 
     /**
-     * Gets the number of visible AprilTags.
-     */
-    public int getTagCount() {
-        return (int) tagCountSub.get();
-    }
-
-    // ========================================================================
-    // Auto-Align Methods
-    // ========================================================================
-
-    /**
-     * Starts alignment to a specific AprilTag.
+     * Calculates standard deviations for a pose estimate.
+     * Uses distance to tags and number of tags to scale trust.
      *
-     * @param tagId AprilTag ID to align to
-     * @param distanceMeters Distance from tag to stop at
-     * @param angleRadians Approach angle offset (0 = perpendicular)
+     * @param estimatedPose The pose estimate to calculate std devs for
+     * @return Matrix of standard deviations [x, y, theta]
      */
-    public void startAlignment(int tagId, double distanceMeters, double angleRadians) {
-        targetTagIdPub.set(tagId);
-        targetOffsetPub.set(new double[]{distanceMeters, angleRadians});
+    public Matrix<N3, N1> getEstimationStdDevs(EstimatedRobotPose estimatedPose) {
+        int numTags = estimatedPose.targetsUsed.size();
+        double avgDist = 0;
 
-        System.out.println("[Vision] Starting alignment to tag " + tagId +
-                          " at " + distanceMeters + "m");
+        for (PhotonTrackedTarget target : estimatedPose.targetsUsed) {
+            var tagPose = frontPoseEstimator.getFieldTags().getTagPose(target.getFiducialId());
+            if (tagPose.isPresent()) {
+                avgDist += tagPose.get().toPose2d()
+                    .getTranslation()
+                    .getDistance(estimatedPose.estimatedPose.toPose2d().getTranslation());
+            }
+        }
+
+        if (numTags == 0) {
+            return VecBuilder.fill(Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE);
+        }
+
+        avgDist /= numTags;
+
+        // Scale standard deviations based on distance and tag count
+        if (numTags > 1) {
+            // Multi-tag: more trustworthy, scale with distance
+            return VecBuilder.fill(
+                MULTI_TAG_STD_DEV_X * (1 + avgDist * avgDist / 30),
+                MULTI_TAG_STD_DEV_Y * (1 + avgDist * avgDist / 30),
+                MULTI_TAG_STD_DEV_THETA * (1 + avgDist * avgDist / 20)
+            );
+        } else {
+            // Single tag: less trustworthy, scale more aggressively
+            return VecBuilder.fill(
+                SINGLE_TAG_STD_DEV_X * (1 + avgDist * avgDist / 15),
+                SINGLE_TAG_STD_DEV_Y * (1 + avgDist * avgDist / 15),
+                SINGLE_TAG_STD_DEV_THETA * (1 + avgDist * avgDist / 10)
+            );
+        }
+    }
+
+    // ========================================================================
+    // Detection Query Methods
+    // ========================================================================
+
+    /**
+     * Gets the latest pipeline result from the front camera.
+     */
+    public PhotonPipelineResult getLatestFrontResult() {
+        return frontCamera.getLatestResult();
     }
 
     /**
-     * Starts alignment to a tag at default distance (0.5m, perpendicular).
+     * Checks if any camera currently sees an AprilTag.
      */
-    public void startAlignment(int tagId) {
-        startAlignment(tagId, 0.5, 0.0);
+    public boolean hasTargets() {
+        return frontCamera.getLatestResult().hasTargets() ||
+               leftCamera.getLatestResult().hasTargets() ||
+               rightCamera.getLatestResult().hasTargets();
     }
 
     /**
-     * Stops alignment.
+     * Gets the total number of detected AprilTags across all cameras.
      */
-    public void stopAlignment() {
-        targetTagIdPub.set(-1);
-        System.out.println("[Vision] Alignment stopped");
+    public int getTotalTagCount() {
+        int count = 0;
+        count += frontCamera.getLatestResult().getTargets().size();
+        count += leftCamera.getLatestResult().getTargets().size();
+        count += rightCamera.getLatestResult().getTargets().size();
+        return count;
     }
 
     /**
-     * Checks if the target tag is currently visible.
-     */
-    public boolean isTargetVisible() {
-        return alignTargetVisibleSub.get();
-    }
-
-    /**
-     * Checks if the robot is aligned to the target (within tolerance).
-     */
-    public boolean isAligned() {
-        return alignReadySub.get();
-    }
-
-    /**
-     * Checks if an alignment target is set.
-     */
-    public boolean hasAlignmentTarget() {
-        return alignHasTargetSub.get();
-    }
-
-    /**
-     * Gets the alignment error [x, y, theta].
-     * Error is (target - current), so positive means robot needs to move in positive direction.
+     * Gets the best target from the front camera.
+     * Useful for alignment commands.
      *
-     * @return Error array [x_meters, y_meters, theta_radians] or null if no target
+     * @return Best target or empty if no targets visible
      */
-    public double[] getAlignmentError() {
-        if (!alignHasTargetSub.get()) return null;
-
-        double[] error = alignErrorSub.get();
-        if (error.length < 3) return null;
-
-        return error;
+    public Optional<PhotonTrackedTarget> getBestFrontTarget() {
+        var result = frontCamera.getLatestResult();
+        if (result.hasTargets()) {
+            return Optional.of(result.getBestTarget());
+        }
+        return Optional.empty();
     }
 
     /**
-     * Gets the X alignment error (field-relative).
+     * Checks if a specific tag ID is visible from any camera.
+     *
+     * @param tagId The AprilTag ID to search for
+     * @return true if the tag is visible
      */
-    public double getAlignmentErrorX() {
-        double[] error = getAlignmentError();
-        return error != null ? error[0] : 0.0;
+    public boolean isTagVisible(int tagId) {
+        return isTagVisibleFromCamera(frontCamera, tagId) ||
+               isTagVisibleFromCamera(leftCamera, tagId) ||
+               isTagVisibleFromCamera(rightCamera, tagId);
     }
 
-    /**
-     * Gets the Y alignment error (field-relative).
-     */
-    public double getAlignmentErrorY() {
-        double[] error = getAlignmentError();
-        return error != null ? error[1] : 0.0;
-    }
-
-    /**
-     * Gets the rotation alignment error (radians).
-     */
-    public double getAlignmentErrorTheta() {
-        double[] error = getAlignmentError();
-        return error != null ? error[2] : 0.0;
-    }
-
-    /**
-     * Gets the distance to the alignment target (meters).
-     */
-    public double getAlignmentDistance() {
-        return alignDistanceSub.get();
-    }
-
-    /**
-     * Gets the target pose for alignment.
-     */
-    public Pose2d getAlignmentTargetPose() {
-        double[] pose = alignTargetPoseSub.get();
-        if (pose.length < 3) return null;
-        return new Pose2d(pose[0], pose[1], new Rotation2d(pose[2]));
+    private boolean isTagVisibleFromCamera(PhotonCamera camera, int tagId) {
+        var result = camera.getLatestResult();
+        if (!result.hasTargets()) return false;
+        for (var target : result.getTargets()) {
+            if (target.getFiducialId() == tagId) return true;
+        }
+        return false;
     }
 
     // ========================================================================
-    // Status Methods
+    // Camera Status Methods
     // ========================================================================
-
-    /**
-     * Gets the vision system uptime in seconds.
-     */
-    public double getUptime() {
-        return uptimeSub.get();
-    }
 
     /**
      * Checks if a specific camera is connected.
      */
-    public boolean isCameraConnected(int cameraId) {
-        switch (cameraId) {
-            case 0: return cam0ConnectedSub.get();
-            case 1: return cam1ConnectedSub.get();
-            case 2: return cam2ConnectedSub.get();
+    public boolean isCameraConnected(String name) {
+        switch (name) {
+            case "front": return frontCamera.isConnected();
+            case "left":  return leftCamera.isConnected();
+            case "right": return rightCamera.isConnected();
             default: return false;
         }
     }
@@ -431,16 +283,39 @@ public class VisionSubsystem extends SubsystemBase {
      */
     public int getConnectedCameraCount() {
         int count = 0;
-        if (cam0ConnectedSub.get()) count++;
-        if (cam1ConnectedSub.get()) count++;
-        if (cam2ConnectedSub.get()) count++;
+        if (frontCamera.isConnected()) count++;
+        if (leftCamera.isConnected()) count++;
+        if (rightCamera.isConnected()) count++;
         return count;
     }
 
     /**
-     * Checks if the vision system is fully operational.
+     * Checks if the vision system is operational (at least one camera connected).
      */
     public boolean isOperational() {
-        return getConnectedCameraCount() > 0 && uptimeSub.get() > 0;
+        return getConnectedCameraCount() > 0;
+    }
+
+    // ========================================================================
+    // Telemetry
+    // ========================================================================
+
+    private void updateTelemetry() {
+        // Camera connection status
+        SmartDashboard.putBoolean("Vision/FrontConnected", frontCamera.isConnected());
+        SmartDashboard.putBoolean("Vision/LeftConnected", leftCamera.isConnected());
+        SmartDashboard.putBoolean("Vision/RightConnected", rightCamera.isConnected());
+        SmartDashboard.putBoolean("Vision/HasTargets", hasTargets());
+        SmartDashboard.putNumber("Vision/TotalTags", getTotalTagCount());
+
+        // Front camera latency
+        var frontResult = frontCamera.getLatestResult();
+        SmartDashboard.putNumber("Vision/FrontLatencyMs", frontResult.getLatencyMillis());
+        SmartDashboard.putNumber("Vision/FrontTargets", frontResult.getTargets().size());
+
+        // Pose availability
+        SmartDashboard.putBoolean("Vision/FrontPoseValid", latestFrontPose.isPresent());
+        SmartDashboard.putBoolean("Vision/LeftPoseValid", latestLeftPose.isPresent());
+        SmartDashboard.putBoolean("Vision/RightPoseValid", latestRightPose.isPresent());
     }
 }

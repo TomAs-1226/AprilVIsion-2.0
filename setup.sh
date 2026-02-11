@@ -1,28 +1,23 @@
 #!/bin/bash
 #===============================================================================
-# AprilVision 3.1 - Ultimate FRC AprilTag Vision System
-# Complete Setup Script - One script to build, configure, and deploy
+# AprilVision 2.0 - Custom FRC Vision System powered by PhotonVision
+# Complete One-Script Setup
 #
-# Version 3.1 includes:
-#   - Phase 1: Sub-pixel refinement + MegaTag fusion
-#   - Phase 2: Runtime monitoring + pose consistency
-#   - Fixed: Angle & distance calculations (coordinate systems)
-#   - Accuracy: <2cm @ 1.5m, <5cm @ 3m, <2° angle
+# This script downloads PhotonVision, installs all dependencies, and sets up
+# a complete vision system with a custom dashboard.
 #
 # Usage: ./setup.sh [OPTIONS]
 #
 # Options:
 #   --team TEAM       Set team number (e.g., 1234)
-#   --build-only      Only build, don't install service
-#   --install-only    Only install service (requires prior build)
+#   --install-only    Only install service (skip PhotonVision download)
 #   --dev             Development mode (no service install)
-#   --clean           Clean build directory first
+#   --clean           Remove existing installation first
 #   --help            Show this help
 #
 # Examples:
 #   ./setup.sh --team 1234          # Full setup for team 1234
-#   ./setup.sh --build-only         # Just build
-#   ./setup.sh --clean --team 5678  # Clean build + setup for team 5678
+#   ./setup.sh --clean --team 5678  # Clean install for team 5678
 #===============================================================================
 
 set -e
@@ -32,17 +27,22 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# PhotonVision version
+PV_VERSION="v2026.2.2"
+PV_JAR_NAME="photonvision-${PV_VERSION}-linuxarm64.jar"
+PV_DOWNLOAD_URL="https://github.com/PhotonVision/photonvision/releases/download/${PV_VERSION}"
 
 # Default values
 TEAM_NUMBER=""
-BUILD_ONLY=false
 INSTALL_ONLY=false
 DEV_MODE=false
-CLEAN_BUILD=false
+CLEAN_INSTALL=false
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/build"
-INSTALL_DIR="/opt/frc-vision"
+INSTALL_DIR="/opt/photonvision"
+DASHBOARD_DIR="/opt/aprilvision"
 
 #===============================================================================
 # Helper functions
@@ -66,32 +66,33 @@ log_error() {
 
 print_banner() {
     echo ""
-    echo -e "${BLUE}"
-    cat << 'EOF'
-   ___              _ ___      ___      _               ___  __
-  / _ | ___  ____(_) | | __ / (_)__ (_)__  ___    |_  |/  \
- / __ |/ _ \/ __/ / /| |/ // / (_-</ / _ \/ _ \  / __/ / () |
-/_/ |_/ .__/_/ /_/_/ |___/_/_/_/__ /_/\___/_//_/ /____(_)___/
-     /_/                          |___/
-
-EOF
+    echo -e "${CYAN}"
+    cat << 'BANNER'
+    _             _ ___      _     _              ____    ___
+   / \  _ __  _ __(_) \ \   | |   (_)___  ___  _ |___ \  / _ \
+  / _ \| '_ \| '__| | |\ \  | |   | / __|/ _ \| '_ \__) || | | |
+ / ___ \ |_) | |  | | | \ \ |\ \  | \__ \ (_) | | | / __/ | |_| |
+/_/   \_\ .__/|_|  |_|_|  \_\ \_\ |_|___/\___/|_| |_|_____(_)___/
+        |_|
+BANNER
     echo -e "${NC}"
-    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}║${NC}  ${YELLOW}Ultimate FRC AprilTag Vision System${NC}                    ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  Version 3.1 - Phase 1 + 2 + 3 + Java Integration                    ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  ${BLUE}Accuracy:${NC} <2cm @ 1.5m, <5cm @ 3m, <2° angle           ${GREEN}║${NC}"
-    echo -e "${GREEN}════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}================================================================${NC}"
+    echo -e "${GREEN}|${NC}  ${YELLOW}Custom FRC Vision System${NC}                                  ${GREEN}|${NC}"
+    echo -e "${GREEN}|${NC}  ${CYAN}Powered by PhotonVision ${PV_VERSION}${NC}                          ${GREEN}|${NC}"
+    echo -e "${GREEN}|${NC}  Built for FRC 2026 Competition Season                      ${GREEN}|${NC}"
+    echo -e "${GREEN}================================================================${NC}"
     echo ""
-    echo -e "${YELLOW}  Features:${NC}"
-    echo "    ✓ Phase 1: Sub-pixel refinement + MegaTag fusion"
-    echo "    ✓ Phase 2: Runtime monitoring + pose consistency"
-    echo "    ✓ Fixed: Angle & distance calculations (coordinate systems)"
-    echo "    ✓ Multi-method validation + accuracy estimation"
+    echo -e "  ${YELLOW}Features:${NC}"
+    echo "    - PhotonVision ${PV_VERSION} detection engine"
+    echo "    - Multi-tag PnP on coprocessor"
+    echo "    - Custom AprilVision monitoring dashboard"
+    echo "    - One-script setup with systemd integration"
+    echo "    - PhotonLib robot code integration"
     echo ""
 }
 
 show_help() {
-    head -25 "$0" | tail -21
+    head -18 "$0" | tail -14
     exit 0
 }
 
@@ -99,19 +100,6 @@ check_root() {
     if [[ $EUID -eq 0 ]]; then
         log_error "Don't run this script as root. It will ask for sudo when needed."
         exit 1
-    fi
-}
-
-check_arch() {
-    ARCH=$(uname -m)
-    if [[ "$ARCH" != "aarch64" ]]; then
-        log_warn "This system is $ARCH, not aarch64 (ARM64)"
-        log_warn "This software is designed for Orange Pi 5 / RK3588S"
-        read -p "Continue anyway? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
     fi
 }
 
@@ -125,10 +113,6 @@ while [[ $# -gt 0 ]]; do
             TEAM_NUMBER="$2"
             shift 2
             ;;
-        --build-only)
-            BUILD_ONLY=true
-            shift
-            ;;
         --install-only)
             INSTALL_ONLY=true
             shift
@@ -138,7 +122,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --clean)
-            CLEAN_BUILD=true
+            CLEAN_INSTALL=true
             shift
             ;;
         --help|-h)
@@ -152,61 +136,40 @@ while [[ $# -gt 0 ]]; do
 done
 
 #===============================================================================
-# Step 1: Validate Phase 1/2 Files
+# Step 1: Detect Architecture
 #===============================================================================
 
-validate_phase_files() {
-    log_info "Validating AprilVision 3.1 files (Phase 1/2)..."
+detect_architecture() {
+    ARCH=$(uname -m)
+    log_info "Detected architecture: $ARCH"
 
-    local missing_files=()
-
-    # Check Phase 1/2 critical files
-    local required_files=(
-        "src/pose_utils.hpp"
-        "src/phase2_monitoring.hpp"
-        "src/types.hpp"
-        "src/pose.cpp"
-        "src/detector.cpp"
-        "config/config.yml"
-    )
-
-    for file in "${required_files[@]}"; do
-        if [[ ! -f "${SCRIPT_DIR}/${file}" ]]; then
-            missing_files+=("$file")
-        fi
-    done
-
-    if [[ ${#missing_files[@]} -gt 0 ]]; then
-        log_error "Missing required AprilVision 3.1 files:"
-        for file in "${missing_files[@]}"; do
-            echo "  - $file"
-        done
-        exit 1
-    fi
-
-    # Check for Phase 1/2 features in config
-    if ! grep -q "subpixel_refine" "${SCRIPT_DIR}/config/config.yml"; then
-        log_warn "Phase 1 sub-pixel refinement not configured in config.yml"
-    fi
-
-    if ! grep -q "calibration:" "${SCRIPT_DIR}/config/config.yml"; then
-        log_warn "Phase 1 calibration validation not configured in config.yml"
-    fi
-
-    log_success "AprilVision 3.1 files validated"
+    case "$ARCH" in
+        aarch64|arm64)
+            PV_JAR_NAME="photonvision-${PV_VERSION}-linuxarm64.jar"
+            log_success "ARM64 detected - using arm64 PhotonVision JAR"
+            ;;
+        x86_64|amd64)
+            PV_JAR_NAME="photonvision-${PV_VERSION}-linuxx64.jar"
+            log_success "x86_64 detected - using x64 PhotonVision JAR"
+            ;;
+        *)
+            log_error "Unsupported architecture: $ARCH"
+            log_error "PhotonVision requires ARM64 or x86_64"
+            exit 1
+            ;;
+    esac
 }
 
 #===============================================================================
-# Step 2: Install Dependencies
+# Step 2: Install System Dependencies
 #===============================================================================
 
 install_dependencies() {
-    log_info "Installing system dependencies for AprilVision 3.1..."
+    log_info "Installing system dependencies..."
 
-    # Check if we need to install packages
     PACKAGES_NEEDED=false
 
-    for pkg in cmake ninja-build g++ libopencv-dev libyaml-cpp-dev unzip curl; do
+    for pkg in curl wget unzip v4l-utils python3; do
         if ! dpkg -s "$pkg" &> /dev/null; then
             PACKAGES_NEEDED=true
             break
@@ -217,79 +180,104 @@ install_dependencies() {
         log_info "Installing required packages (requires sudo)..."
         sudo apt-get update
         sudo apt-get install -y \
-            build-essential \
-            cmake \
-            ninja-build \
-            g++ \
-            git \
-            pkg-config \
-            libopencv-dev \
-            libyaml-cpp-dev \
-            libssl-dev \
-            v4l-utils \
             curl \
-            unzip
-        log_success "Dependencies installed"
+            wget \
+            unzip \
+            v4l-utils \
+            python3 \
+            libatomic1 \
+            libglib2.0-0
+        log_success "System dependencies installed"
     else
-        log_success "All dependencies already installed"
+        log_success "System dependencies already installed"
     fi
+}
 
-    # Verify OpenCV version (need 4.x for Phase 1/2)
-    if command -v opencv_version &> /dev/null; then
-        OPENCV_VER=$(opencv_version 2>/dev/null || echo "unknown")
-        log_info "OpenCV version: $OPENCV_VER"
+#===============================================================================
+# Step 3: Install Java 17
+#===============================================================================
 
-        if [[ "$OPENCV_VER" == "3."* ]]; then
-            log_warn "OpenCV 3.x detected. AprilVision 3.1 works best with OpenCV 4.x"
-            log_warn "Consider upgrading for optimal Phase 1/2 performance"
+install_java() {
+    log_info "Checking Java installation..."
+
+    # Check if Java 17 is already installed
+    if command -v java &> /dev/null; then
+        JAVA_VER=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}' | cut -d'.' -f1)
+        if [[ "$JAVA_VER" == "17" ]]; then
+            log_success "Java 17 already installed"
+            return
+        else
+            log_warn "Java $JAVA_VER found, but Java 17 is required"
         fi
     fi
-}
 
-#===============================================================================
-# Step 3: Build
-#===============================================================================
+    log_info "Installing Java 17 JDK (required by PhotonVision)..."
+    sudo apt-get update
+    sudo apt-get install -y openjdk-17-jdk-headless
 
-build_project() {
-    log_info "Building AprilVision 3.1 (Phase 1/2 enhanced)..."
-
-    # IMPORTANT: Stop service first to avoid "text file busy" error
-    if systemctl is-active --quiet frc_vision 2>/dev/null; then
-        log_info "Stopping frc_vision service before build..."
-        sudo systemctl stop frc_vision
-        sleep 1
-    fi
-
-    if $CLEAN_BUILD && [[ -d "$BUILD_DIR" ]]; then
-        log_info "Cleaning build directory..."
-        rm -rf "$BUILD_DIR"
-    fi
-
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
-
-    log_info "Configuring with CMake..."
-    cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release
-
-    log_info "Building (downloads prebuilt WPILib on first run, ~30 seconds)..."
-    ninja -j$(nproc)
-
-    if [[ -f "${BUILD_DIR}/frc_vision" ]]; then
-        log_success "Build successful: ${BUILD_DIR}/frc_vision"
-        log_info "AprilVision 3.1 binary includes:"
-        echo "  ✓ Phase 1: Sub-pixel refinement + MegaTag fusion"
-        echo "  ✓ Phase 2: Runtime monitoring + pose consistency"
-        echo "  ✓ Fixed coordinate systems for accurate angles"
+    # Verify installation
+    if command -v java &> /dev/null; then
+        JAVA_VER=$(java -version 2>&1 | head -n 1)
+        log_success "Java installed: $JAVA_VER"
     else
-        log_error "Build failed - executable not found"
+        log_error "Java installation failed"
         exit 1
     fi
-
-    cd "$SCRIPT_DIR"
 }
 
 #===============================================================================
-# Step 4: Configure Team Number
+# Step 4: Download PhotonVision
+#===============================================================================
+
+download_photonvision() {
+    log_info "Setting up PhotonVision ${PV_VERSION}..."
+
+    # Create installation directory
+    sudo mkdir -p "${INSTALL_DIR}"
+
+    # Check if JAR already exists
+    if [[ -f "${INSTALL_DIR}/photonvision.jar" ]] && ! $CLEAN_INSTALL; then
+        log_success "PhotonVision JAR already present at ${INSTALL_DIR}/photonvision.jar"
+        log_info "Use --clean to force re-download"
+        return
+    fi
+
+    if $CLEAN_INSTALL && [[ -d "${INSTALL_DIR}" ]]; then
+        log_info "Cleaning existing PhotonVision installation..."
+        sudo rm -f "${INSTALL_DIR}/photonvision.jar"
+    fi
+
+    local DOWNLOAD_URL="${PV_DOWNLOAD_URL}/${PV_JAR_NAME}"
+    log_info "Downloading PhotonVision from: ${DOWNLOAD_URL}"
+    log_info "This may take a few minutes (JAR is ~115 MB)..."
+
+    # Download with retry logic
+    local retries=0
+    local max_retries=4
+    local wait_time=2
+
+    while [[ $retries -lt $max_retries ]]; do
+        if sudo wget -q --show-progress -O "${INSTALL_DIR}/photonvision.jar" "$DOWNLOAD_URL"; then
+            log_success "PhotonVision ${PV_VERSION} downloaded successfully"
+            return
+        fi
+
+        retries=$((retries + 1))
+        if [[ $retries -lt $max_retries ]]; then
+            log_warn "Download failed, retrying in ${wait_time}s... (attempt $((retries + 1))/$max_retries)"
+            sleep $wait_time
+            wait_time=$((wait_time * 2))
+        fi
+    done
+
+    log_error "Failed to download PhotonVision after $max_retries attempts"
+    log_error "Download manually from: https://github.com/PhotonVision/photonvision/releases"
+    log_error "Place the JAR at: ${INSTALL_DIR}/photonvision.jar"
+    exit 1
+}
+
+#===============================================================================
+# Step 5: Configure Team Number
 #===============================================================================
 
 configure_team() {
@@ -314,50 +302,66 @@ configure_team() {
 
     log_info "Team $TEAM_NUMBER -> roboRIO IP: $ROBORIO_IP"
 
-    # Update config file
+    # Update our config file with team number
     CONFIG_FILE="${SCRIPT_DIR}/config/config.yml"
     if [[ -f "$CONFIG_FILE" ]]; then
-        log_info "Updating config with team $TEAM_NUMBER..."
-        sed -i "s|nt_server:.*|nt_server: \"${ROBORIO_IP}\"           # Team $TEAM_NUMBER roboRIO|" "$CONFIG_FILE"
-        log_success "Config updated: $CONFIG_FILE"
-    else
-        log_warn "Config file not found at $CONFIG_FILE"
+        sed -i "s|team_number:.*|team_number: ${TEAM_NUMBER}|" "$CONFIG_FILE"
+        sed -i "s|nt_server:.*|nt_server: \"${ROBORIO_IP}\"|" "$CONFIG_FILE"
+        log_success "Config updated with team $TEAM_NUMBER"
     fi
+
+    # Update PhotonVision's network config
+    # PhotonVision uses its own settings directory
+    sudo mkdir -p "${INSTALL_DIR}/photonvision_config/network"
+    sudo tee "${INSTALL_DIR}/photonvision_config/network/networkSettings.json" > /dev/null << EOF
+{
+    "ntServerAddress": "${ROBORIO_IP}",
+    "teamNumber": ${TEAM_NUMBER},
+    "connectionType": 0,
+    "staticIp": "",
+    "hostname": "photonvision",
+    "runNTServer": false,
+    "shouldManage": false,
+    "shouldPublishProto": true,
+    "networkManagerIface": "",
+    "setStaticCommand": "",
+    "setDHCPcommand": ""
+}
+EOF
+    log_success "PhotonVision network configured for team $TEAM_NUMBER"
 }
 
 #===============================================================================
-# Step 5: Create System User and Permissions
+# Step 6: Create System User and Permissions
 #===============================================================================
 
 setup_user_and_permissions() {
-    log_info "Setting up system user and permissions (requires sudo)..."
+    log_info "Setting up system user and permissions..."
 
-    # Create frcvision user if it doesn't exist
-    if ! id -u frcvision &>/dev/null; then
-        log_info "Creating frcvision user..."
-        sudo useradd -r -s /usr/sbin/nologin -d /opt/frc-vision -c "FRC Vision Coprocessor" frcvision
-        log_success "User frcvision created"
+    # Create photonvision user if it doesn't exist
+    if ! id -u photonvision &>/dev/null; then
+        log_info "Creating photonvision user..."
+        sudo useradd -r -s /usr/sbin/nologin -d "${INSTALL_DIR}" -c "PhotonVision Service" photonvision
+        log_success "User photonvision created"
     else
-        log_success "User frcvision already exists"
+        log_success "User photonvision already exists"
     fi
 
-    # Add frcvision to video group for camera access
-    sudo usermod -aG video frcvision 2>/dev/null || true
+    # Add to video group for camera access
+    sudo usermod -aG video photonvision 2>/dev/null || true
 
     # Create udev rules for camera access
-    UDEV_RULES="/etc/udev/rules.d/99-frc-vision.rules"
+    UDEV_RULES="/etc/udev/rules.d/99-photonvision.rules"
     log_info "Creating udev rules for camera access..."
     sudo tee "$UDEV_RULES" > /dev/null << 'EOF'
-# FRC Vision Coprocessor - Camera Access Rules
-# Give frcvision user access to all video devices
+# AprilVision 2.0 (PhotonVision) - Camera Access Rules
+# Give photonvision user access to all video devices
 
 # V4L2 video devices
 KERNEL=="video[0-9]*", MODE="0666", GROUP="video"
 
 # USB cameras - set permissions
-SUBSYSTEM=="usb", ATTR{idVendor}=="*",  MODE="0666"
-
-# Trigger udev reload
+SUBSYSTEM=="usb", ATTR{idVendor}=="*", MODE="0666"
 EOF
 
     # Reload udev rules
@@ -366,114 +370,121 @@ EOF
     log_success "Udev rules created"
 
     # Set resource limits for real-time performance
-    LIMITS_FILE="/etc/security/limits.d/frc-vision.conf"
-    log_info "Setting resource limits..."
+    LIMITS_FILE="/etc/security/limits.d/photonvision.conf"
     sudo tee "$LIMITS_FILE" > /dev/null << 'EOF'
-# FRC Vision Coprocessor - Resource Limits
-frcvision soft rtprio 99
-frcvision hard rtprio 99
-frcvision soft memlock unlimited
-frcvision hard memlock unlimited
-frcvision soft nice -20
-frcvision hard nice -20
+# AprilVision 2.0 (PhotonVision) - Resource Limits
+photonvision soft rtprio 99
+photonvision hard rtprio 99
+photonvision soft memlock unlimited
+photonvision hard memlock unlimited
+photonvision soft nice -20
+photonvision hard nice -20
 EOF
     log_success "Resource limits configured"
 }
 
 #===============================================================================
-# Step 6: Install Files
+# Step 7: Install Files
 #===============================================================================
 
 install_files() {
-    log_info "Installing to $INSTALL_DIR (requires sudo)..."
+    log_info "Installing AprilVision dashboard files..."
 
-    # Create directories
-    sudo mkdir -p "${INSTALL_DIR}"
-    sudo mkdir -p "${INSTALL_DIR}/config"
-    sudo mkdir -p "${INSTALL_DIR}/web"
-    sudo mkdir -p "${INSTALL_DIR}/logs"
-
-    # Copy binary
-    if [[ -f "${BUILD_DIR}/frc_vision" ]]; then
-        sudo cp "${BUILD_DIR}/frc_vision" "${INSTALL_DIR}/"
-        sudo chmod +x "${INSTALL_DIR}/frc_vision"
-        log_success "Binary installed"
-    else
-        log_error "Binary not found. Run with --build-only first or without --install-only"
-        exit 1
-    fi
-
-    # Copy config files
-    if [[ -d "${SCRIPT_DIR}/config" ]]; then
-        sudo cp -r "${SCRIPT_DIR}/config/"* "${INSTALL_DIR}/config/"
-        log_success "Config files installed"
-    fi
+    # Create dashboard directories
+    sudo mkdir -p "${DASHBOARD_DIR}"
+    sudo mkdir -p "${DASHBOARD_DIR}/web"
+    sudo mkdir -p "${DASHBOARD_DIR}/config"
+    sudo mkdir -p "${DASHBOARD_DIR}/logs"
 
     # Copy web files
     if [[ -d "${SCRIPT_DIR}/web" ]]; then
-        sudo cp -r "${SCRIPT_DIR}/web/"* "${INSTALL_DIR}/web/"
-        log_success "Web files installed"
+        sudo cp -r "${SCRIPT_DIR}/web/"* "${DASHBOARD_DIR}/web/"
+        log_success "Web dashboard files installed"
+    fi
+
+    # Copy config
+    if [[ -d "${SCRIPT_DIR}/config" ]]; then
+        sudo cp -r "${SCRIPT_DIR}/config/"* "${DASHBOARD_DIR}/config/"
+        log_success "Config files installed"
+    fi
+
+    # Copy bridge script
+    if [[ -f "${SCRIPT_DIR}/scripts/aprilvision-bridge.py" ]]; then
+        sudo cp "${SCRIPT_DIR}/scripts/aprilvision-bridge.py" "${DASHBOARD_DIR}/bridge.py"
+        sudo chmod +x "${DASHBOARD_DIR}/bridge.py"
+        log_success "Dashboard bridge installed"
     fi
 
     # Set ownership
-    sudo chown -R frcvision:frcvision "${INSTALL_DIR}"
+    sudo chown -R photonvision:photonvision "${INSTALL_DIR}"
+    sudo chown -R photonvision:photonvision "${DASHBOARD_DIR}"
 
-    log_success "Files installed to $INSTALL_DIR"
+    log_success "All files installed"
 }
 
 #===============================================================================
-# Step 7: Install Systemd Service
+# Step 8: Install Systemd Services
 #===============================================================================
 
-install_service() {
-    log_info "Installing systemd service..."
+install_services() {
+    log_info "Installing systemd services..."
 
-    SERVICE_FILE="/etc/systemd/system/frc_vision.service"
+    # Stop existing services if running
+    sudo systemctl stop photonvision 2>/dev/null || true
+    sudo systemctl stop aprilvision-dashboard 2>/dev/null || true
 
-    sudo tee "$SERVICE_FILE" > /dev/null << 'EOF'
+    # PhotonVision main service
+    sudo tee "/etc/systemd/system/photonvision.service" > /dev/null << EOF
 [Unit]
-Description=AprilVision 3.1 - Ultimate FRC AprilTag Vision System
-Documentation=https://github.com/TomAs-1226/AprilVIsion-2.0
+Description=AprilVision 2.0 - PhotonVision Detection Engine
+Documentation=https://docs.photonvision.org
 After=network.target
-Wants=network.target
-
-# Don't wait for network - we'll retry connection
+Wants=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=frcvision
-Group=frcvision
-WorkingDirectory=/opt/frc-vision
-
-# Main executable with fast-start flag
-ExecStart=/opt/frc-vision/frc_vision /opt/frc-vision/config/config.yml --fast-start
-
-# Fast restart on failure
+User=root
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=/usr/bin/java \\
+    -Xmx512m \\
+    -jar ${INSTALL_DIR}/photonvision.jar \\
+    -configDir ${INSTALL_DIR}/photonvision_config
 Restart=always
-RestartSec=0.5
-TimeoutStartSec=30
-TimeoutStopSec=5
-
-# Kill whole process group
-KillMode=mixed
-KillSignal=SIGTERM
-
-# Resource limits
+RestartSec=2
+TimeoutStartSec=60
+TimeoutStopSec=10
 Nice=-5
 LimitRTPRIO=99
 LimitMEMLOCK=infinity
-CPUSchedulingPolicy=rr
-CPUSchedulingPriority=50
-
-# Environment
-Environment="MALLOC_ARENA_MAX=2"
-Environment="OPENCV_VIDEOIO_DEBUG=0"
-
-# Logging
+Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64"
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=frc_vision
+SyslogIdentifier=photonvision
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # AprilVision custom dashboard service
+    sudo tee "/etc/systemd/system/aprilvision-dashboard.service" > /dev/null << EOF
+[Unit]
+Description=AprilVision 2.0 - Custom Monitoring Dashboard
+After=photonvision.service
+Requires=photonvision.service
+
+[Service]
+Type=simple
+User=photonvision
+Group=photonvision
+WorkingDirectory=${DASHBOARD_DIR}
+ExecStart=/usr/bin/python3 ${DASHBOARD_DIR}/bridge.py
+Restart=always
+RestartSec=3
+TimeoutStartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aprilvision-dashboard
 
 [Install]
 WantedBy=multi-user.target
@@ -482,27 +493,39 @@ EOF
     # Reload systemd
     sudo systemctl daemon-reload
 
-    # Enable service
-    sudo systemctl enable frc_vision
+    # Enable services
+    sudo systemctl enable photonvision
+    sudo systemctl enable aprilvision-dashboard
 
-    log_success "Service installed and enabled"
+    log_success "Services installed and enabled"
 
     # Ask to start
-    read -p "Start the service now? [Y/n] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        sudo systemctl start frc_vision
-        sleep 2
-        if systemctl is-active --quiet frc_vision; then
-            log_success "Service started successfully"
-        else
-            log_warn "Service may still be starting. Check: sudo systemctl status frc_vision"
+    if ! $DEV_MODE; then
+        read -p "Start the services now? [Y/n] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            sudo systemctl start photonvision
+            sleep 3
+            sudo systemctl start aprilvision-dashboard
+            sleep 2
+
+            if systemctl is-active --quiet photonvision; then
+                log_success "PhotonVision service started"
+            else
+                log_warn "PhotonVision may still be starting. Check: sudo systemctl status photonvision"
+            fi
+
+            if systemctl is-active --quiet aprilvision-dashboard; then
+                log_success "Dashboard service started"
+            else
+                log_warn "Dashboard may still be starting. Check: sudo systemctl status aprilvision-dashboard"
+            fi
         fi
     fi
 }
 
 #===============================================================================
-# Step 8: Verify Installation
+# Step 9: Verify Installation
 #===============================================================================
 
 verify_installation() {
@@ -510,50 +533,71 @@ verify_installation() {
 
     echo ""
     echo "Installation Summary:"
-    echo "────────────────────────────────────────────────────────────"
+    echo "------------------------------------------------------------"
 
-    # Check binary
-    if [[ -x "${INSTALL_DIR}/frc_vision" ]]; then
-        echo -e "  Binary:     ${GREEN}✓${NC} ${INSTALL_DIR}/frc_vision"
+    # Check PhotonVision JAR
+    if [[ -f "${INSTALL_DIR}/photonvision.jar" ]]; then
+        local jar_size=$(du -h "${INSTALL_DIR}/photonvision.jar" | awk '{print $1}')
+        echo -e "  PhotonVision JAR:  ${GREEN}OK${NC} (${jar_size})"
     else
-        echo -e "  Binary:     ${RED}✗${NC} Not found"
+        echo -e "  PhotonVision JAR:  ${RED}MISSING${NC}"
     fi
 
-    # Check config
-    if [[ -f "${INSTALL_DIR}/config/config.yml" ]]; then
-        echo -e "  Config:     ${GREEN}✓${NC} ${INSTALL_DIR}/config/config.yml"
+    # Check Java
+    if command -v java &> /dev/null; then
+        echo -e "  Java:              ${GREEN}OK${NC} ($(java -version 2>&1 | head -n 1))"
     else
-        echo -e "  Config:     ${RED}✗${NC} Not found"
+        echo -e "  Java:              ${RED}MISSING${NC}"
     fi
 
-    # Check service
-    if systemctl is-enabled --quiet frc_vision 2>/dev/null; then
-        echo -e "  Service:    ${GREEN}✓${NC} Enabled"
+    # Check dashboard files
+    if [[ -f "${DASHBOARD_DIR}/web/index.html" ]]; then
+        echo -e "  Dashboard:         ${GREEN}OK${NC}"
     else
-        echo -e "  Service:    ${YELLOW}○${NC} Not enabled"
+        echo -e "  Dashboard:         ${RED}MISSING${NC}"
+    fi
+
+    # Check services
+    if systemctl is-enabled --quiet photonvision 2>/dev/null; then
+        echo -e "  PV Service:        ${GREEN}Enabled${NC}"
+    else
+        echo -e "  PV Service:        ${YELLOW}Not enabled${NC}"
+    fi
+
+    if systemctl is-enabled --quiet aprilvision-dashboard 2>/dev/null; then
+        echo -e "  Dashboard Service: ${GREEN}Enabled${NC}"
+    else
+        echo -e "  Dashboard Service: ${YELLOW}Not enabled${NC}"
     fi
 
     # Check if running
-    if systemctl is-active --quiet frc_vision 2>/dev/null; then
-        echo -e "  Status:     ${GREEN}✓${NC} Running"
+    if systemctl is-active --quiet photonvision 2>/dev/null; then
+        echo -e "  PV Status:         ${GREEN}Running${NC}"
     else
-        echo -e "  Status:     ${YELLOW}○${NC} Not running"
+        echo -e "  PV Status:         ${YELLOW}Not running${NC}"
+    fi
+
+    if systemctl is-active --quiet aprilvision-dashboard 2>/dev/null; then
+        echo -e "  Dashboard Status:  ${GREEN}Running${NC}"
+    else
+        echo -e "  Dashboard Status:  ${YELLOW}Not running${NC}"
     fi
 
     # Get IP address
     IP_ADDR=$(hostname -I | awk '{print $1}')
 
-    echo "────────────────────────────────────────────────────────────"
+    echo "------------------------------------------------------------"
     echo ""
-    echo "Access:"
-    echo "  Dashboard:  http://${IP_ADDR}:5800"
-    echo "  Status API: http://${IP_ADDR}:5800/api/status"
+    echo "Access Points:"
+    echo "  PhotonVision UI:     http://${IP_ADDR}:5800"
+    echo "  AprilVision Dashboard: http://${IP_ADDR}:5801"
     echo ""
     echo "Commands:"
-    echo "  Start:      sudo systemctl start frc_vision"
-    echo "  Stop:       sudo systemctl stop frc_vision"
-    echo "  Status:     sudo systemctl status frc_vision"
-    echo "  Logs:       journalctl -u frc_vision -f"
+    echo "  Start all:    sudo systemctl start photonvision aprilvision-dashboard"
+    echo "  Stop all:     sudo systemctl stop photonvision aprilvision-dashboard"
+    echo "  PV status:    sudo systemctl status photonvision"
+    echo "  PV logs:      journalctl -u photonvision -f"
+    echo "  Dash logs:    journalctl -u aprilvision-dashboard -f"
     echo ""
 
     if [[ -n "$TEAM_NUMBER" ]]; then
@@ -565,45 +609,56 @@ verify_installation() {
 }
 
 #===============================================================================
-# Step 9: Print Completion Message
+# Step 10: Print Completion Message
 #===============================================================================
 
-print_completion_message() {
+print_completion() {
     echo ""
-    echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${NC}                                                                   ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}  ${YELLOW}🎉  AprilVision 3.1 Setup Complete!${NC}                           ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}                                                                   ${GREEN}║${NC}"
-    echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${GREEN}================================================================${NC}"
+    echo -e "${GREEN}|${NC}                                                              ${GREEN}|${NC}"
+    echo -e "${GREEN}|${NC}  ${YELLOW}AprilVision 2.0 Setup Complete!${NC}                            ${GREEN}|${NC}"
+    echo -e "${GREEN}|${NC}  ${CYAN}Powered by PhotonVision ${PV_VERSION}${NC}                          ${GREEN}|${NC}"
+    echo -e "${GREEN}|${NC}                                                              ${GREEN}|${NC}"
+    echo -e "${GREEN}================================================================${NC}"
     echo ""
     echo -e "${BLUE}Next Steps:${NC}"
-    echo "  1. Calibrate cameras:"
-    echo "     ${YELLOW}./scripts/setup_and_test.sh${NC} (select option 1)"
     echo ""
-    echo "  2. Test accuracy at 1.5m:"
-    echo "     ${YELLOW}./scripts/setup_and_test.sh${NC} (select option 2)"
-    echo "     Target: <2cm distance error, <2° angle error"
+    echo "  1. Open PhotonVision UI to configure cameras:"
+    echo "     ${YELLOW}http://<this-device-ip>:5800${NC}"
+    echo "     - Add cameras and set resolution/FPS"
+    echo "     - Select AprilTag pipeline"
+    echo "     - Configure tag family (tag36h11)"
+    echo "     - Calibrate cameras for best accuracy"
     echo ""
-    echo "  3. Run full vision system:"
-    echo "     ${YELLOW}sudo systemctl start frc_vision${NC}"
+    echo "  2. Open AprilVision custom dashboard:"
+    echo "     ${YELLOW}http://<this-device-ip>:5801${NC}"
+    echo "     - Monitor all cameras and detections"
+    echo "     - View system health and performance"
     echo ""
-    echo -e "${BLUE}Phase 1/2 Features Active:${NC}"
-    echo "  ✓ Sub-pixel corner refinement (0.1-0.3px improvement)"
-    echo "  ✓ MegaTag multi-tag fusion (30-50% better with 3+ tags)"
-    echo "  ✓ Multi-method distance validation"
-    echo "  ✓ Coordinate system fixes (angles now accurate!)"
-    echo "  ✓ Per-tag accuracy estimation"
-    echo "  ✓ Runtime calibration health monitoring"
-    echo "  ✓ Pose consistency checking"
+    echo "  3. Add PhotonLib to your robot project:"
+    echo "     In build.gradle add:"
+    echo "     ${YELLOW}implementation 'org.photonvision:photonlib-java:${PV_VERSION}'${NC}"
     echo ""
-    echo -e "${BLUE}Performance Targets:${NC}"
-    echo "  Distance @ 1.5m: <2cm error  (was ~10cm)"
-    echo "  Distance @ 3m:   <5cm error  (was ~20cm)"
-    echo "  Angle accuracy:  <2° error   (was ~10-15°)"
+    echo "  4. Copy robot code examples from:"
+    echo "     ${YELLOW}robot-code-examples/${NC}"
+    echo "     - VisionSubsystem.java (PhotonLib integration)"
+    echo "     - AlignToTagCommand.java (auto-alignment)"
+    echo "     - RobotContainerExample.java (wiring it up)"
     echo ""
-    echo -e "${YELLOW}Documentation:${NC} See PHASE2_ENHANCEMENTS.md for full details"
+    echo -e "${BLUE}PhotonVision Features:${NC}"
+    echo "  - Multi-tag PnP on coprocessor (accurate pose)"
+    echo "  - AprilTag detection with tag36h11"
+    echo "  - Camera calibration via web UI"
+    echo "  - NetworkTables 4.0 integration"
+    echo "  - MJPEG camera streams"
+    echo "  - Game piece detection (2026 models)"
     echo ""
-    echo -e "${GREEN}Happy vision processing! 🚀${NC}"
+    echo -e "${BLUE}AprilVision 2.0 Adds:${NC}"
+    echo "  - Custom monitoring dashboard"
+    echo "  - One-script setup and deployment"
+    echo "  - Pre-configured systemd services"
+    echo "  - Team-specific NetworkTables config"
+    echo "  - Ready-to-use Java robot code examples"
     echo ""
 }
 
@@ -614,56 +669,30 @@ print_completion_message() {
 main() {
     print_banner
     check_root
-    check_arch
-
-    # NEW: Validate AprilVision 3.1 Phase 1/2 files
-    validate_phase_files
+    detect_architecture
 
     if $INSTALL_ONLY; then
-        setup_user_and_permissions
         install_files
-        install_service
+        install_services
         verify_installation
-        print_completion_message
+        print_completion
         exit 0
     fi
 
     # Full installation
     install_dependencies
+    install_java
+    download_photonvision
 
-    if ! $INSTALL_ONLY; then
-        build_project
+    if ! $DEV_MODE; then
+        configure_team
+        setup_user_and_permissions
+        install_files
+        install_services
     fi
 
-    if $BUILD_ONLY; then
-        log_success "Build complete. Run './setup.sh --install-only' to install."
-        exit 0
-    fi
-
-    if $DEV_MODE; then
-        log_success "Development build complete."
-        echo ""
-        echo "Run manually with:"
-        echo "  ./build/frc_vision config/config.yml"
-        exit 0
-    fi
-
-    # Configure team number
-    configure_team
-
-    # Setup user and permissions
-    setup_user_and_permissions
-
-    # Install files
-    install_files
-
-    # Install service
-    install_service
-
-    # Verify
     verify_installation
-
-    print_completion_message
+    print_completion
 }
 
 # Run main

@@ -1,45 +1,50 @@
 package frc.robot.commands;
 
+import java.util.Optional;
+
+import org.photonvision.targeting.PhotonTrackedTarget;
+
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import frc.robot.subsystems.DriveSubsystem;
 import frc.robot.subsystems.VisionSubsystem;
 
 /**
- * Command to automatically align the robot to an AprilTag.
+ * Command to automatically align the robot to an AprilTag using PhotonVision.
  *
- * This command:
- * 1. Tells the vision system which tag to align to
- * 2. Uses PID control on the alignment error to drive the robot
- * 3. Finishes when the robot is within tolerance (vision reports "ready")
+ * AprilVision 2.0 - Custom Vision System built on PhotonVision libraries.
+ *
+ * This command uses PhotonVision's target data to drive the robot toward
+ * a specific AprilTag. It uses PID control on the tag's relative position
+ * from the camera.
  *
  * Usage:
- *   // Align to tag 5 at 0.5 meters
- *   new AlignToTagCommand(vision, drive, 5, 0.5)
+ *   // Align to tag 5
+ *   new AlignToTagCommand(vision, drive, 5)
  *
  *   // Bind to button
- *   driverController.a().whileTrue(new AlignToTagCommand(vision, drive, 7, 0.6));
+ *   driverController.a().whileTrue(new AlignToTagCommand(vision, drive, 7));
  */
 public class AlignToTagCommand extends Command {
 
     private final VisionSubsystem vision;
     private final DriveSubsystem drive;
     private final int tagId;
-    private final double distanceMeters;
-    private final double approachAngle;
+    private final double targetDistanceMeters;
 
-    // PID Controllers for each axis
-    private final PIDController xController;
-    private final PIDController yController;
-    private final PIDController thetaController;
+    // PID Controllers
+    private final PIDController forwardController;  // Forward/backward
+    private final PIDController strafeController;    // Left/right
+    private final PIDController rotationController;  // Rotation
 
     // Configuration
-    private static final double MAX_SPEED = 2.0;        // m/s
-    private static final double MAX_ROT_SPEED = 2.0;    // rad/s
-    private static final double POSITION_TOLERANCE = 0.03;  // meters
-    private static final double ANGLE_TOLERANCE = 0.03;     // radians
+    private static final double MAX_SPEED = 2.0;       // m/s
+    private static final double MAX_ROT_SPEED = 2.0;   // rad/s
+    private static final double POSITION_TOLERANCE = 0.05;  // meters
+    private static final double ANGLE_TOLERANCE = 0.03;     // radians (~1.7 deg)
 
     // Timeout
     private final double timeoutSeconds;
@@ -54,61 +59,48 @@ public class AlignToTagCommand extends Command {
      * @param vision Vision subsystem
      * @param drive Drive subsystem
      * @param tagId AprilTag ID to align to
-     * @param distanceMeters Distance from tag to stop at
      */
-    public AlignToTagCommand(VisionSubsystem vision, DriveSubsystem drive,
-                            int tagId, double distanceMeters) {
-        this(vision, drive, tagId, distanceMeters, 0.0, 10.0);
+    public AlignToTagCommand(VisionSubsystem vision, DriveSubsystem drive, int tagId) {
+        this(vision, drive, tagId, 0.5, 10.0);
     }
 
     /**
-     * Creates an AlignToTagCommand with custom angle and timeout.
+     * Creates an AlignToTagCommand with custom distance and timeout.
      *
      * @param vision Vision subsystem
      * @param drive Drive subsystem
      * @param tagId AprilTag ID to align to
-     * @param distanceMeters Distance from tag to stop at
-     * @param approachAngle Approach angle offset from perpendicular (radians)
-     * @param timeoutSeconds Maximum time to attempt alignment
+     * @param targetDistanceMeters Desired distance from tag (meters)
+     * @param timeoutSeconds Maximum alignment time
      */
     public AlignToTagCommand(VisionSubsystem vision, DriveSubsystem drive,
-                            int tagId, double distanceMeters, double approachAngle,
+                            int tagId, double targetDistanceMeters,
                             double timeoutSeconds) {
         this.vision = vision;
         this.drive = drive;
         this.tagId = tagId;
-        this.distanceMeters = distanceMeters;
-        this.approachAngle = approachAngle;
+        this.targetDistanceMeters = targetDistanceMeters;
         this.timeoutSeconds = timeoutSeconds;
 
-        // Configure PID controllers
-        // Tune these values for your robot!
-        xController = new PIDController(2.0, 0.0, 0.1);
-        yController = new PIDController(2.0, 0.0, 0.1);
-        thetaController = new PIDController(3.0, 0.0, 0.15);
+        // PID controllers - tune these for your robot
+        forwardController = new PIDController(1.5, 0.0, 0.08);
+        strafeController = new PIDController(1.5, 0.0, 0.08);
+        rotationController = new PIDController(2.0, 0.0, 0.1);
 
-        // Theta controller wraps around
-        thetaController.enableContinuousInput(-Math.PI, Math.PI);
+        rotationController.enableContinuousInput(-Math.PI, Math.PI);
 
-        // Set tolerances
-        xController.setTolerance(POSITION_TOLERANCE);
-        yController.setTolerance(POSITION_TOLERANCE);
-        thetaController.setTolerance(ANGLE_TOLERANCE);
+        forwardController.setTolerance(POSITION_TOLERANCE);
+        strafeController.setTolerance(POSITION_TOLERANCE);
+        rotationController.setTolerance(ANGLE_TOLERANCE);
 
         addRequirements(drive);
     }
 
     @Override
     public void initialize() {
-        // Tell vision to start tracking this tag
-        vision.startAlignment(tagId, distanceMeters, approachAngle);
-
-        // Reset controllers
-        xController.reset();
-        yController.reset();
-        thetaController.reset();
-
-        // Record start time
+        forwardController.reset();
+        strafeController.reset();
+        rotationController.reset();
         startTime = Timer.getFPGATimestamp();
         targetEverSeen = false;
 
@@ -117,59 +109,56 @@ public class AlignToTagCommand extends Command {
 
     @Override
     public void execute() {
-        // Check if target is visible
-        if (!vision.isTargetVisible()) {
-            // Target not visible - stop and wait
-            drive.stop();
+        // Look for the target tag in camera results
+        Optional<PhotonTrackedTarget> target = findTargetTag();
 
-            if (!targetEverSeen) {
-                // Never seen the target - maybe rotate to find it?
-                // Or just wait for it to appear
-            }
+        if (target.isEmpty()) {
+            drive.stop();
             return;
         }
 
         targetEverSeen = true;
+        PhotonTrackedTarget t = target.get();
 
-        // Get alignment error from vision
-        double[] error = vision.getAlignmentError();
-        if (error == null) {
-            drive.stop();
-            return;
-        }
+        // PhotonVision gives us the target's position relative to the camera
+        // as a Transform3d (best camera to target transform)
+        Transform3d camToTarget = t.getBestCameraToTarget();
 
-        // error[0] = x error (forward/back in field frame)
-        // error[1] = y error (left/right in field frame)
-        // error[2] = theta error (rotation)
+        // Extract target position relative to camera
+        // X = forward distance to tag
+        // Y = left/right offset (positive = left)
+        // Z = up/down offset (positive = up)
+        double forwardDistance = camToTarget.getX();
+        double strafeOffset = camToTarget.getY();
+        double yawToTarget = Math.atan2(strafeOffset, forwardDistance);
 
-        // Calculate control outputs
-        // PID calculates output to drive error to zero
-        double xSpeed = xController.calculate(error[0], 0);
-        double ySpeed = yController.calculate(error[1], 0);
-        double rotSpeed = thetaController.calculate(error[2], 0);
+        // Calculate errors
+        double forwardError = forwardDistance - targetDistanceMeters;
+        double strafeError = strafeOffset;  // Want to center on tag (0 offset)
+        double rotError = yawToTarget;       // Want to face tag (0 yaw)
+
+        // PID outputs
+        double forwardSpeed = forwardController.calculate(forwardError, 0);
+        double strafeSpeed = strafeController.calculate(strafeError, 0);
+        double rotSpeed = rotationController.calculate(rotError, 0);
 
         // Clamp speeds
-        xSpeed = MathUtil.clamp(xSpeed, -MAX_SPEED, MAX_SPEED);
-        ySpeed = MathUtil.clamp(ySpeed, -MAX_SPEED, MAX_SPEED);
+        forwardSpeed = MathUtil.clamp(forwardSpeed, -MAX_SPEED, MAX_SPEED);
+        strafeSpeed = MathUtil.clamp(strafeSpeed, -MAX_SPEED, MAX_SPEED);
         rotSpeed = MathUtil.clamp(rotSpeed, -MAX_ROT_SPEED, MAX_ROT_SPEED);
 
-        // Apply deadband for small errors
-        if (Math.abs(error[0]) < POSITION_TOLERANCE) xSpeed = 0;
-        if (Math.abs(error[1]) < POSITION_TOLERANCE) ySpeed = 0;
-        if (Math.abs(error[2]) < ANGLE_TOLERANCE) rotSpeed = 0;
+        // Deadband for small errors
+        if (Math.abs(forwardError) < POSITION_TOLERANCE) forwardSpeed = 0;
+        if (Math.abs(strafeError) < POSITION_TOLERANCE) strafeSpeed = 0;
+        if (Math.abs(rotError) < ANGLE_TOLERANCE) rotSpeed = 0;
 
-        // Drive the robot (field-relative)
-        drive.driveFieldRelative(xSpeed, ySpeed, rotSpeed);
+        // Drive the robot (robot-relative since we're using camera frame)
+        drive.driveRobotRelative(forwardSpeed, -strafeSpeed, -rotSpeed);
     }
 
     @Override
     public void end(boolean interrupted) {
-        // Stop the robot
         drive.stop();
-
-        // Stop alignment tracking
-        vision.stopAlignment();
-
         if (interrupted) {
             System.out.println("[AlignToTag] Alignment interrupted");
         } else {
@@ -179,54 +168,53 @@ public class AlignToTagCommand extends Command {
 
     @Override
     public boolean isFinished() {
-        // Check for timeout
+        // Timeout check
         if (Timer.getFPGATimestamp() - startTime > timeoutSeconds) {
             System.out.println("[AlignToTag] Timeout reached");
             return true;
         }
 
-        // Check if vision reports aligned (uses its internal tolerances)
-        if (vision.isAligned()) {
-            return true;
+        // Check if all controllers are at setpoint
+        return forwardController.atSetpoint() &&
+               strafeController.atSetpoint() &&
+               rotationController.atSetpoint();
+    }
+
+    /**
+     * Searches all cameras for the target tag.
+     */
+    private Optional<PhotonTrackedTarget> findTargetTag() {
+        // Check front camera first (most common for alignment)
+        var frontResult = vision.getLatestFrontResult();
+        if (frontResult.hasTargets()) {
+            for (var target : frontResult.getTargets()) {
+                if (target.getFiducialId() == tagId) {
+                    return Optional.of(target);
+                }
+            }
         }
-
-        // Also check our own PID tolerances
-        return xController.atSetpoint() &&
-               yController.atSetpoint() &&
-               thetaController.atSetpoint();
+        return Optional.empty();
     }
 
     // ========================================================================
-    // Static factory methods for FRC 2026 REBUILT common alignments
+    // Static factory methods for common alignments
     // ========================================================================
 
     /**
-     * Creates an alignment command for hub scoring (close range).
-     * Hub tags: Red 2-5,8-11 / Blue 18-21,24-27
+     * Creates an alignment command for close-range scoring.
      */
-    public static AlignToTagCommand alignToHub(VisionSubsystem vision,
+    public static AlignToTagCommand alignClose(VisionSubsystem vision,
                                                 DriveSubsystem drive,
-                                                int hubTagId) {
-        return new AlignToTagCommand(vision, drive, hubTagId, 0.5, 0.0, 5.0);
+                                                int tagId) {
+        return new AlignToTagCommand(vision, drive, tagId, 0.4, 5.0);
     }
 
     /**
-     * Creates an alignment command for tower wall approach.
-     * Tower wall tags: Red 15,16 / Blue 31,32
+     * Creates an alignment command for medium-range approach.
      */
-    public static AlignToTagCommand alignToTowerWall(VisionSubsystem vision,
-                                                      DriveSubsystem drive,
-                                                      int towerTagId) {
-        return new AlignToTagCommand(vision, drive, towerTagId, 0.3, 0.0, 5.0);
-    }
-
-    /**
-     * Creates an alignment command for outpost approach.
-     * Outpost tags: Red 13,14 / Blue 29,30
-     */
-    public static AlignToTagCommand alignToOutpost(VisionSubsystem vision,
-                                                    DriveSubsystem drive,
-                                                    int outpostTagId) {
-        return new AlignToTagCommand(vision, drive, outpostTagId, 0.6, 0.0, 5.0);
+    public static AlignToTagCommand alignMedium(VisionSubsystem vision,
+                                                 DriveSubsystem drive,
+                                                 int tagId) {
+        return new AlignToTagCommand(vision, drive, tagId, 1.0, 8.0);
     }
 }

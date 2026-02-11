@@ -3,216 +3,144 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AprilVision 3.1 Dashboard</title>
-    <link rel="stylesheet" href="style.css">
+    <title>AprilVision 2.0 - Custom Vision System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            text-align: center;
+            padding: 40px;
+        }
+        h1 {
+            font-size: 2.5rem;
+            color: #00ff88;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            color: #8b949e;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+        }
+        .links {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        a {
+            display: block;
+            padding: 16px 24px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 1.1rem;
+            transition: all 0.2s;
+        }
+        a:hover {
+            background: #1f2937;
+            border-color: #58a6ff;
+            transform: translateY(-2px);
+        }
+        a .desc {
+            display: block;
+            color: #8b949e;
+            font-size: 0.85rem;
+            margin-top: 4px;
+        }
+        .status {
+            margin-top: 30px;
+            padding: 16px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+        }
+        .status-label { color: #8b949e; }
+        .status-value { color: #00ff88; font-weight: 600; }
+        .status-value.error { color: #f85149; }
+        .footer {
+            margin-top: 30px;
+            color: #484f58;
+            font-size: 0.8rem;
+        }
+    </style>
 </head>
 <body>
-    <!-- Compact Header -->
-    <header>
-        <h1>AprilVision 3.1</h1>
-        <div class="status-bar">
-            <span id="status-uptime">Uptime: --</span>
-            <span id="status-temp">CPU: --</span>
-            <span id="status-nt" class="status-indicator disconnected">
-                NT: <span id="nt-status-text">Disconnected</span>
-                <span id="nt-server-ip" style="font-size:0.8em;"></span>
-            </span>
-            <span id="status-clients">Clients: 0</span>
-        </div>
-    </header>
+    <div class="container">
+        <h1>AprilVision 2.0</h1>
+        <p class="subtitle">Custom FRC Vision System built on PhotonVision</p>
 
-    <!-- Main Content Grid -->
-    <main>
-        <!-- Camera Grid (2x2) -->
-        <section class="camera-grid">
-            <!-- Camera 0 -->
-            <div class="camera-panel" data-cam="0">
-                <div class="camera-header">
-                    <h3>Camera 0</h3>
-                    <span class="cam-stats">
-                        <span class="fps" data-cam="0">-- fps</span>
-                        <span class="latency" data-cam="0">-- ms</span>
-                        <span class="tags" data-cam="0">0 tags</span>
-                    </span>
-                </div>
-                <div class="camera-container">
-                    <img id="cam0-img" alt="Camera 0">
-                    <canvas id="cam0-overlay"></canvas>
-                </div>
-            </div>
-
-            <!-- Camera 1 -->
-            <div class="camera-panel" data-cam="1">
-                <div class="camera-header">
-                    <h3>Camera 1</h3>
-                    <span class="cam-stats">
-                        <span class="fps" data-cam="1">-- fps</span>
-                        <span class="latency" data-cam="1">-- ms</span>
-                        <span class="tags" data-cam="1">0 tags</span>
-                    </span>
-                </div>
-                <div class="camera-container">
-                    <img id="cam1-img" alt="Camera 1">
-                    <canvas id="cam1-overlay"></canvas>
-                </div>
-            </div>
-
-            <!-- Camera 2 -->
-            <div class="camera-panel" data-cam="2">
-                <div class="camera-header">
-                    <h3>Camera 2</h3>
-                    <span class="cam-stats">
-                        <span class="fps" data-cam="2">-- fps</span>
-                        <span class="latency" data-cam="2">-- ms</span>
-                        <span class="tags" data-cam="2">0 tags</span>
-                    </span>
-                </div>
-                <div class="camera-container">
-                    <img id="cam2-img" alt="Camera 2">
-                    <canvas id="cam2-overlay"></canvas>
-                </div>
-            </div>
-
-            <!-- Empty slot for layout -->
-            <div class="camera-panel" style="background: transparent; border: none;"></div>
-        </section>
-
-        <!-- Right Side Panels -->
-        <aside class="side-panels">
-            <!-- Robot Pose -->
-            <div class="panel">
-                <h3>Robot Pose</h3>
-                <div class="pose-values">
-                    <div class="pose-row">
-                        <label>X</label>
-                        <span id="pose-x">--.--</span>
-                        <span class="unit">m</span>
-                    </div>
-                    <div class="pose-row">
-                        <label>Y</label>
-                        <span id="pose-y">--.--</span>
-                        <span class="unit">m</span>
-                    </div>
-                    <div class="pose-row">
-                        <label>&theta;</label>
-                        <span id="pose-theta">--.--</span>
-                        <span class="unit">&deg;</span>
-                    </div>
-                </div>
-                <div class="confidence-bar">
-                    <div id="confidence-fill" style="width: 0%"></div>
-                </div>
-                <div class="pose-field">
-                    <canvas id="field-canvas" width="400" height="200"></canvas>
-                </div>
-            </div>
-
-            <!-- Stats -->
-            <div class="panel">
-                <h3>Stats</h3>
-                <div class="stats-grid">
-                    <div class="stat-item">
-                        <span class="stat-label">Tags:</span>
-                        <span class="stat-value" id="total-tags">0</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Cameras:</span>
-                        <span class="stat-value" id="cameras-count">0</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Confidence:</span>
-                        <span class="stat-value" id="confidence-value">0%</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Ambiguity:</span>
-                        <span class="stat-value" id="ambiguity-value">--</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Auto-Align -->
-            <div class="panel">
-                <h3>Auto-Align</h3>
-                <div class="auto-align-controls">
-                    <input type="number" id="target-tag-id" value="7" placeholder="Tag ID" style="width: 60px;">
-                    <button id="set-align-target">Set Target</button>
-                    <button id="clear-align" class="danger">Clear</button>
-                    <button id="test-semicircle">Test Path</button>
-                </div>
-                <div class="auto-align-status" id="align-status" style="display:none;">
-                    <div>Target: <span id="align-target">--</span></div>
-                    <div>Error: <span id="align-error">--</span></div>
-                    <div>Status: <span id="align-ready">--</span></div>
-                </div>
-            </div>
-        </aside>
-
-        <!-- Test Mode Status Banner (hidden by default) -->
-        <div id="test-mode-status" style="display:none; background:#1a1a2e; border:1px solid #e94560; padding:8px 12px; margin:4px 0; border-radius:4px;">
-            <strong id="current-test-mode" style="color:#e94560;">--</strong>
-            <span id="test-instructions" style="color:#ccc; margin-left:8px; font-size:0.9em;">--</span>
+        <div class="links">
+            <a href="/" id="pv-link">
+                Vision Dashboard
+                <span class="desc">Full camera feeds, detection settings, and calibration</span>
+            </a>
+            <a href="#" id="nt-link" onclick="return false;">
+                NetworkTables Status
+                <span class="desc" id="nt-status">Checking connection...</span>
+            </a>
         </div>
 
-        <!-- Bottom Controls -->
-        <section class="bottom-controls">
-            <!-- Calibration -->
-            <div class="control-group">
-                <label>Calibration:</label>
-                <select id="cal-camera" style="width:70px;">
-                    <option value="0">Cam 0</option>
-                    <option value="1">Cam 1</option>
-                    <option value="2">Cam 2</option>
-                </select>
-                <button id="btn-cal-start">Start</button>
-                <button id="btn-cal-capture" disabled>Capture</button>
-                <button id="btn-cal-compute" disabled>Compute</button>
-                <button id="btn-cal-reset" style="display:none;" class="danger">Reset</button>
-                <span id="cal-status" style="color:#8b949e; font-size:0.85em; margin-left:4px;">Idle</span>
+        <div class="status" id="status-panel">
+            <div class="status-row">
+                <span class="status-label">Detection Engine</span>
+                <span class="status-value" id="pv-status">Checking...</span>
             </div>
-
-            <!-- Diagnostics -->
-            <div class="control-group">
-                <label>Diagnostics:</label>
-                <button id="btn-run-diagnostics">Run Diagnostics</button>
+            <div class="status-row">
+                <span class="status-label">Dashboard Proxy</span>
+                <span class="status-value">Running</span>
             </div>
-
-            <!-- Validation -->
-            <div class="control-group">
-                <label>Validation:</label>
-                <button id="btn-run-validation">Test at 1.5m</button>
-            </div>
-
-            <!-- Config -->
-            <div class="control-group">
-                <label>Config:</label>
-                <button id="reload-config">Reload</button>
-                <label for="overlay-toggle" style="margin-left:8px;">
-                    <input type="checkbox" id="overlay-toggle" checked> Overlays
-                </label>
-            </div>
-        </section>
-
-        <!-- Diagnostics Results Panel (hidden by default) -->
-        <div id="diagnostics-results" style="display:none; background:#0d1117; border:1px solid #30363d; padding:10px; margin:4px 0; border-radius:4px; font-size:0.85em;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-                <strong style="color:#58a6ff;">System Diagnostics</strong>
-                <button id="btn-close-diag" style="background:none; border:none; color:#8b949e; cursor:pointer;">close</button>
-            </div>
-            <div id="diag-content" style="color:#c9d1d9; white-space:pre-wrap; font-family:monospace; max-height:200px; overflow-y:auto;">
-                Running...
+            <div class="status-row">
+                <span class="status-label">Proxy Port</span>
+                <span class="status-value">5801</span>
             </div>
         </div>
 
-        <!-- Calibration Results Panel (hidden by default) -->
-        <div id="calibration-results" style="display:none; background:#0d1117; border:1px solid #30363d; padding:10px; margin:4px 0; border-radius:4px; font-size:0.85em;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-                <strong style="color:#3fb950;">Calibration Result</strong>
-                <button id="btn-close-cal" style="background:none; border:none; color:#8b949e; cursor:pointer;">close</button>
-            </div>
-            <div id="cal-result-content" style="color:#c9d1d9; font-family:monospace;"></div>
+        <div class="footer">
+            AprilVision 2.0 &mdash; Custom vision system built on PhotonVision libraries
         </div>
-    </main>
+    </div>
 
-    <script src="app.js"></script>
+    <script>
+        // Check PhotonVision status
+        async function checkStatus() {
+            const pvStatus = document.getElementById('pv-status');
+            try {
+                const resp = await fetch('/api/settings/general', {
+                    signal: AbortSignal.timeout(3000)
+                });
+                if (resp.ok) {
+                    pvStatus.textContent = 'Online';
+                    pvStatus.classList.remove('error');
+                    // Auto-redirect to the main dashboard
+                    const pvLink = document.getElementById('pv-link');
+                    pvLink.href = '/';
+                } else {
+                    pvStatus.textContent = 'Error';
+                    pvStatus.classList.add('error');
+                }
+            } catch {
+                pvStatus.textContent = 'Starting...';
+                pvStatus.classList.add('error');
+            }
+        }
+        checkStatus();
+        setInterval(checkStatus, 5000);
+    </script>
 </body>
 </html>
