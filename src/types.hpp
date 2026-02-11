@@ -162,28 +162,38 @@ struct TagCorners {
 };
 
 /**
- * @brief Multi-method distance estimation results (Phase 1)
+ * @brief Multi-method distance estimation with geometric consistency checking
  */
 struct DistanceEstimate {
-    double distance_pnp = 0.0;        // Distance from PnP solve
-    double distance_pinhole = 0.0;    // Distance from pinhole model
-    double distance_edge = 0.0;       // Distance from tag edge length
-    double distance_fused = 0.0;      // Weighted fusion of methods
-    bool is_consistent = false;       // All methods agree within threshold
-    double confidence = 0.0;          // Overall confidence (0-1)
-    double stddev = 0.0;              // Standard deviation of estimates
+    double distance_pnp = 0.0;                 // From PnP translation vector norm
+    double distance_pinhole = 0.0;             // From pinhole model (avg edge length)
+    double distance_vertical_edges = 0.0;      // From vertical edges only
+    double distance_horizontal_edges = 0.0;    // From horizontal edges only
+
+    double distance_fused = 0.0;               // Final fused estimate
+    double confidence = 0.0;                   // 0-1 based on agreement between methods
+
+    // Consistency metrics
+    double pnp_pinhole_agreement = 0.0;        // exp(-|pnp - pinhole| / 0.5)
+    double edge_consistency = 0.0;             // exp(-|vert - horiz| / 0.3)
+
+    bool is_consistent = false;                // True if all methods agree within tolerance
 };
 
 /**
- * @brief Per-tag accuracy prediction (Phase 2)
+ * @brief Per-tag accuracy estimation based on viewing conditions
  */
 struct TagAccuracyEstimate {
-    double estimated_error_m = 0.0;           // Predicted position error (meters)
-    double confidence = 1.0;                   // Confidence in this tag (0-1)
-    double reprojection_contribution = 0.0;    // Error from reprojection
-    double viewing_angle_contribution = 0.0;   // Error from viewing angle
-    double ambiguity_contribution = 0.0;       // Error from pose ambiguity
-    double distance_contribution = 0.0;        // Error from distance
+    double estimated_error_m = 0.0;            // Predicted absolute distance error (meters)
+    double estimated_angle_error_deg = 0.0;    // Predicted angle error (degrees)
+
+    std::string confidence_level = "unknown";  // "high", "medium", "low"
+
+    // Contributing factors
+    double base_error = 0.0;                   // 0.01 * distance^2
+    double reprojection_contribution = 0.0;    // reproj_err * 0.005 * distance
+    double viewing_angle_contribution = 0.0;   // viewing_angle_factor * 0.01 * distance
+    double ambiguity_contribution = 0.0;       // ambiguity * 0.02 * distance
 };
 
 /**
@@ -428,41 +438,6 @@ struct CalibrationQualityMetrics {
     // Recommendations
     std::vector<std::string> warnings;
     std::vector<std::string> recommendations;
-};
-
-/**
- * @brief Multi-method distance estimation with geometric consistency checking
- */
-struct DistanceEstimate {
-    double distance_pnp = 0.0;                 // From PnP translation vector norm
-    double distance_pinhole = 0.0;             // From pinhole model (avg edge length)
-    double distance_vertical_edges = 0.0;      // From vertical edges only
-    double distance_horizontal_edges = 0.0;    // From horizontal edges only
-
-    double distance_fused = 0.0;               // Final fused estimate
-    double confidence = 0.0;                   // 0-1 based on agreement between methods
-
-    // Consistency metrics
-    double pnp_pinhole_agreement = 0.0;        // exp(-|pnp - pinhole| / 0.5)
-    double edge_consistency = 0.0;             // exp(-|vert - horiz| / 0.3)
-
-    bool is_consistent = false;                // True if all methods agree within tolerance
-};
-
-/**
- * @brief Per-tag accuracy estimation based on viewing conditions
- */
-struct TagAccuracyEstimate {
-    double estimated_error_m = 0.0;            // Predicted absolute distance error (meters)
-    double estimated_angle_error_deg = 0.0;    // Predicted angle error (degrees)
-
-    std::string confidence_level = "unknown";  // "high", "medium", "low"
-
-    // Contributing factors
-    double base_error = 0.0;                   // 0.01 * distance^2
-    double reprojection_contribution = 0.0;    // reproj_err * 0.005 * distance
-    double viewing_angle_contribution = 0.0;   // viewing_angle_factor * 0.01 * distance
-    double ambiguity_contribution = 0.0;       // ambiguity * 0.02 * distance
 };
 
 /**
