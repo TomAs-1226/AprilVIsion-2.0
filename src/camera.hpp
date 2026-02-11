@@ -100,6 +100,12 @@ public:
      */
     void update_config(const CameraConfig& config);
 
+    /**
+     * @brief Get camera health state for diagnostics
+     * @return 0=healthy, 1=degraded, 2=stalled/reconnecting
+     */
+    int health_state() const { return camera_health_state_.load(); }
+
 private:
     void capture_loop();
     bool open_camera();
@@ -128,6 +134,9 @@ private:
 
     // Track which device index we opened (for multi-camera coordination)
     int opened_device_index_{-1};
+
+    // Health state for diagnostics: 0=healthy, 1=degraded, 2=stalled
+    std::atomic<int> camera_health_state_{1};
 };
 
 /**

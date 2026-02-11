@@ -189,10 +189,11 @@ void Camera::configure_camera() {
     // Set FPS
     cap_.set(cv::CAP_PROP_FPS, config_.fps);
 
-    // Buffer of 2 prevents driver-level drops while keeping latency low.
-    // Buffer of 1 causes the V4L2 driver to drop frames under CPU load,
-    // which triggers consecutive_failures and false disconnects.
-    cap_.set(cv::CAP_PROP_BUFFERSIZE, 2);
+    // Buffer of 1 minimizes latency and prevents multi-camera USB bus stalls.
+    // With buffer=2, frames queue in the V4L2 driver and when two cameras share
+    // a USB controller, the driver can deadlock waiting for buffer space.
+    // Buffer=1 means "always grab the latest frame" which is exactly what we want.
+    cap_.set(cv::CAP_PROP_BUFFERSIZE, 1);
 
     // Configure camera controls via v4l2-ctl for reliable control
     std::string device_path = "/dev/video" + std::to_string(opened_device_index_);
@@ -338,42 +339,48 @@ void Camera::capture_loop() {
         auto last_good_frame = SteadyClock::now();
 
         // Capture loop - runs until camera disconnects or shutdown
+        // KEY FIX for multi-camera freezing:
+        // - Use read() instead of grab()/retrieve() (atomic, fewer race conditions)
+        // - Shorter watchdog (3s) to detect frozen cameras faster
+        // - Yield between reads to give other cameras USB bus time
+        // - Track health for diagnostics
         while (!should_stop_.load()) {
-            // Watchdog: If no frames for 10 seconds, assume camera hung
+            // Watchdog: If no frames for 3 seconds, assume camera hung
+            // (reduced from 10s — 10s of frozen stream is unacceptable)
             auto watchdog_now = SteadyClock::now();
             auto time_since_frame = std::chrono::duration<double>(watchdog_now - last_good_frame).count();
-            if (time_since_frame > 10.0) {
+            if (time_since_frame > 3.0) {
                 std::cerr << "[Camera " << id_ << "] Watchdog timeout: No frames for "
                           << time_since_frame << "s, reconnecting..." << std::endl;
+                camera_health_state_ = 2;  // STALLED
                 break;  // Break inner loop to reconnect
             }
 
-            // grab() can sometimes hang on a dead USB bus. We detect that
-            // via the consecutive_failures counter and reconnect.
-            if (!cap_.grab()) {
+            // Use read() instead of separate grab()/retrieve() — it's atomic
+            // and avoids the race condition where grab() succeeds but retrieve()
+            // fails (or blocks) when multiple cameras share a USB bus.
+            if (!cap_.read(frame)) {
                 consecutive_failures++;
 
-                if (consecutive_failures >= 30) {
+                if (consecutive_failures >= 15) {
                     std::cerr << "[Camera " << id_ << "] Camera lost after "
                               << consecutive_failures << " failures, reconnecting..."
                               << std::endl;
-                    break;  // Break inner loop to reconnect
+                    camera_health_state_ = 2;  // STALLED
+                    break;
                 }
 
-                // Short sleep - don't busy-loop on failure
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                // Yield to other camera threads on the same USB bus
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 continue;
             }
 
             consecutive_failures = 0;
             last_good_frame = SteadyClock::now();
+            camera_health_state_ = 0;  // HEALTHY
 
             auto capture_time = SteadyClock::now();
             auto capture_wall = SystemClock::now();
-
-            // retrieve() decodes into 'frame'. We then MOVE this mat into
-            // the ring buffer frame to avoid a deep copy (clone).
-            if (!cap_.retrieve(frame)) continue;
 
             if (frame.empty() || frame.cols == 0 || frame.rows == 0) {
                 empty_frames_dropped_.fetch_add(1);
@@ -386,12 +393,9 @@ void Camera::capture_loop() {
             f.capture_time = capture_time;
             f.capture_wall_time = capture_wall;
 
-            // Save dimensions BEFORE move (use-after-move = undefined behavior / crash)
             int frame_width = frame.cols;
             int frame_height = frame.rows;
 
-            // Move the mat data - avoids expensive deep copy.
-            // retrieve() will allocate a new buffer on the next call.
             f.image = std::move(frame);
 
             frame_buffer_.push(std::move(f));
@@ -411,6 +415,13 @@ void Camera::capture_loop() {
                 fps_frame_count_ = 0;
                 last_fps_time_ = now;
             }
+
+            // KEY FIX: Brief yield between frames to prevent USB bus hogging.
+            // When multiple cameras share a USB controller, one camera doing
+            // back-to-back reads can starve the others, causing their streams
+            // to freeze. A 1ms yield gives the USB scheduler time to service
+            // other cameras on the same bus.
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
         // Camera disconnected or shutting down - clean up for reconnect
@@ -480,10 +491,11 @@ int CameraManager::initialize(const std::vector<CameraConfig>& configs) {
         cam->start();  // Launches capture thread - doesn't block long
         cameras_.push_back(std::move(cam));
 
-        // Delay between starts to let each camera claim its device.
-        // USB cameras can take 1-2s to fully open, so 1s gives enough time
-        // for the atomic claim-before-open logic to prevent conflicts.
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        // Stagger camera starts to prevent USB bus contention.
+        // USB cameras on the same controller need time to enumerate and
+        // start streaming before the next camera opens. 2s between starts
+        // prevents the common "all cameras freeze on startup" issue.
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
     }
 
     // Count how many connected

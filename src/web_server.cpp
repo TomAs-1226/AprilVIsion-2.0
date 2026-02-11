@@ -128,39 +128,51 @@ bool WebServer::initialize(int port, const std::string& web_root,
 
                     std::cout << "[WebServer] MJPEG cam" << i << " starting stream" << std::endl;
 
+                    // Track last frame for keepalive resend
+                    std::vector<uint8_t> last_frame_data;
+                    auto last_frame_sent_time = std::chrono::steady_clock::now();
+
                     while (!should_stop_.load()) {
                         try {
-                            // Get latest frame only if changed (avoids sending duplicates)
                             auto frame_changed = impl_->latest_frames[i]->get_if_changed(last_version);
+                            const std::vector<uint8_t>* frame_to_send = nullptr;
 
                             if (frame_changed) {
                                 const auto& [frame, version] = *frame_changed;
                                 last_version = version;
-
                                 if (!frame.empty()) {
-                                    // Build MJPEG frame
-                                    std::string header = "--frame\r\n"
-                                        "Content-Type: image/jpeg\r\n"
-                                        "Content-Length: " + std::to_string(frame.size()) + "\r\n\r\n";
-
-                                    if (!sink.write(header.data(), header.size())) {
-                                        break;
-                                    }
-                                    if (!sink.write(reinterpret_cast<const char*>(frame.data()), frame.size())) {
-                                        break;
-                                    }
-                                    if (!sink.write("\r\n", 2)) {
-                                        break;
-                                    }
-
-                                    frames_sent++;
-                                    if (frames_sent == 1) {
-                                        std::cout << "[WebServer] MJPEG cam" << i << " first frame sent" << std::endl;
-                                    }
+                                    last_frame_data = frame;
+                                    frame_to_send = &last_frame_data;
+                                }
+                            } else {
+                                // KEY FIX: If no new frame in 1 second, re-send the last frame.
+                                // This prevents the browser from considering the MJPEG stream dead
+                                // when a camera temporarily stalls (e.g., USB bus contention).
+                                // Without this, multi-camera setups freeze in the browser.
+                                auto now = std::chrono::steady_clock::now();
+                                auto since_last = std::chrono::duration<double>(now - last_frame_sent_time).count();
+                                if (since_last > 1.0 && !last_frame_data.empty()) {
+                                    frame_to_send = &last_frame_data;
                                 }
                             }
 
-                            // Poll at ~30fps to match camera capture rate
+                            if (frame_to_send && !frame_to_send->empty()) {
+                                std::string header = "--frame\r\n"
+                                    "Content-Type: image/jpeg\r\n"
+                                    "Content-Length: " + std::to_string(frame_to_send->size()) + "\r\n\r\n";
+
+                                if (!sink.write(header.data(), header.size())) break;
+                                if (!sink.write(reinterpret_cast<const char*>(frame_to_send->data()), frame_to_send->size())) break;
+                                if (!sink.write("\r\n", 2)) break;
+
+                                last_frame_sent_time = std::chrono::steady_clock::now();
+                                frames_sent++;
+                                if (frames_sent == 1) {
+                                    std::cout << "[WebServer] MJPEG cam" << i << " first frame sent" << std::endl;
+                                }
+                            }
+
+                            // Poll at ~30fps
                             std::this_thread::sleep_for(std::chrono::milliseconds(33));
                         } catch (const std::exception& e) {
                             std::cerr << "[WebServer] MJPEG cam" << i << " error: " << e.what() << std::endl;
@@ -234,6 +246,8 @@ bool WebServer::initialize(int port, const std::string& web_root,
                 uint64_t last_fused_version = 0;
                 uint64_t last_status_version = 0;
 
+                auto last_heartbeat = std::chrono::steady_clock::now();
+
                 while (!should_stop_.load()) {
                     bool sent = false;
 
@@ -243,9 +257,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                         const auto& [data, version] = *det_opt;
                         last_det_version = version;
                         std::string msg = "event: detections\ndata: " + data + "\n\n";
-                        if (!sink.write(msg.data(), msg.size())) {
-                            break;
-                        }
+                        if (!sink.write(msg.data(), msg.size())) break;
                         sent = true;
                     }
 
@@ -255,9 +267,7 @@ bool WebServer::initialize(int port, const std::string& web_root,
                         const auto& [data, version] = *fused_opt;
                         last_fused_version = version;
                         std::string msg = "event: fused\ndata: " + data + "\n\n";
-                        if (!sink.write(msg.data(), msg.size())) {
-                            break;
-                        }
+                        if (!sink.write(msg.data(), msg.size())) break;
                         sent = true;
                     }
 
@@ -267,10 +277,16 @@ bool WebServer::initialize(int port, const std::string& web_root,
                         const auto& [data, version] = *status_opt;
                         last_status_version = version;
                         std::string msg = "event: status\ndata: " + data + "\n\n";
-                        if (!sink.write(msg.data(), msg.size())) {
-                            break;
-                        }
+                        if (!sink.write(msg.data(), msg.size())) break;
                         sent = true;
+                    }
+
+                    // SSE heartbeat every 15s to prevent browser/proxy timeouts
+                    auto now_hb = std::chrono::steady_clock::now();
+                    if (std::chrono::duration<double>(now_hb - last_heartbeat).count() > 15.0) {
+                        std::string heartbeat = ":heartbeat\n\n";
+                        if (!sink.write(heartbeat.data(), heartbeat.size())) break;
+                        last_heartbeat = now_hb;
                     }
 
                     if (!sent) {
@@ -802,6 +818,94 @@ bool WebServer::initialize(int port, const std::string& web_root,
         res.set_content(j.dump(), "application/json");
     });
 
+    // ==========================================================================
+    // Diagnostics Endpoint — full system health report
+    // ==========================================================================
+    impl_->server.Get("/api/diagnostics", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Cache-Control", "no-cache");
+
+        json diag;
+        diag["timestamp"] = std::chrono::duration<double>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Get current status
+        auto status_opt = impl_->latest_status_json.get();
+        if (status_opt) {
+            try {
+                json status = json::parse(*status_opt);
+                diag["uptime_s"] = status.value("uptime", 0.0);
+                diag["cpu_temp_c"] = status.value("cpu_temp", 0.0);
+                diag["cpu_usage_pct"] = status.value("cpu_usage", 0.0);
+                diag["nt_connected"] = status.value("nt_connected", false);
+                diag["fused_valid"] = status.value("fused_valid", false);
+                diag["fused_fps"] = status.value("fused_fps", 0.0);
+
+                // Per-camera diagnostics
+                diag["cameras"] = json::array();
+                if (status.contains("cameras") && status["cameras"].is_array()) {
+                    for (const auto& cam : status["cameras"]) {
+                        json cam_diag;
+                        cam_diag["id"] = cam.value("id", -1);
+                        cam_diag["connected"] = cam.value("connected", false);
+                        cam_diag["fps"] = cam.value("fps", 0.0);
+                        cam_diag["frames_captured"] = cam.value("frames_captured", 0);
+                        cam_diag["frames_dropped"] = cam.value("frames_dropped", 0);
+                        cam_diag["avg_detect_ms"] = cam.value("avg_detect_ms", 0.0);
+                        cam_diag["avg_pose_ms"] = cam.value("avg_pose_ms", 0.0);
+                        cam_diag["tags_detected"] = cam.value("tags_detected", 0);
+
+                        // Health assessment
+                        bool connected = cam.value("connected", false);
+                        double fps = cam.value("fps", 0.0);
+                        if (!connected) {
+                            cam_diag["health"] = "disconnected";
+                            cam_diag["health_detail"] = "Camera not connected or USB device not found";
+                        } else if (fps < 1.0) {
+                            cam_diag["health"] = "stalled";
+                            cam_diag["health_detail"] = "Camera connected but producing <1 FPS - USB bus contention?";
+                        } else if (fps < 10.0) {
+                            cam_diag["health"] = "degraded";
+                            cam_diag["health_detail"] = "Low FPS - check USB bandwidth or CPU load";
+                        } else {
+                            cam_diag["health"] = "healthy";
+                            cam_diag["health_detail"] = "Operating normally";
+                        }
+
+                        // Stream health
+                        auto frame_opt = impl_->latest_frames[cam.value("id", 0)]->get();
+                        cam_diag["stream_has_frame"] = frame_opt.has_value();
+                        cam_diag["stream_frame_size"] = frame_opt ? frame_opt->size() : 0;
+
+                        diag["cameras"].push_back(cam_diag);
+                    }
+                }
+            } catch (...) {
+                diag["error"] = "Failed to parse status";
+            }
+        } else {
+            diag["error"] = "No status data available";
+        }
+
+        // Get latest detection info
+        auto det_opt = impl_->latest_detections_json.get();
+        if (det_opt) {
+            try {
+                json det = json::parse(*det_opt);
+                diag["last_detection"] = {
+                    {"tags_count", det.contains("tags") ? det["tags"].size() : 0},
+                    {"latency_ms", det.value("latency_ms", 0.0)},
+                    {"has_robot_pose", det.contains("robot_pose")}
+                };
+            } catch (...) {}
+        }
+
+        diag["sse_clients"] = impl_->sse_client_count.load();
+        diag["web_server_running"] = running_.load();
+
+        res.set_content(diag.dump(2), "application/json");
+    });
+
     // CORS preflight
     impl_->server.Options(".*", [](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
@@ -1014,7 +1118,7 @@ void WebServer::push_status(const SystemStatus& status) {
 
     j["cameras"] = json::array();
     for (const auto& cam : status.cameras) {
-        j["cameras"].push_back({
+        json cam_json = {
             {"id", cam.camera_id},
             {"connected", cam.connected},
             {"fps", cam.fps},
@@ -1024,7 +1128,13 @@ void WebServer::push_status(const SystemStatus& status) {
             {"avg_pose_ms", cam.avg_pose_ms},
             {"avg_total_ms", cam.avg_total_ms},
             {"tags_detected", cam.tags_detected}
-        });
+        };
+        // Diagnostics: health state per camera
+        cam_json["health"] = cam.connected ? "healthy" : "disconnected";
+        if (cam.connected && cam.fps < 5.0) {
+            cam_json["health"] = "degraded";
+        }
+        j["cameras"].push_back(cam_json);
     }
 
     j["fused_fps"] = status.fused_fps;

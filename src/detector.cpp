@@ -91,7 +91,8 @@ bool Detector::initialize(const DetectorConfig& config) {
     detector_->quad_sigma = static_cast<float>(config_.sigma);
     detector_->nthreads = config_.nthreads;
     detector_->refine_edges = config_.refine_edges ? 1 : 0;
-    detector_->decode_sharpening = 0.25;  // Helps with motion blur
+    // Decode sharpening helps recover tags with motion blur and at long range
+    detector_->decode_sharpening = 0.25;
 
     std::cout << "[Detector] Initialized with family=" << config_.family
               << ", decimate=" << config_.decimation
@@ -235,13 +236,15 @@ std::vector<TagDetection> Detector::process_detections(void* detections_ptr, con
                 corners_cv.emplace_back(tag.corners.corners[j].x, tag.corners.corners[j].y);
             }
 
-            // Sub-pixel refinement parameters (optimized for AprilTag corners)
-            cv::Size win_size(5, 5);           // 5x5 window
-            cv::Size zero_zone(-1, -1);        // No dead zone
+            // Sub-pixel refinement parameters (proven: PhotonVision uses similar)
+            // Larger window (7x7) gives better convergence at distance
+            // Small zero zone avoids singularity at window center
+            cv::Size win_size(7, 7);
+            cv::Size zero_zone(1, 1);
             cv::TermCriteria criteria(
                 cv::TermCriteria::EPS + cv::TermCriteria::COUNT,
-                40,      // Max 40 iterations
-                0.001    // Epsilon for convergence
+                50,      // Max 50 iterations for better convergence
+                0.0005   // Tighter epsilon for sub-pixel precision
             );
 
             try {
