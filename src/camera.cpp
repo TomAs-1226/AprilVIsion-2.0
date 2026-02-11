@@ -334,8 +334,8 @@ void Camera::capture_loop() {
         // Capture loop - runs until camera disconnects or shutdown
         while (!should_stop_.load()) {
             // Watchdog: If no frames for 10 seconds, assume camera hung
-            auto now = SteadyClock::now();
-            auto time_since_frame = std::chrono::duration<double>(now - last_good_frame).count();
+            auto watchdog_now = SteadyClock::now();
+            auto time_since_frame = std::chrono::duration<double>(watchdog_now - last_good_frame).count();
             if (time_since_frame > 10.0) {
                 std::cerr << "[Camera " << id_ << "] Watchdog timeout: No frames for "
                           << time_since_frame << "s, reconnecting..." << std::endl;
