@@ -84,6 +84,15 @@ class VisionDashboard {
                 panel.classList.remove('stream-error');
                 panel.classList.add('stream-active');
             }
+
+            // Resize canvas to match image when it loads
+            const canvas = document.getElementById(`cam${camId}-overlay`);
+            if (canvas && img.naturalWidth && img.naturalHeight) {
+                const imgRect = img.getBoundingClientRect();
+                canvas.width = imgRect.width;
+                canvas.height = imgRect.height;
+                console.log(`Camera ${camId} loaded: ${img.naturalWidth}x${img.naturalHeight}, canvas: ${canvas.width}x${canvas.height}`);
+            }
         };
 
         img.onerror = () => {
@@ -500,12 +509,24 @@ class VisionDashboard {
         const img = document.getElementById(`cam${camId}-img`);
         if (!canvas || !img) return;
 
+        // Skip if image hasn't loaded yet (prevents floating boxes)
+        if (!img.naturalWidth || !img.naturalHeight || img.naturalWidth === 0) {
+            return;
+        }
+
+        // Ensure canvas matches image display size
+        const imgRect = img.getBoundingClientRect();
+        if (canvas.width !== imgRect.width || canvas.height !== imgRect.height) {
+            canvas.width = imgRect.width;
+            canvas.height = imgRect.height;
+        }
+
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Calculate scale factors
-        const scaleX = canvas.width / (img.naturalWidth || 640);
-        const scaleY = canvas.height / (img.naturalHeight || 480);
+        // Calculate scale factors based on actual image size
+        const scaleX = canvas.width / img.naturalWidth;
+        const scaleY = canvas.height / img.naturalHeight;
 
         // Draw each tag
         data.tags.forEach(tag => {

@@ -105,17 +105,32 @@ bool Camera::open_camera() {
         if (i != device_index) scan_order.push_back(i);
     }
 
+    std::cout << "[Camera " << id_ << "] Scanning for devices (preferred: /dev/video"
+              << device_index << ")..." << std::endl;
+
     for (int idx : scan_order) {
         std::string dev_path = "/dev/video" + std::to_string(idx);
-        if (!fs::exists(dev_path)) continue;
+        if (!fs::exists(dev_path)) {
+            if (idx == device_index) {
+                std::cerr << "[Camera " << id_ << "] Configured device " << dev_path
+                          << " does NOT exist!" << std::endl;
+            }
+            continue;
+        }
 
         // Check if already claimed by another camera
         {
             std::lock_guard<std::mutex> lock(opened_devices_mutex);
             if (opened_devices.find(idx) != opened_devices.end()) {
+                if (idx == device_index) {
+                    std::cerr << "[Camera " << id_ << "] Device " << dev_path
+                              << " already in use by another camera" << std::endl;
+                }
                 continue;
             }
         }
+
+        std::cout << "[Camera " << id_ << "] Trying " << dev_path << "..." << std::endl;
 
         // Try to open with V4L2
         cap_.open(idx, cv::CAP_V4L2);
@@ -132,13 +147,18 @@ bool Camera::open_camera() {
             opened_device_index_ = idx;
 
             if (idx == device_index) {
-                std::cout << "[Camera " << id_ << "] Opened configured device /dev/video"
+                std::cout << "[Camera " << id_ << "] ✓ Opened configured device /dev/video"
                           << idx << std::endl;
             } else {
-                std::cout << "[Camera " << id_ << "] Opened /dev/video"
+                std::cout << "[Camera " << id_ << "] ✓ Opened /dev/video"
                           << idx << " (auto-detected)" << std::endl;
             }
             return true;
+        } else {
+            if (idx == device_index) {
+                std::cerr << "[Camera " << id_ << "] ✗ Failed to open " << dev_path
+                          << " (permissions or not a capture device?)" << std::endl;
+            }
         }
     }
 
@@ -309,9 +329,19 @@ void Camera::capture_loop() {
         fps_frame_count_ = 0;
         uint64_t local_frame_count = 0;
         int consecutive_failures = 0;
+        auto last_good_frame = SteadyClock::now();
 
         // Capture loop - runs until camera disconnects or shutdown
         while (!should_stop_.load()) {
+            // Watchdog: If no frames for 10 seconds, assume camera hung
+            auto now = SteadyClock::now();
+            auto time_since_frame = std::chrono::duration<double>(now - last_good_frame).count();
+            if (time_since_frame > 10.0) {
+                std::cerr << "[Camera " << id_ << "] Watchdog timeout: No frames for "
+                          << time_since_frame << "s, reconnecting..." << std::endl;
+                break;  // Break inner loop to reconnect
+            }
+
             // grab() can sometimes hang on a dead USB bus. We detect that
             // via the consecutive_failures counter and reconnect.
             if (!cap_.grab()) {
@@ -330,6 +360,7 @@ void Camera::capture_loop() {
             }
 
             consecutive_failures = 0;
+            last_good_frame = SteadyClock::now();
 
             auto capture_time = SteadyClock::now();
             auto capture_wall = SystemClock::now();
