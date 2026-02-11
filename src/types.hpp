@@ -246,6 +246,10 @@ struct FrameDetections {
     uint64_t frame_number = 0;
     Timestamps timestamps;
 
+    // Original image dimensions (for correct JS overlay scaling)
+    int image_width = 0;
+    int image_height = 0;
+
     std::vector<TagDetection> detections;
 
     // Multi-tag pose (if >= 2 tags visible)
@@ -586,6 +590,11 @@ struct SystemStatus {
     // Fused pose stats
     double fused_fps = 0;
     bool fused_pose_valid = false;
+
+    // NetworkTables connection status (for WebUI display)
+    bool nt_connected = false;
+    int nt_connection_count = 0;
+    std::string nt_server_ip;
 };
 
 // =============================================================================

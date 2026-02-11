@@ -254,8 +254,8 @@ class VisionDashboard {
             }
         });
 
-        // Show overlay toggle
-        const overlayToggle = document.getElementById('show-overlay');
+        // Show overlay toggle (matches id="overlay-toggle" in HTML)
+        const overlayToggle = document.getElementById('overlay-toggle');
         if (overlayToggle) {
             overlayToggle.addEventListener('change', (e) => {
                 this.showOverlay = e.target.checked;
@@ -384,20 +384,22 @@ class VisionDashboard {
         const ntConnCount = data.nt_connection_count || 0;
         const serverIp = data.nt_server_ip || '';
 
-        if (isNTConnected && ntConnCount > 0) {
-            ntStatusText.textContent = 'Connected';
-            ntStatus.classList.remove('disconnected');
-            ntStatus.classList.add('connected');
-            if (serverIp && serverIp !== 'disconnected') {
-                ntServerIp.textContent = `(${serverIp})`;
-            } else {
-                ntServerIp.textContent = '';
+        if (isNTConnected) {
+            if (ntStatusText) ntStatusText.textContent = 'Connected';
+            if (ntStatus) {
+                ntStatus.classList.remove('disconnected');
+                ntStatus.classList.add('connected');
+            }
+            if (ntServerIp) {
+                ntServerIp.textContent = (serverIp && serverIp !== 'disconnected') ? `(${serverIp})` : '';
             }
         } else {
-            ntStatusText.textContent = 'Disconnected';
-            ntStatus.classList.remove('connected');
-            ntStatus.classList.add('disconnected');
-            ntServerIp.textContent = '';
+            if (ntStatusText) ntStatusText.textContent = 'Disconnected';
+            if (ntStatus) {
+                ntStatus.classList.remove('connected');
+                ntStatus.classList.add('disconnected');
+            }
+            if (ntServerIp) ntServerIp.textContent = '';
         }
     }
 
@@ -524,9 +526,14 @@ class VisionDashboard {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Calculate scale factors based on actual image size
-        const scaleX = canvas.width / img.naturalWidth;
-        const scaleY = canvas.height / img.naturalHeight;
+        // Calculate scale factors using ORIGINAL camera resolution (not stream resolution).
+        // The MJPEG stream is 320x240 but corner coordinates from SSE are in the
+        // original camera resolution (e.g., 640x480). Using img.naturalWidth would
+        // give 320 and cause 2x position error.
+        const origWidth = data.image_width || img.naturalWidth;
+        const origHeight = data.image_height || img.naturalHeight;
+        const scaleX = canvas.width / origWidth;
+        const scaleY = canvas.height / origHeight;
 
         // Draw each tag
         data.tags.forEach(tag => {
@@ -834,28 +841,34 @@ function showTestMode(modeName, instructions) {
     const instrEl = document.getElementById('test-instructions');
     const stopBtn = document.getElementById('stop-test-mode');
 
-    modeEl.textContent = modeName;
-    instrEl.textContent = instructions;
-    statusEl.style.display = 'block';
-    stopBtn.style.display = 'block';
+    if (modeEl) modeEl.textContent = modeName;
+    if (instrEl) instrEl.textContent = instructions;
+    if (statusEl) statusEl.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'inline-block';
 
     // Hide start buttons
-    document.getElementById('start-calibration-mode').style.display = 'none';
-    document.getElementById('start-validation-mode').style.display = 'none';
-    document.getElementById('start-diagnostics').style.display = 'none';
+    const calBtn = document.getElementById('start-calibration-mode');
+    const valBtn = document.getElementById('start-validation-mode');
+    const diagBtn = document.getElementById('start-diagnostics');
+    if (calBtn) calBtn.style.display = 'none';
+    if (valBtn) valBtn.style.display = 'none';
+    if (diagBtn) diagBtn.style.display = 'none';
 }
 
 function hideTestMode() {
     const statusEl = document.getElementById('test-mode-status');
     const stopBtn = document.getElementById('stop-test-mode');
 
-    statusEl.style.display = 'none';
-    stopBtn.style.display = 'none';
+    if (statusEl) statusEl.style.display = 'none';
+    if (stopBtn) stopBtn.style.display = 'none';
 
     // Show start buttons
-    document.getElementById('start-calibration-mode').style.display = 'block';
-    document.getElementById('start-validation-mode').style.display = 'block';
-    document.getElementById('start-diagnostics').style.display = 'block';
+    const calBtn = document.getElementById('start-calibration-mode');
+    const valBtn = document.getElementById('start-validation-mode');
+    const diagBtn = document.getElementById('start-diagnostics');
+    if (calBtn) calBtn.style.display = 'inline-block';
+    if (valBtn) valBtn.style.display = 'inline-block';
+    if (diagBtn) diagBtn.style.display = 'inline-block';
 }
 
 // Auto-align controls
@@ -998,11 +1011,20 @@ function updateAutoAlignStatus(data) {
     }
 }
 
-// Hook into existing SSE update
-const originalUpdateStatus = app.updateStatus.bind(app);
-app.updateStatus = function(data) {
-    originalUpdateStatus(data);
-    updateAutoAlignStatus(data);
-};
+// Hook auto-align status updates into the dashboard's handleStatus method.
+// Must wait for DOMContentLoaded since window.dashboard is created there.
+document.addEventListener('DOMContentLoaded', () => {
+    // Small delay to ensure dashboard is fully constructed
+    setTimeout(() => {
+        if (window.dashboard && typeof window.dashboard.handleStatus === 'function') {
+            const originalHandleStatus = window.dashboard.handleStatus.bind(window.dashboard);
+            window.dashboard.handleStatus = function(data) {
+                originalHandleStatus(data);
+                updateAutoAlignStatus(data);
+            };
+            console.log('Phase 3 auto-align hook installed');
+        }
+    }, 100);
+});
 
 console.log('Phase 3 auto-align & testing controls initialized');

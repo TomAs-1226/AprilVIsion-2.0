@@ -15,6 +15,7 @@
             <span id="status-temp">🌡 --°C</span>
             <span id="status-nt" class="status-indicator disconnected">
                 NT: <span id="nt-status-text">Disconnected</span>
+                <span id="nt-server-ip" style="font-size:0.8em;"></span>
             </span>
             <span id="status-clients">👥 0</span>
         </div>
@@ -146,17 +147,23 @@
             </div>
         </aside>
 
+        <!-- Test Mode Status Banner (hidden by default) -->
+        <div id="test-mode-status" style="display:none; background:#1a1a2e; border:1px solid #e94560; padding:8px 12px; margin:4px 0; border-radius:4px;">
+            <strong id="current-test-mode" style="color:#e94560;">--</strong>
+            <span id="test-instructions" style="color:#ccc; margin-left:8px; font-size:0.9em;">--</span>
+        </div>
+
         <!-- Bottom Controls -->
         <section class="bottom-controls">
             <div class="control-group">
-                <label>🔧 Test:</label>
+                <label>Test:</label>
                 <button id="start-calibration-mode">Calibration</button>
                 <button id="start-validation-mode">Validation</button>
                 <button id="start-diagnostics">Diagnostics</button>
                 <button id="stop-test-mode" class="danger" style="display:none;">Stop</button>
             </div>
             <div class="control-group">
-                <label>📡:</label>
+                <label>Config:</label>
                 <button id="reload-config">Reload Config</button>
             </div>
             <div class="control-group">

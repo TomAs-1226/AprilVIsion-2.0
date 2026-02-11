@@ -468,6 +468,10 @@ int main(int argc, char* argv[]) {
                     // This is the core computation - maximize CPU here.
                     auto processed = pipeline.process_frame(frame, intr, cam_to_robot);
 
+                    // Set original image dimensions for correct JS overlay scaling
+                    processed.detections.image_width = frame.image.cols;
+                    processed.detections.image_height = frame.image.rows;
+
                     // Always push detections (lightweight JSON) and NT data
                     web_server.push_detections(processed.detections);
                     nt_publisher.publish_camera(i, processed.detections);
@@ -626,6 +630,9 @@ int main(int argc, char* argv[]) {
 
             g_cameras_connected.store(connected_count);
             status.fused_pose_valid = pipeline.get_fused_pose().valid;
+
+            // NT connection status for WebUI display
+            status.nt_connected = nt_publisher.is_connected();
 
             // Push to NT and web
             nt_publisher.publish_status(status);

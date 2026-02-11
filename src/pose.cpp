@@ -518,41 +518,74 @@ DistanceEstimate PoseEstimator::compute_distance_estimate(
         est.pnp_pinhole_agreement = 0.5;  // Neutral if no PnP
     }
 
-    // Fuse distances with weighted average based on confidence
-    // Priority: PnP > pinhole > edge methods
+    // Fuse ALL distance methods with adaptive weighting.
+    // PhotonVision-style: PnP is primary, cross-validated with geometric methods.
     double total_weight = 0.0;
     double weighted_sum = 0.0;
 
-    if (detection.pose_valid && est.distance_pnp > 0.01 &&
-        detection.reprojection_error < 2.0) {
-        // Trust PnP more when reprojection error is low
-        double pnp_weight = 0.7;
+    // Method 1: PnP distance (most accurate when reprojection error is low)
+    if (detection.pose_valid && est.distance_pnp > 0.05 && est.distance_pnp < 12.0) {
+        // Weight decreases with reprojection error
+        double reproj_quality = std::exp(-detection.reprojection_error * 0.5);
+        double pnp_weight = 0.6 * reproj_quality;
+        pnp_weight *= (1.0 - 0.5 * detection.ambiguity);
+        pnp_weight = std::max(0.05, pnp_weight);
         weighted_sum += est.distance_pnp * pnp_weight;
         total_weight += pnp_weight;
     }
 
-    if (est.distance_pinhole > 0.01 && est.distance_pinhole < 20.0) {
-        // Pinhole model is robust
-        double pinhole_weight = 0.3;
-        weighted_sum += est.distance_pinhole * pinhole_weight;
-        total_weight += pinhole_weight;
+    // Method 2: Pinhole model from average edge (robust, always available)
+    if (est.distance_pinhole > 0.05 && est.distance_pinhole < 12.0) {
+        weighted_sum += est.distance_pinhole * 0.25;
+        total_weight += 0.25;
+    }
+
+    // Method 3: Vertical edges (robust to horizontal viewing angle)
+    if (est.distance_vertical_edges > 0.05 && est.distance_vertical_edges < 12.0) {
+        double horiz_foreshortening = (est.distance_pinhole > 0.05) ?
+            std::abs(est.distance_horizontal_edges - est.distance_pinhole) / est.distance_pinhole : 0.0;
+        double vert_weight = 0.1 + 0.1 * std::min(1.0, horiz_foreshortening * 5.0);
+        weighted_sum += est.distance_vertical_edges * vert_weight;
+        total_weight += vert_weight;
+    }
+
+    // Method 4: Horizontal edges (robust to vertical viewing angle)
+    if (est.distance_horizontal_edges > 0.05 && est.distance_horizontal_edges < 12.0) {
+        double vert_foreshortening = (est.distance_pinhole > 0.05) ?
+            std::abs(est.distance_vertical_edges - est.distance_pinhole) / est.distance_pinhole : 0.0;
+        double horiz_weight = 0.1 + 0.1 * std::min(1.0, vert_foreshortening * 5.0);
+        weighted_sum += est.distance_horizontal_edges * horiz_weight;
+        total_weight += horiz_weight;
     }
 
     if (total_weight > 0.0) {
         est.distance_fused = weighted_sum / total_weight;
     } else {
-        // Fallback
-        est.distance_fused = est.distance_pinhole > 0.01 ? est.distance_pinhole : 10.0;
+        est.distance_fused = est.distance_pinhole > 0.05 ? est.distance_pinhole : 10.0;
     }
 
-    // Overall confidence based on agreement
-    est.confidence = est.pnp_pinhole_agreement * 0.6 + est.edge_consistency * 0.4;
+    // Overall confidence: agreement between all methods
+    est.confidence = est.pnp_pinhole_agreement * 0.5 + est.edge_consistency * 0.3;
+    if (est.pnp_pinhole_agreement > 0.8 && est.edge_consistency > 0.8) {
+        est.confidence = std::min(1.0, est.confidence + 0.2);
+    }
 
-    // Check consistency threshold
-    est.is_consistent = (est.confidence > 0.7) &&
-                        (vert_horiz_diff < 0.5) &&
-                        (detection.pose_valid ?
-                         std::abs(est.distance_pnp - est.distance_pinhole) < 0.5 : true);
+    // Consistency check using spread across all valid methods
+    std::vector<double> valid_distances;
+    if (est.distance_pnp > 0.05) valid_distances.push_back(est.distance_pnp);
+    if (est.distance_pinhole > 0.05) valid_distances.push_back(est.distance_pinhole);
+    if (est.distance_vertical_edges > 0.05) valid_distances.push_back(est.distance_vertical_edges);
+    if (est.distance_horizontal_edges > 0.05) valid_distances.push_back(est.distance_horizontal_edges);
+
+    double max_method_spread = 0.0;
+    if (valid_distances.size() >= 2) {
+        double min_d = *std::min_element(valid_distances.begin(), valid_distances.end());
+        double max_d = *std::max_element(valid_distances.begin(), valid_distances.end());
+        max_method_spread = max_d - min_d;
+    }
+
+    est.is_consistent = (est.confidence > 0.5) &&
+                        (max_method_spread < std::max(0.5, est.distance_fused * 0.2));
 
     return est;
 }

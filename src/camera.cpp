@@ -118,7 +118,10 @@ bool Camera::open_camera() {
             continue;
         }
 
-        // Check if already claimed by another camera
+        // ATOMIC claim-before-open: Reserve the device BEFORE trying to open it.
+        // This prevents the TOCTOU race where two camera threads both find a
+        // device unclaimed and then both try to open it simultaneously.
+        bool claimed = false;
         {
             std::lock_guard<std::mutex> lock(opened_devices_mutex);
             if (opened_devices.find(idx) != opened_devices.end()) {
@@ -128,6 +131,9 @@ bool Camera::open_camera() {
                 }
                 continue;
             }
+            // Claim it now, before opening
+            opened_devices.insert(idx);
+            claimed = true;
         }
 
         std::cout << "[Camera " << id_ << "] Trying " << dev_path << "..." << std::endl;
@@ -139,24 +145,24 @@ bool Camera::open_camera() {
         }
 
         if (cap_.isOpened()) {
-            // Claim this device
-            {
-                std::lock_guard<std::mutex> lock(opened_devices_mutex);
-                opened_devices.insert(idx);
-            }
             opened_device_index_ = idx;
 
             if (idx == device_index) {
-                std::cout << "[Camera " << id_ << "] ✓ Opened configured device /dev/video"
+                std::cout << "[Camera " << id_ << "] Opened configured device /dev/video"
                           << idx << std::endl;
             } else {
-                std::cout << "[Camera " << id_ << "] ✓ Opened /dev/video"
+                std::cout << "[Camera " << id_ << "] Opened /dev/video"
                           << idx << " (auto-detected)" << std::endl;
             }
             return true;
         } else {
+            // Open failed - release the claim so other cameras can try this device
+            if (claimed) {
+                std::lock_guard<std::mutex> lock(opened_devices_mutex);
+                opened_devices.erase(idx);
+            }
             if (idx == device_index) {
-                std::cerr << "[Camera " << id_ << "] ✗ Failed to open " << dev_path
+                std::cerr << "[Camera " << id_ << "] Failed to open " << dev_path
                           << " (permissions or not a capture device?)" << std::endl;
             }
         }
@@ -474,8 +480,10 @@ int CameraManager::initialize(const std::vector<CameraConfig>& configs) {
         cam->start();  // Launches capture thread - doesn't block long
         cameras_.push_back(std::move(cam));
 
-        // Small delay between starts so cameras don't race for the same device
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        // Delay between starts to let each camera claim its device.
+        // USB cameras can take 1-2s to fully open, so 1s gives enough time
+        // for the atomic claim-before-open logic to prevent conflicts.
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
     // Count how many connected

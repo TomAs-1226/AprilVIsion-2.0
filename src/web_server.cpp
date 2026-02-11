@@ -40,6 +40,11 @@ public:
     // SSE client management
     std::atomic<int> sse_client_count{0};
 
+    // Current test mode state
+    std::atomic<int> current_mode{0}; // 0=normal, 1=calibration, 2=validation, 3=diagnostics
+    std::string current_mode_name = "normal";
+    std::mutex mode_mutex;
+
     // Configuration
     int num_cameras = 0;
     std::string web_root;
@@ -729,33 +734,63 @@ bool WebServer::initialize(int port, const std::string& web_root,
     // Testing Mode Endpoints (Calibration, Validation, Diagnostics)
     // ==========================================================================
 
-    impl_->server.Post("/api/mode/calibration", [](const httplib::Request&, httplib::Response& res) {
+    impl_->server.Post("/api/mode/calibration", [this](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
+        {
+            std::lock_guard<std::mutex> lock(impl_->mode_mutex);
+            impl_->current_mode.store(1);
+            impl_->current_mode_name = "calibration";
+        }
         std::cout << "[WebServer] Starting calibration mode..." << std::endl;
-        res.set_content("{\"success\": true, \"message\": \"Calibration mode started\"}", "application/json");
+        res.set_content("{\"success\": true, \"mode\": \"calibration\", \"message\": \"Calibration mode started. Point camera at ChArUco board.\"}", "application/json");
     });
 
-    impl_->server.Post("/api/mode/validation", [](const httplib::Request&, httplib::Response& res) {
+    impl_->server.Post("/api/mode/validation", [this](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
+        {
+            std::lock_guard<std::mutex> lock(impl_->mode_mutex);
+            impl_->current_mode.store(2);
+            impl_->current_mode_name = "validation";
+        }
         std::cout << "[WebServer] Starting validation mode..." << std::endl;
-        res.set_content("{\"success\": true, \"message\": \"Validation mode started\"}", "application/json");
+        res.set_content("{\"success\": true, \"mode\": \"validation\", \"message\": \"Validation mode started. Place tag at 1.5m.\"}", "application/json");
     });
 
-    impl_->server.Post("/api/mode/diagnostics", [](const httplib::Request&, httplib::Response& res) {
+    impl_->server.Post("/api/mode/diagnostics", [this](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
+        {
+            std::lock_guard<std::mutex> lock(impl_->mode_mutex);
+            impl_->current_mode.store(3);
+            impl_->current_mode_name = "diagnostics";
+        }
         std::cout << "[WebServer] Running diagnostics..." << std::endl;
-        // Log system diagnostics
-        std::cout << "  Camera status check..." << std::endl;
-        std::cout << "  NetworkTables connectivity..." << std::endl;
-        std::cout << "  Performance metrics..." << std::endl;
-        std::cout << "  Diagnostics complete!" << std::endl;
-        res.set_content("{\"success\": true, \"message\": \"Diagnostics completed\"}", "application/json");
+        res.set_content("{\"success\": true, \"mode\": \"diagnostics\", \"message\": \"Diagnostics running.\"}", "application/json");
     });
 
-    impl_->server.Post("/api/mode/stop", [](const httplib::Request&, httplib::Response& res) {
+    // Both /api/mode/stop and /api/mode/normal return to normal mode
+    auto stop_mode_handler = [this](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
-        std::cout << "[WebServer] Stopping test mode..." << std::endl;
-        res.set_content("{\"success\": true, \"message\": \"Test mode stopped\"}", "application/json");
+        {
+            std::lock_guard<std::mutex> lock(impl_->mode_mutex);
+            impl_->current_mode.store(0);
+            impl_->current_mode_name = "normal";
+        }
+        std::cout << "[WebServer] Returning to normal mode." << std::endl;
+        res.set_content("{\"success\": true, \"mode\": \"normal\", \"message\": \"Returned to normal mode.\"}", "application/json");
+    };
+    impl_->server.Post("/api/mode/stop", stop_mode_handler);
+    impl_->server.Post("/api/mode/normal", stop_mode_handler);
+
+    // GET current mode status
+    impl_->server.Get("/api/mode", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        json j;
+        {
+            std::lock_guard<std::mutex> lock(impl_->mode_mutex);
+            j["mode"] = impl_->current_mode_name;
+            j["mode_id"] = impl_->current_mode.load();
+        }
+        res.set_content(j.dump(), "application/json");
     });
 
     // CORS preflight
@@ -824,6 +859,11 @@ void WebServer::push_detections(const FrameDetections& detections) {
     j["timestamp"] = std::chrono::duration<double>(
         detections.timestamps.capture_wall.time_since_epoch()).count();
     j["latency_ms"] = detections.timestamps.total_pipeline_ms();
+
+    // Send original image dimensions so JS overlay can scale correctly.
+    // The MJPEG stream is 320x240 but corners are in original resolution.
+    j["image_width"] = detections.image_width;
+    j["image_height"] = detections.image_height;
 
     j["tags"] = json::array();
     for (const auto& det : detections.detections) {
@@ -981,6 +1021,17 @@ void WebServer::push_status(const SystemStatus& status) {
     j["fused_fps"] = status.fused_fps;
     j["fused_valid"] = status.fused_pose_valid;
     j["sse_clients"] = impl_->sse_client_count.load();
+
+    // NT connection status (so JS can display it)
+    j["nt_connected"] = status.nt_connected;
+    j["nt_connection_count"] = status.nt_connection_count;
+    j["nt_server_ip"] = status.nt_server_ip;
+
+    // Current test mode
+    {
+        std::lock_guard<std::mutex> lock(impl_->mode_mutex);
+        j["current_mode"] = impl_->current_mode_name;
+    }
 
     impl_->latest_status_json.set(j.dump());
 }
