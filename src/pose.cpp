@@ -216,10 +216,17 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
             return result;
         }
 
-        // Transform: camera_to_field = tag_to_field * camera_to_tag
+        // CRITICAL FIX: Convert camera_to_tag from OpenCV to FRC BEFORE composing!
+        // field_tag.pose_field is in FRC coordinates, but camera_to_tag is in OpenCV coordinates
+        // We MUST convert camera_to_tag to FRC first, otherwise angles are completely wrong
         const auto& field_tag = field_.get_tag(det_with_pose.id);
-        Pose3D camera_to_tag = det_with_pose.tag_to_camera.inverse();
-        result.camera_to_field = field_tag.pose_field.compose(camera_to_tag);
+        Pose3D camera_to_tag_opencv = det_with_pose.tag_to_camera.inverse();
+
+        // Convert camera_to_tag from OpenCV coords to FRC coords
+        Pose3D camera_to_tag_frc = pose_utils::opencv_camera_to_frc_field(camera_to_tag_opencv);
+
+        // NOW we can safely compose (both in FRC coords)
+        result.camera_to_field = field_tag.pose_field.compose(camera_to_tag_frc);
 
         result.reprojection_error = det_with_pose.reprojection_error;
         result.tags_used = 1;
@@ -303,10 +310,14 @@ PoseEstimator::MultiTagResult PoseEstimator::estimate_multi_tag(
             );
         }
 
-        // This gives us field_to_camera (world points in field frame)
-        // We want camera_to_field
-        Pose3D field_to_camera = Pose3D::from_rvec_tvec(rvec, tvec);
-        result.camera_to_field = field_to_camera.inverse();
+        // CRITICAL FIX: PnP gives field_to_camera where camera is in OpenCV coords
+        // The object_points are in FRC field coords, but PnP works with OpenCV camera
+        // So field_to_camera represents: FRC_field -> OpenCV_camera
+        Pose3D field_to_camera_opencv = Pose3D::from_rvec_tvec(rvec, tvec);
+        Pose3D camera_to_field_opencv = field_to_camera_opencv.inverse();
+
+        // Convert from OpenCV camera coords to FRC coords
+        result.camera_to_field = pose_utils::opencv_camera_to_frc_field(camera_to_field_opencv);
 
         // Calculate reprojection error
         result.reprojection_error = calculate_reprojection_error(
@@ -371,19 +382,21 @@ Pose2D PoseEstimator::camera_to_robot_pose(
     const Pose3D& camera_to_field,
     const Pose3D& camera_to_robot)
 {
-    // Phase 1/2: Enhanced coordinate system handling with proper FRC transforms
-    // robot_to_field = camera_to_field * robot_to_camera
-    // where robot_to_camera = camera_to_robot^-1
-    Pose3D robot_to_camera = camera_to_robot.inverse();
-    Pose3D robot_to_field_opencv = camera_to_field.compose(robot_to_camera);
+    // CRITICAL FIX: camera_to_field is now in FRC coords (after earlier fix)
+    // But camera_to_robot is in OpenCV coords (from camera extrinsics config)
+    // We MUST convert camera_to_robot to FRC before composing!
 
-    // Transform from OpenCV coordinates to FRC field coordinates
-    // This is CRITICAL for correct angle measurements!
-    // OpenCV: X-right, Y-down, Z-forward
-    // FRC: X-downfield, Y-left, Z-up
-    Pose3D robot_to_field_frc = pose_utils::opencv_camera_to_frc_field(robot_to_field_opencv);
+    // Convert camera_to_robot from OpenCV to FRC coords
+    Pose3D camera_to_robot_frc = pose_utils::opencv_camera_to_frc_field(camera_to_robot);
 
-    // Extract 2D pose with robust angle extraction and gimbal lock handling
+    // Now compute robot_to_camera in FRC coords
+    Pose3D robot_to_camera_frc = camera_to_robot_frc.inverse();
+
+    // Compose: robot_to_field = camera_to_field * robot_to_camera
+    // Both are now in FRC coords, so composition is valid
+    Pose3D robot_to_field_frc = camera_to_field.compose(robot_to_camera_frc);
+
+    // Extract 2D pose (already in FRC coords)
     Pose2D result = pose_utils::extract_robot_pose_2d(robot_to_field_frc);
 
     return result;
