@@ -104,6 +104,40 @@ check_root() {
     fi
 }
 
+check_os_compatibility() {
+    log_info "Checking OS compatibility..."
+
+    # Check for Debian-based distro (required for apt-get)
+    if ! command -v apt-get &> /dev/null; then
+        log_error "This script requires a Debian-based Linux distribution (Ubuntu, Debian, Raspberry Pi OS, Armbian, etc.)"
+        log_error "Your system does not have apt-get. Please install dependencies manually or use a supported distro."
+        exit 1
+    fi
+
+    # Read distro info if available
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        log_success "Detected OS: ${PRETTY_NAME:-$ID}"
+
+        case "$ID" in
+            ubuntu|debian|raspbian|linuxmint|pop|armbian)
+                log_success "OS $ID is fully supported"
+                ;;
+            *)
+                # Has apt-get but not a known distro - warn but continue
+                if [[ "$ID_LIKE" == *"debian"* ]] || [[ "$ID_LIKE" == *"ubuntu"* ]]; then
+                    log_success "OS $ID (Debian-based) should be compatible"
+                else
+                    log_warn "OS '$ID' is not officially tested. Proceeding since apt-get is available."
+                    log_warn "If you encounter issues, try Ubuntu 22.04+ or Debian 12+"
+                fi
+                ;;
+        esac
+    else
+        log_warn "Could not detect OS version. Proceeding since apt-get is available."
+    fi
+}
+
 #===============================================================================
 # Parse arguments
 #===============================================================================
@@ -147,10 +181,12 @@ detect_architecture() {
     case "$ARCH" in
         aarch64|arm64)
             PV_JAR_NAME="photonvision-${PV_VERSION}-linuxarm64.jar"
+            JAVA_ARCH="arm64"
             log_success "ARM64 detected - using arm64 PhotonVision JAR"
             ;;
         x86_64|amd64)
             PV_JAR_NAME="photonvision-${PV_VERSION}-linuxx64.jar"
+            JAVA_ARCH="amd64"
             log_success "x86_64 detected - using x64 PhotonVision JAR"
             ;;
         *)
@@ -458,7 +494,7 @@ TimeoutStopSec=10
 Nice=-5
 LimitRTPRIO=99
 LimitMEMLOCK=infinity
-Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64"
+Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk-${JAVA_ARCH}"
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=photonvision
@@ -662,6 +698,7 @@ print_completion() {
 main() {
     print_banner
     check_root
+    check_os_compatibility
     detect_architecture
 
     if $INSTALL_ONLY; then
