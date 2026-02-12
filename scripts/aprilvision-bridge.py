@@ -469,6 +469,35 @@ def _fetch_camera_frame(cam_idx, stream_type="output", timeout=2.5):
     return None
 
 
+def _extract_ws_payloads(payload):
+    """Yield dict payload candidates from PV websocket frames.
+
+    PV versions may emit:
+      - direct dict payloads
+      - envelope payloads containing data/message/payload
+      - list batches of any of the above
+    """
+    if isinstance(payload, list):
+        for item in payload:
+            for d in _extract_ws_payloads(item):
+                yield d
+        return
+
+    if not isinstance(payload, dict):
+        return
+
+    yield payload
+
+    for wrapped_key in ("data", "payload", "message", "results"):
+        wrapped = payload.get(wrapped_key)
+        if isinstance(wrapped, dict):
+            yield wrapped
+        elif isinstance(wrapped, list):
+            for item in wrapped:
+                if isinstance(item, dict):
+                    yield item
+
+
 def _target_poll_loop():
     """Continuously try all data sources in priority order, retrying forever.
 
@@ -607,91 +636,75 @@ def _process_pv_ws_data(data):
       - FPS, latency metrics
       - General settings
     """
-    if not isinstance(data, dict):
-        return
-
-    # Some PV builds wrap payloads in envelopes like
-    # {"event": "x", "data": {...}} or {"payload": {...}}.
-    for wrapped_key in ("data", "payload", "message"):
-        wrapped = data.get(wrapped_key)
-        if isinstance(wrapped, dict) and wrapped:
-            data = wrapped
-            break
-
     with _targets_lock:
-        _latest_targets["last_update"] = time.time()
-        _latest_targets["nt_connected"] = True  # WS is our "connection"
+        had_payload = False
+        for data_item in _extract_ws_payloads(data):
+            had_payload = True
+            _latest_targets["last_update"] = time.time()
+            _latest_targets["nt_connected"] = True  # WS is our "connection"
 
-        # Extract camera/pipeline data from various possible formats
-        # PV sends different shaped data depending on version and event type
+            # Camera configurations (full state dump on connect)
+            cam_data = (data_item.get("cameras") or data_item.get("cameraSettings")
+                        or data_item.get("cameraConfigurations") or data_item.get("configuredCameras"))
 
-        # Camera configurations (full state dump on connect)
-        cam_data = (data.get("cameras") or data.get("cameraSettings")
-                    or data.get("cameraConfigurations") or data.get("configuredCameras"))
+            if cam_data:
+                if isinstance(cam_data, dict):
+                    for cam_name, cam_conf in cam_data.items():
+                        _update_camera_from_ws(cam_name, cam_conf)
+                elif isinstance(cam_data, list):
+                    for i, cam_conf in enumerate(cam_data):
+                        cam_name = (cam_conf.get("nickname") or cam_conf.get("uniqueName")
+                                    or cam_conf.get("name") or f"Camera_{i}")
+                        _update_camera_from_ws(cam_name, cam_conf)
 
-        if cam_data:
-            if isinstance(cam_data, dict):
-                # {cameraName: configObject, ...}
-                for cam_name, cam_conf in cam_data.items():
-                    _update_camera_from_ws(cam_name, cam_conf)
-            elif isinstance(cam_data, list):
-                for i, cam_conf in enumerate(cam_data):
-                    cam_name = (cam_conf.get("nickname") or cam_conf.get("uniqueName")
-                                or cam_conf.get("name") or f"Camera_{i}")
-                    _update_camera_from_ws(cam_name, cam_conf)
-
-        # Per-camera result updates (incremental)
-        # Support both single result dicts and batched arrays/maps.
-        for key in ("cameraResult", "result", "pipelineResult", "cameraResults", "pipelineResults", "results"):
-            result = data.get(key)
-            if not result:
-                continue
-            if isinstance(result, dict):
-                # Either a direct result, or a map of camera->result.
-                if any(k in result for k in ("targets", "trackedTargets", "hasTarget", "bestFiducialId", "fiducialId")):
-                    cam_name = (result.get("cameraName") or result.get("nickname")
-                                or result.get("camera") or f"Camera_{result.get('cameraIndex', 0)}")
-                    _update_result_from_ws(cam_name, result)
-                else:
-                    for cam_name, cam_result in result.items():
+            # Per-camera result updates (incremental)
+            for key in ("cameraResult", "result", "pipelineResult", "cameraResults", "pipelineResults", "results"):
+                result = data_item.get(key)
+                if not result:
+                    continue
+                if isinstance(result, dict):
+                    if any(k in result for k in ("targets", "trackedTargets", "hasTarget", "bestFiducialId", "fiducialId", "fiducialID")):
+                        cam_name = (result.get("cameraName") or result.get("nickname")
+                                    or result.get("camera") or f"Camera_{result.get('cameraIndex', 0)}")
+                        _update_result_from_ws(cam_name, result)
+                    else:
+                        for cam_name, cam_result in result.items():
+                            if isinstance(cam_result, dict):
+                                _update_result_from_ws(str(cam_name), cam_result)
+                elif isinstance(result, list):
+                    for i, cam_result in enumerate(result):
                         if isinstance(cam_result, dict):
-                            _update_result_from_ws(str(cam_name), cam_result)
-            elif isinstance(result, list):
-                for i, cam_result in enumerate(result):
-                    if isinstance(cam_result, dict):
-                        cam_name = (cam_result.get("cameraName") or cam_result.get("nickname")
-                                    or cam_result.get("camera") or f"Camera_{cam_result.get('cameraIndex', i)}")
-                        _update_result_from_ws(cam_name, cam_result)
+                            cam_name = (cam_result.get("cameraName") or cam_result.get("nickname")
+                                        or cam_result.get("camera") or f"Camera_{cam_result.get('cameraIndex', i)}")
+                            _update_result_from_ws(cam_name, cam_result)
 
-        # FPS and latency metrics
-        fps = data.get("fps")
-        latency = data.get("latency") or data.get("latencyMillis")
-        if fps is not None or latency is not None:
-            # Apply to all known cameras or a specific one
-            cam_name = data.get("cameraName") or data.get("camera")
-            if cam_name and cam_name in _latest_targets["cameras"]:
-                if fps is not None:
-                    _latest_targets["cameras"][cam_name]["fps"] = round(float(fps), 1)
-                if latency is not None:
-                    _latest_targets["cameras"][cam_name]["latencyMs"] = round(float(latency), 1)
-            else:
-                # Broadcast to all cameras
-                for cam in _latest_targets["cameras"].values():
+            fps = data_item.get("fps")
+            latency = data_item.get("latency") or data_item.get("latencyMillis")
+            if fps is not None or latency is not None:
+                cam_name = data_item.get("cameraName") or data_item.get("camera")
+                if cam_name and cam_name in _latest_targets["cameras"]:
                     if fps is not None:
-                        cam["fps"] = round(float(fps), 1)
+                        _latest_targets["cameras"][cam_name]["fps"] = round(float(fps), 1)
                     if latency is not None:
-                        cam["latencyMs"] = round(float(latency), 1)
+                        _latest_targets["cameras"][cam_name]["latencyMs"] = round(float(latency), 1)
+                else:
+                    for cam in _latest_targets["cameras"].values():
+                        if fps is not None:
+                            cam["fps"] = round(float(fps), 1)
+                        if latency is not None:
+                            cam["latencyMs"] = round(float(latency), 1)
 
-        # General settings that may contain useful info
-        general = data.get("generalSettings") or data.get("general")
-        if general and isinstance(general, dict):
-            _latest_targets.setdefault("_pv_settings", {}).update(general)
+            general = data_item.get("generalSettings") or data_item.get("general")
+            if general and isinstance(general, dict):
+                _latest_targets.setdefault("_pv_settings", {}).update(general)
 
-        # Current camera/pipeline index changes
-        if "currentCamera" in data:
-            _latest_targets["_currentCamera"] = data["currentCamera"]
-        if "currentPipeline" in data:
-            _latest_targets["_currentPipeline"] = data["currentPipeline"]
+            if "currentCamera" in data_item:
+                _latest_targets["_currentCamera"] = data_item["currentCamera"]
+            if "currentPipeline" in data_item:
+                _latest_targets["_currentPipeline"] = data_item["currentPipeline"]
+
+        if not had_payload:
+            return
 
 
 def _update_camera_from_ws(cam_name, cam_conf):

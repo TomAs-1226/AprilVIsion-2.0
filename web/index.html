@@ -1587,6 +1587,7 @@
             this.uptimeTimer = null;
             this.dashboardStartTime = Date.now();
             this._cameraRefreshTimers = {};
+            this._frameRefreshTimers = {};
             this._streamRetryBackoff = {};
             // Stream base port for direct connection (bypass proxy)
             this.STREAM_BASE_PORT = 1181;
@@ -3390,8 +3391,35 @@
             const modeEl = document.getElementById('streamMode-' + camIdx);
             if (modeEl) {
                 const src = img.getAttribute('src') || '';
-                modeEl.textContent = src.startsWith('http') ? 'direct' : 'proxy';
+                if (src.indexOf('/api/av/frame/') !== -1) modeEl.textContent = 'frame-fallback';
+                else modeEl.textContent = src.startsWith('http') ? 'direct' : 'proxy';
             }
+
+            // Keep refreshing single-frame fallback so it behaves like video.
+            if (img.getAttribute('src') && img.getAttribute('src').indexOf('/api/av/frame/') !== -1) {
+                this.scheduleFrameRefresh(img, camIdx, streamType);
+            } else {
+                const frameKey = camIdx + '-' + streamType;
+                if (this._frameRefreshTimers[frameKey]) {
+                    clearTimeout(this._frameRefreshTimers[frameKey]);
+                    delete this._frameRefreshTimers[frameKey];
+                }
+            }
+        }
+
+        scheduleFrameRefresh(img, camIdx, streamType) {
+            const frameKey = camIdx + '-' + streamType;
+            if (this._frameRefreshTimers[frameKey]) return;
+            this._frameRefreshTimers[frameKey] = setTimeout(() => {
+                delete this._frameRefreshTimers[frameKey];
+                const frameUrl = img.getAttribute('data-frame-url');
+                if (!frameUrl) return;
+                // Only refresh if still in frame mode and element still attached.
+                if (!document.body.contains(img)) return;
+                const current = img.getAttribute('src') || '';
+                if (current.indexOf('/api/av/frame/') === -1) return;
+                img.src = frameUrl + '?_t=' + Date.now();
+            }, 250);
         }
 
         handleStreamError(img, camIdx, streamType) {
