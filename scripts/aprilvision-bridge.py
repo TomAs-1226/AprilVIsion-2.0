@@ -478,6 +478,14 @@ def _process_pv_ws_data(data):
     if not isinstance(data, dict):
         return
 
+    # Some PV builds wrap payloads in envelopes like
+    # {"event": "x", "data": {...}} or {"payload": {...}}.
+    for wrapped_key in ("data", "payload", "message"):
+        wrapped = data.get(wrapped_key)
+        if isinstance(wrapped, dict) and wrapped:
+            data = wrapped
+            break
+
     with _targets_lock:
         _latest_targets["last_update"] = time.time()
         _latest_targets["nt_connected"] = True  # WS is our "connection"
@@ -501,12 +509,27 @@ def _process_pv_ws_data(data):
                     _update_camera_from_ws(cam_name, cam_conf)
 
         # Per-camera result updates (incremental)
-        for key in ("cameraResult", "result", "pipelineResult"):
+        # Support both single result dicts and batched arrays/maps.
+        for key in ("cameraResult", "result", "pipelineResult", "cameraResults", "pipelineResults", "results"):
             result = data.get(key)
-            if result and isinstance(result, dict):
-                cam_name = (result.get("cameraName") or result.get("nickname")
-                            or result.get("camera") or "Camera_0")
-                _update_result_from_ws(cam_name, result)
+            if not result:
+                continue
+            if isinstance(result, dict):
+                # Either a direct result, or a map of camera->result.
+                if any(k in result for k in ("targets", "trackedTargets", "hasTarget", "bestFiducialId", "fiducialId")):
+                    cam_name = (result.get("cameraName") or result.get("nickname")
+                                or result.get("camera") or f"Camera_{result.get('cameraIndex', 0)}")
+                    _update_result_from_ws(cam_name, result)
+                else:
+                    for cam_name, cam_result in result.items():
+                        if isinstance(cam_result, dict):
+                            _update_result_from_ws(str(cam_name), cam_result)
+            elif isinstance(result, list):
+                for i, cam_result in enumerate(result):
+                    if isinstance(cam_result, dict):
+                        cam_name = (cam_result.get("cameraName") or cam_result.get("nickname")
+                                    or cam_result.get("camera") or f"Camera_{cam_result.get('cameraIndex', i)}")
+                        _update_result_from_ws(cam_name, cam_result)
 
         # FPS and latency metrics
         fps = data.get("fps")
@@ -561,6 +584,7 @@ def _update_camera_from_ws(cam_name, cam_conf):
     calibrated = bool(cals)
 
     existing.update({
+        "cameraIndex": cam_conf.get("cameraIndex", existing.get("cameraIndex", 0)),
         "pipelineName": pipe_name,
         "pipelineType": pipe_type,
         "pipelineIndex": current_idx,
@@ -586,16 +610,34 @@ def _update_result_from_ws(cam_name, result):
     has_target = len(targets) > 0 if isinstance(targets, list) else bool(result.get("hasTarget"))
 
     best_target = targets[0] if targets and isinstance(targets, list) else result
-    best_id = int(best_target.get("fiducialId") or best_target.get("fid") or
-                  best_target.get("bestFiducialId") or -1)
+    try:
+        best_id = int(best_target.get("fiducialId") or best_target.get("fid") or
+                      best_target.get("bestFiducialId") or best_target.get("fiducialID") or -1)
+    except (TypeError, ValueError):
+        best_id = -1
 
     # All detected tag IDs
     all_ids = []
     if isinstance(targets, list):
         for t in targets:
-            fid = t.get("fiducialId") or t.get("fid") or -1
-            if int(fid) >= 0:
-                all_ids.append(int(fid))
+            try:
+                fid = int(t.get("fiducialId") or t.get("fid") or t.get("fiducialID") or -1)
+            except (TypeError, ValueError):
+                fid = -1
+            if fid >= 0:
+                all_ids.append(fid)
+
+    # Some PV payloads include IDs outside targets array.
+    used_ids = (result.get("fiducialIDsUsed") or result.get("fiducialIdsUsed") or
+                result.get("tagIds") or result.get("detectedTagIds"))
+    if isinstance(used_ids, list):
+        for fid in used_ids:
+            try:
+                fid_int = int(fid)
+            except (TypeError, ValueError):
+                continue
+            if fid_int >= 0 and fid_int not in all_ids:
+                all_ids.append(fid_int)
 
     # Best target data
     yaw = float(best_target.get("yaw") or best_target.get("targetYaw") or 0)
@@ -645,6 +687,7 @@ def _update_result_from_ws(cam_name, result):
                 }
 
     existing.update({
+        "cameraIndex": result.get("cameraIndex", existing.get("cameraIndex", 0)),
         "hasTarget": has_target,
         "targetYaw": round(yaw, 2),
         "targetPitch": round(pitch, 2),
@@ -724,7 +767,7 @@ def _poll_ntcore(nt):
                     except Exception:
                         pass
 
-                    for cam_name in subtables:
+                    for cam_idx, cam_name in enumerate(subtables):
                         try:
                             cam_table = pv_table.getSubTable(cam_name)
                             has_target = cam_table.getEntry("hasTarget").getBoolean(False)
@@ -789,6 +832,7 @@ def _poll_ntcore(nt):
                                 pass
 
                             _latest_targets["cameras"][cam_name] = {
+                                "cameraIndex": cam_idx,
                                 "hasTarget": has_target,
                                 "latencyMs": round(latency, 1),
                                 "targetYaw": round(target_yaw, 2),
@@ -845,11 +889,11 @@ def _poll_api_targets():
                             pipe = pipelines[min(current_pipe_idx, len(pipelines) - 1)] if isinstance(current_pipe_idx, int) else pipelines[0]
                             if isinstance(pipe, dict):
                                 _latest_targets["cameras"][cam_name] = {
+                                    "cameraIndex": i,
                                     "hasTarget": False,
                                     "latencyMs": 0,
                                     "pipelineType": pipe.get("pipelineType", "unknown"),
                                     "pipelineName": pipe.get("pipelineNickname", pipe.get("name", f"Pipeline {current_pipe_idx}")),
-                                    "cameraIndex": i,
                                 }
         except Exception:
             pass
@@ -988,7 +1032,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         sock = None
         # cscore MJPEG server paths in order of likelihood
-        stream_paths = ["/stream.mjpg", "/?action=stream", "/"]
+        stream_paths = ["/stream.mjpg", "/stream", "/?action=stream", "/"]
         try:
             # Try each path until we get a 200
             connected = False
@@ -1004,6 +1048,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     request = (
                         f"GET {try_path} HTTP/1.1\r\n"
                         f"Host: {ENGINE_HOST}:{port}\r\n"
+                        f"User-Agent: AprilVision-Bridge/3.2\r\n"
+                        f"Accept: */*\r\n"
+                        f"Connection: keep-alive\r\n"
                         f"\r\n"
                     )
                     sock.sendall(request.encode())
