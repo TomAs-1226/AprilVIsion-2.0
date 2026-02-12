@@ -521,6 +521,25 @@
             z-index: 2;
         }
 
+        .feed-panel .feed-status {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.7);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .feed-panel .feed-status.live { color: var(--accent-green); }
+        .feed-panel .feed-status.connecting { color: var(--accent-yellow); }
+        .feed-panel .feed-status.error { color: var(--accent-red); }
+
         .feed-panel img {
             width: 100%;
             height: 340px;
@@ -531,6 +550,33 @@
 
         .feed-panel + .feed-panel {
             border-left: 1px solid var(--border-color);
+        }
+
+        /* Camera info bar beneath feeds */
+        .camera-info-bar {
+            padding: 10px 18px;
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .camera-info-bar .info-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .camera-info-bar .info-label {
+            color: var(--text-muted);
+        }
+
+        .camera-info-bar .info-value {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-family: 'SFMono-Regular', Consolas, monospace;
         }
 
         /* ===== Calibration ===== */
@@ -938,13 +984,37 @@
             <div class="page" id="page-cameras">
                 <div class="page-header">
                     <h1>Camera Feeds</h1>
-                    <div class="page-desc">Live input (raw) and output (detection overlay) MJPEG streams from connected cameras</div>
+                    <div class="page-desc">Live input (raw) and output (detection overlay) MJPEG streams from the detection engine</div>
                 </div>
+
+                <!-- Stream source explanation -->
+                <div class="alert alert-info" id="cameraSourceBanner">
+                    Streams are sourced from the PhotonVision engine backend. The engine owns the camera devices and serves MJPEG streams which this dashboard proxies.
+                </div>
+
+                <!-- Stream health status -->
+                <div id="streamHealthBar" style="display:none;" class="alert alert-warn"></div>
 
                 <div class="camera-feeds" id="cameraFeedsContainer">
                     <div class="empty-state">
                         <div class="empty-icon">&#128247;</div>
                         <p>Loading camera feeds...</p>
+                    </div>
+                </div>
+
+                <!-- Stream Debug Info (collapsible) -->
+                <div class="panel" style="margin-top: 20px;">
+                    <div class="panel-header" style="cursor:pointer;" onclick="document.getElementById('streamDebugBody').style.display = document.getElementById('streamDebugBody').style.display === 'none' ? 'block' : 'none';">
+                        Stream Debug Info (click to toggle)
+                    </div>
+                    <div class="panel-body" id="streamDebugBody" style="display:none;">
+                        <div class="tool-output" id="streamDebugOutput" style="font-size: 0.75rem; min-height: 60px;">
+                            Click "Check Streams" to probe stream ports.
+                        </div>
+                        <div class="btn-group" style="margin-top: 10px;">
+                            <button class="btn btn-blue" onclick="AVApp.checkStreamHealth()">Check Streams</button>
+                            <button class="btn btn-green" onclick="AVApp.fetchCameraInfo()">Refresh Camera Info</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1150,6 +1220,14 @@
                         <div class="tool-output" id="toolHealthOutput">Waiting...</div>
                     </div>
 
+                    <!-- Stream Port Checker -->
+                    <div class="tool-card">
+                        <h3>&#127909; Stream Health Checker</h3>
+                        <div class="tool-desc">Probe each camera's MJPEG stream ports to verify the engine is serving frames. Shows port status and stream URLs.</div>
+                        <button class="btn btn-blue" onclick="AVApp.toolStreamHealth()">Check Stream Ports</button>
+                        <div class="tool-output" id="toolStreamHealthOutput">Waiting...</div>
+                    </div>
+
                     <!-- Latency Monitor -->
                     <div class="tool-card">
                         <h3>&#9201; Latency Monitor</h3>
@@ -1191,6 +1269,8 @@
                 cameras: [],
                 cameraStreams: [],
                 detectedCameras: [],
+                cameraInfo: null,         // rich camera info from /api/av/camera-info
+                streamHealth: null,        // stream port health from /api/av/stream-health
                 engineSettings: null,
                 teamNumber: null,
                 latencyHistory: [],
@@ -1202,6 +1282,7 @@
             this.uptimeTimer = null;
             this.dashboardStartTime = Date.now();
             this._cameraRefreshTimers = {};
+            this._streamRetryBackoff = {};  // per-stream exponential backoff
             this.init();
         }
 
@@ -1269,8 +1350,11 @@
         startPolling() {
             this.fetchStatus();
             this.fetchCameras();
+            this.fetchCameraInfo();
             this.pollTimer = setInterval(() => this.fetchStatus(), 3000);
             this.cameraPollTimer = setInterval(() => this.fetchCameras(), 10000);
+            // Fetch rich camera info less frequently (includes stream port probing)
+            setInterval(() => this.fetchCameraInfo(), 15000);
         }
 
         startUptimeTimer() {
@@ -1376,6 +1460,115 @@
                 }
             } catch (e) {
                 output.textContent = 'Failed to connect to engine API';
+                output.className = 'tool-output error';
+            }
+        }
+
+        /* ======================== CAMERA INFO & STREAM HEALTH ======================== */
+
+        async fetchCameraInfo() {
+            try {
+                const resp = await fetch('/api/av/camera-info', { signal: AbortSignal.timeout(8000) });
+                if (resp.ok) {
+                    this.state.cameraInfo = await resp.json();
+                }
+            } catch (e) {
+                // Camera info API may not be available
+            }
+        }
+
+        async checkStreamHealth() {
+            const output = document.getElementById('streamDebugOutput');
+            if (output) {
+                output.textContent = 'Probing stream ports...';
+                output.className = 'tool-output warn';
+            }
+
+            try {
+                const resp = await fetch('/api/av/stream-health', { signal: AbortSignal.timeout(10000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.state.streamHealth = data;
+
+                    // Update the health bar
+                    const bar = document.getElementById('streamHealthBar');
+                    if (bar && data.streams && data.streams.length > 0) {
+                        const allLive = data.streams.every(s => s.inputStatus === 'live' || s.outputStatus === 'live');
+                        const anyLive = data.streams.some(s => s.inputStatus === 'live' || s.outputStatus === 'live');
+                        if (allLive) {
+                            bar.style.display = 'block';
+                            bar.className = 'alert alert-success';
+                            bar.textContent = 'All ' + data.streams.length + ' camera stream(s) are live and serving MJPEG frames.';
+                        } else if (anyLive) {
+                            bar.style.display = 'block';
+                            bar.className = 'alert alert-warn';
+                            const liveCount = data.streams.filter(s => s.inputStatus === 'live' || s.outputStatus === 'live').length;
+                            bar.textContent = liveCount + '/' + data.streams.length + ' stream(s) are live. Some streams may still be starting.';
+                        } else {
+                            bar.style.display = 'block';
+                            bar.className = 'alert alert-warn';
+                            bar.textContent = 'No streams are live yet. The engine may still be starting or no cameras are connected.';
+                        }
+                    }
+
+                    // Update debug output
+                    if (output) {
+                        const lines = ['Stream Health Report', '=' .repeat(40)];
+                        data.streams.forEach(s => {
+                            lines.push('');
+                            lines.push(s.camera + ' (index ' + s.index + ')');
+                            lines.push('  Input:  port ' + s.inputPort + ' -> ' + s.inputStatus + '  ' + s.inputUrl);
+                            lines.push('  Output: port ' + s.outputPort + ' -> ' + s.outputStatus + '  ' + s.outputUrl);
+                        });
+                        if (data.streams.length === 0) {
+                            lines.push('No cameras found in engine settings.');
+                            lines.push('Ensure the engine is running and cameras are connected.');
+                        }
+                        output.textContent = lines.join('\n');
+                        output.className = 'tool-output ' + (data.streams.some(s => s.inputStatus === 'live') ? 'success' : 'warn');
+                    }
+                }
+            } catch (e) {
+                if (output) {
+                    output.textContent = 'Failed to check stream health: ' + e.message;
+                    output.className = 'tool-output error';
+                }
+            }
+        }
+
+        async toolStreamHealth() {
+            const output = document.getElementById('toolStreamHealthOutput');
+            output.textContent = 'Probing stream ports...';
+            output.className = 'tool-output warn';
+
+            try {
+                const resp = await fetch('/api/av/stream-health', { signal: AbortSignal.timeout(10000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const lines = ['AprilVision Stream Health', '=' .repeat(40)];
+                    data.streams.forEach(s => {
+                        const inputIcon = s.inputStatus === 'live' ? '[LIVE]' : s.inputStatus === 'responding' ? '[OK]' : '[DOWN]';
+                        const outputIcon = s.outputStatus === 'live' ? '[LIVE]' : s.outputStatus === 'responding' ? '[OK]' : '[DOWN]';
+                        lines.push('');
+                        lines.push(s.camera + ' (#' + s.index + ')');
+                        lines.push('  Input  ' + inputIcon + '  :' + s.inputPort + '  ' + s.inputUrl);
+                        lines.push('  Output ' + outputIcon + '  :' + s.outputPort + '  ' + s.outputUrl);
+                    });
+                    if (data.streams.length === 0) {
+                        lines.push('');
+                        lines.push('No cameras found in engine. Check:');
+                        lines.push('  1. Engine is running (port 5800)');
+                        lines.push('  2. USB cameras are plugged in');
+                        lines.push('  3. Cameras are configured in engine UI (/pv/)');
+                    }
+                    output.textContent = lines.join('\n');
+                    output.className = 'tool-output ' + (data.streams.some(s => s.inputStatus === 'live') ? 'success' : 'error');
+                } else {
+                    output.textContent = 'Error: HTTP ' + resp.status;
+                    output.className = 'tool-output error';
+                }
+            } catch (e) {
+                output.textContent = 'Connection failed: ' + e.message;
                 output.className = 'tool-output error';
             }
         }
@@ -1627,7 +1820,7 @@
             const cameras = this.state.cameras;
 
             if (cameras.length === 0) {
-                if (container.querySelector('.empty-state')) return; // already showing empty
+                if (container.querySelector('.empty-state')) return;
                 container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div><p>No cameras connected</p></div>';
                 return;
             }
@@ -1635,7 +1828,6 @@
             // Only re-render if camera count changed
             const existing = container.querySelectorAll('.camera-preview-card');
             if (existing.length === cameras.length) {
-                // Just refresh broken images
                 this.refreshBrokenImages(container);
                 return;
             }
@@ -1644,10 +1836,13 @@
             cameras.forEach(cam => {
                 const card = document.createElement('div');
                 card.className = 'camera-preview-card';
+                card.setAttribute('data-cam-index', cam.index);
 
                 const streamUrl = cam.outputStreamUrl || ('/stream/' + cam.index + '/output');
                 card.innerHTML =
-                    '<img class="cam-thumb" src="' + this.escapeAttr(streamUrl) + '" alt="' + this.escapeAttr(cam.name) + '" onerror="AVApp.handleImgError(this)" loading="lazy">' +
+                    '<img class="cam-thumb" src="' + this.escapeAttr(streamUrl) + '" alt="' + this.escapeAttr(cam.name) + '" ' +
+                        'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                        'onerror="AVApp.handleImgError(this,' + cam.index + ',\'output\')" loading="lazy">' +
                     '<div class="cam-info">' +
                     '<span class="cam-name">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
                     '<span class="cam-index">#' + cam.index + (cam.calibrated ? ' &#10003;' : '') + '</span>' +
@@ -1691,7 +1886,9 @@
 
             if (cameras.length === 0) {
                 if (container.querySelector('.empty-state')) return;
-                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div><p>No cameras connected. Connect a USB camera and refresh.</p></div>';
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div>' +
+                    '<p>No cameras connected to the detection engine.</p>' +
+                    '<p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px;">Connect a USB camera, then check the engine UI at <a href="/pv/" style="color:var(--accent-blue);">/pv/</a></p></div>';
                 return;
             }
 
@@ -1699,18 +1896,33 @@
             const existing = container.querySelectorAll('.camera-feed-block');
             if (existing.length === cameras.length) {
                 this.refreshBrokenImages(container);
+                this.updateStreamStatusBadges();
                 return;
+            }
+
+            // Find matching rich camera info if available
+            const infoMap = {};
+            if (this.state.cameraInfo && this.state.cameraInfo.engineCameras) {
+                this.state.cameraInfo.engineCameras.forEach(c => { infoMap[c.index] = c; });
             }
 
             container.innerHTML = '';
             cameras.forEach(cam => {
                 const block = document.createElement('div');
                 block.className = 'camera-feed-block';
+                block.setAttribute('data-cam-index', cam.index);
 
                 const inputUrl = cam.inputStreamUrl || ('/stream/' + cam.index + '/input');
                 const outputUrl = cam.outputStreamUrl || ('/stream/' + cam.index + '/output');
                 const calibIcon = cam.calibrated ? '&#10003; Calibrated' : '&#9888; Not Calibrated';
                 const calibColor = cam.calibrated ? 'var(--accent-green)' : 'var(--accent-yellow)';
+
+                // Rich info if available
+                const info = infoMap[cam.index];
+                const devicePath = info ? info.devicePath : '';
+                const inputPort = info ? info.inputStreamPort : (1181 + cam.index * 2);
+                const outputPort = info ? info.outputStreamPort : (1182 + cam.index * 2);
+                const pipelineName = (info && info.currentPipeline) ? info.currentPipeline.name : '';
 
                 block.innerHTML =
                     '<div class="camera-feed-header">' +
@@ -1718,21 +1930,55 @@
                     '<span class="feed-meta">' +
                     '<span>Index: ' + cam.index + '</span>' +
                     '<span>Pipelines: ' + (cam.pipelineCount || 0) + '</span>' +
+                    (pipelineName ? '<span style="color:var(--accent-blue);">' + this.escapeHtml(pipelineName) + '</span>' : '') +
                     '<span style="color:' + calibColor + ';">' + calibIcon + '</span>' +
                     '</span>' +
                     '</div>' +
                     '<div class="feed-pair">' +
                     '<div class="feed-panel">' +
                     '<span class="feed-label">Input (Raw)</span>' +
-                    '<img src="' + this.escapeAttr(inputUrl) + '" alt="Input Stream" onerror="AVApp.handleImgError(this)">' +
+                    '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-input"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
+                    '<img src="' + this.escapeAttr(inputUrl) + '" alt="Input Stream" ' +
+                        'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
+                        'onerror="AVApp.handleImgError(this,' + cam.index + ',\'input\')">' +
                     '</div>' +
                     '<div class="feed-panel">' +
                     '<span class="feed-label">Output (Detection)</span>' +
-                    '<img src="' + this.escapeAttr(outputUrl) + '" alt="Output Stream" onerror="AVApp.handleImgError(this)">' +
+                    '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-output"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
+                    '<img src="' + this.escapeAttr(outputUrl) + '" alt="Output Stream" ' +
+                        'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                        'onerror="AVApp.handleImgError(this,' + cam.index + ',\'output\')">' +
                     '</div>' +
+                    '</div>' +
+                    '<div class="camera-info-bar">' +
+                    (devicePath ? '<div class="info-item"><span class="info-label">Device:</span><span class="info-value">' + this.escapeHtml(devicePath) + '</span></div>' : '') +
+                    '<div class="info-item"><span class="info-label">Input Port:</span><span class="info-value">' + inputPort + '</span></div>' +
+                    '<div class="info-item"><span class="info-label">Output Port:</span><span class="info-value">' + outputPort + '</span></div>' +
+                    '<div class="info-item"><span class="info-label">Proxy:</span><span class="info-value">' + this.escapeHtml(inputUrl) + '</span></div>' +
                     '</div>';
 
                 container.appendChild(block);
+            });
+        }
+
+        updateStreamStatusBadges() {
+            if (!this.state.cameraInfo || !this.state.cameraInfo.engineCameras) return;
+            this.state.cameraInfo.engineCameras.forEach(cam => {
+                ['input', 'output'].forEach(type => {
+                    const badge = document.getElementById('streamStatus-' + cam.index + '-' + type);
+                    if (!badge) return;
+                    const status = type === 'input' ? cam.inputStreamStatus : cam.outputStreamStatus;
+                    if (status === 'live') {
+                        badge.className = 'feed-status live';
+                        badge.innerHTML = '<span class="dot green" style="width:6px;height:6px;"></span> Live';
+                    } else if (status === 'responding') {
+                        badge.className = 'feed-status connecting';
+                        badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Responding';
+                    } else if (status === 'unreachable') {
+                        badge.className = 'feed-status error';
+                        badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Unreachable';
+                    }
+                });
             });
         }
 
@@ -1830,30 +2076,65 @@
 
         /* ======================== IMAGE ERROR HANDLING ======================== */
 
-        handleImgError(img) {
-            // Set a placeholder and schedule a retry
-            const originalSrc = img.getAttribute('src');
-            if (!originalSrc || originalSrc === 'about:blank') return;
+        handleImgLoad(img, camIdx, streamType) {
+            // Stream is working - update status badge
+            img.style.opacity = '1';
+            const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
+            if (badge) {
+                badge.className = 'feed-status live';
+                badge.innerHTML = '<span class="dot green" style="width:6px;height:6px;"></span> Live';
+            }
+            // Reset backoff on success
+            const key = camIdx + '-' + streamType;
+            this._streamRetryBackoff[key] = 0;
+        }
+
+        handleImgError(img, camIdx, streamType) {
+            // Get the base URL (strip cache busters)
+            const src = img.getAttribute('src');
+            if (!src || src === 'about:blank') return;
+            const baseSrc = src.split('?')[0];
 
             img.style.opacity = '0.3';
 
-            // Retry after 5 seconds by resetting the src with a cache buster
-            const retryKey = originalSrc;
-            if (this._cameraRefreshTimers[retryKey]) return; // already scheduled
+            // Update status badge if we have the info
+            if (camIdx !== undefined && streamType) {
+                const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
+                if (badge) {
+                    badge.className = 'feed-status error';
+                    badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Retrying...';
+                }
+            }
 
-            this._cameraRefreshTimers[retryKey] = setTimeout(() => {
-                delete this._cameraRefreshTimers[retryKey];
-                const separator = originalSrc.indexOf('?') !== -1 ? '&' : '?';
-                img.src = originalSrc.split('?')[0] + separator + '_t=' + Date.now();
+            // Exponential backoff retry: 2s, 4s, 8s, 16s, max 16s
+            const key = (camIdx !== undefined ? camIdx + '-' + streamType : baseSrc);
+            if (this._cameraRefreshTimers[key]) return; // already scheduled
+
+            const attempt = this._streamRetryBackoff[key] || 0;
+            const delay = Math.min(2000 * Math.pow(2, attempt), 16000);
+            this._streamRetryBackoff[key] = attempt + 1;
+
+            this._cameraRefreshTimers[key] = setTimeout(() => {
+                delete this._cameraRefreshTimers[key];
+                img.src = baseSrc + '?_t=' + Date.now();
                 img.style.opacity = '1';
-            }, 5000);
+            }, delay);
         }
 
         refreshBrokenImages(container) {
             const images = container.querySelectorAll('img');
             images.forEach(img => {
                 if (img.naturalWidth === 0 && img.complete) {
-                    this.handleImgError(img);
+                    // Extract cam index and type from the parent structure
+                    const block = img.closest('.camera-feed-block') || img.closest('.camera-preview-card');
+                    const camIdx = block ? parseInt(block.getAttribute('data-cam-index')) : undefined;
+                    const panel = img.closest('.feed-panel');
+                    let streamType = undefined;
+                    if (panel) {
+                        const label = panel.querySelector('.feed-label');
+                        streamType = label && label.textContent.includes('Input') ? 'input' : 'output';
+                    }
+                    this.handleImgError(img, camIdx, streamType);
                 }
             });
         }

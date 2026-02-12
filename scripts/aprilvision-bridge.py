@@ -274,7 +274,12 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
     # --- Camera stream proxy ------------------------------------------------
 
     def _proxy_camera_stream(self, path):
-        """Proxy MJPEG stream from engine camera ports.
+        """Proxy MJPEG stream from engine camera ports using raw sockets.
+
+        Uses raw socket relay instead of http.client because MJPEG streams
+        are multipart/x-mixed-replace and http.client.read(n) blocks until
+        it fills the buffer, killing real-time frame delivery.
+
         /stream/<camera_index>          -> input stream (port 1181 + index*2)
         /stream/<camera_index>/input    -> input stream
         /stream/<camera_index>/output   -> output stream (port 1182 + index*2)
@@ -293,30 +298,115 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         if stream_type == 'output':
             port += 1
 
+        sock = None
+        # Try multiple paths that cscore MJPEG servers commonly respond to
+        stream_paths = ["/stream.mjpg", "/?action=stream", "/"]
         try:
-            conn = http.client.HTTPConnection(ENGINE_HOST, port, timeout=10)
-            conn.request("GET", "/")
-            response = conn.getresponse()
+            sock = socket.create_connection((ENGINE_HOST, port), timeout=5)
+            sock.settimeout(5)
 
-            self.send_response(response.status)
-            for key, value in response.getheaders():
-                if key.lower() != "transfer-encoding":
-                    self.send_header(key, value)
+            # Try each path until we get an MJPEG response
+            connected = False
+            for try_path in stream_paths:
+                try:
+                    request = (
+                        f"GET {try_path} HTTP/1.0\r\n"
+                        f"Host: {ENGINE_HOST}:{port}\r\n"
+                        f"Connection: close\r\n"
+                        f"\r\n"
+                    )
+                    sock.sendall(request.encode())
+
+                    # Read HTTP response headers
+                    header_buf = b""
+                    while b"\r\n\r\n" not in header_buf:
+                        chunk = sock.recv(4096)
+                        if not chunk:
+                            raise ConnectionError("Connection closed reading headers")
+                        header_buf += chunk
+                        if len(header_buf) > 65536:
+                            raise ConnectionError("Header too large")
+
+                    header_end = header_buf.index(b"\r\n\r\n") + 4
+                    headers_raw = header_buf[:header_end]
+                    body_start = header_buf[header_end:]
+
+                    # Parse status line
+                    status_line = headers_raw.split(b"\r\n")[0]
+                    status_parts = status_line.split(b" ", 2)
+                    status_code = int(status_parts[1])
+
+                    if status_code == 200:
+                        connected = True
+                        break
+
+                    # Non-200: reconnect and try next path
+                    sock.close()
+                    sock = socket.create_connection((ENGINE_HOST, port), timeout=5)
+                    sock.settimeout(5)
+                except (socket.timeout, ConnectionError):
+                    if try_path != stream_paths[-1]:
+                        try:
+                            sock.close()
+                        except Exception:
+                            pass
+                        sock = socket.create_connection((ENGINE_HOST, port), timeout=5)
+                        sock.settimeout(5)
+                        continue
+                    raise
+
+            if not connected:
+                raise ConnectionError("No valid MJPEG path found")
+
+            # Send response headers to client
+            self.send_response(status_code)
+            for header_line in headers_raw.split(b"\r\n")[1:]:
+                if not header_line:
+                    continue
+                if b":" in header_line:
+                    key, value = header_line.split(b":", 1)
+                    key_str = key.strip().decode("ascii", errors="replace")
+                    val_str = value.strip().decode("ascii", errors="replace")
+                    if key_str.lower() in ("transfer-encoding", "connection"):
+                        continue
+                    self.send_header(key_str, val_str)
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
+            # Send any body data that arrived with the headers
+            if body_start:
+                self.wfile.write(body_start)
+                self.wfile.flush()
+
+            # Relay MJPEG stream data using select() for non-blocking reads
+            sock.settimeout(0)
+            while True:
+                readable, _, _ = select.select([sock], [], [], 30)
+                if not readable:
+                    break  # 30s timeout with no data
+                data = sock.recv(65536)
+                if not data:
+                    break
+                self.wfile.write(data)
+                self.wfile.flush()
+
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
             try:
-                while True:
-                    chunk = response.read(8192)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
+                self._send_error(503, "Stream Unavailable",
+                                 f"Camera {cam_idx} {stream_type} stream not available on port {port}")
+            except Exception:
                 pass
-            conn.close()
-        except Exception:
-            self._send_error(503, "Stream Unavailable",
-                             f"Camera {cam_idx} stream not available on port {port}")
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     # --- Engine API proxy ---------------------------------------------------
 
@@ -464,6 +554,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return self._api_snapshot()
         elif endpoint == 'streams':
             return self._api_streams()
+        elif endpoint == 'stream-health':
+            return self._api_stream_health()
+        elif endpoint == 'camera-info':
+            return self._api_camera_info()
         elif endpoint == 'engine-settings':
             return self._api_engine_settings()
         else:
@@ -549,6 +643,114 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         except Exception:
             pass
         self._send_json({'streams': streams})
+
+    def _check_stream_port(self, port):
+        """Check if a stream port is reachable and serving MJPEG."""
+        try:
+            s = socket.create_connection((ENGINE_HOST, port), timeout=2)
+            s.sendall(f"GET /stream.mjpg HTTP/1.0\r\nHost: {ENGINE_HOST}:{port}\r\n\r\n".encode())
+            s.settimeout(2)
+            data = s.recv(512)
+            s.close()
+            if b"200" in data and (b"multipart" in data.lower() or b"image" in data.lower()):
+                return "live"
+            if b"200" in data:
+                return "responding"
+            return "error"
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            return "unreachable"
+        except Exception:
+            return "error"
+
+    def _api_stream_health(self):
+        """Check availability of all camera stream ports."""
+        results = []
+        try:
+            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=3)
+            conn.request("GET", "/api/settings")
+            resp = conn.getresponse()
+            if resp.status == 200:
+                data = json.loads(resp.read())
+                for i, cam in enumerate(data.get('cameraSettings', [])):
+                    input_port = STREAM_BASE_PORT + (i * 2)
+                    output_port = input_port + 1
+                    results.append({
+                        'camera': cam.get('nickname', cam.get('uniqueName', f'Camera {i}')),
+                        'index': i,
+                        'inputPort': input_port,
+                        'outputPort': output_port,
+                        'inputStatus': self._check_stream_port(input_port),
+                        'outputStatus': self._check_stream_port(output_port),
+                        'inputUrl': f'/stream/{i}/input',
+                        'outputUrl': f'/stream/{i}/output',
+                    })
+            conn.close()
+        except Exception:
+            pass
+        self._send_json({'streams': results, 'engine': ENGINE_HOST})
+
+    def _api_camera_info(self):
+        """Rich camera information combining system devices and engine data."""
+        system_cameras = get_system_cameras()
+        engine_cameras = []
+        try:
+            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=3)
+            conn.request("GET", "/api/settings")
+            resp = conn.getresponse()
+            if resp.status == 200:
+                data = json.loads(resp.read())
+                for i, cam in enumerate(data.get('cameraSettings', [])):
+                    input_port = STREAM_BASE_PORT + (i * 2)
+                    output_port = input_port + 1
+                    calibrations = cam.get('calibrations', [])
+                    resolutions = []
+                    for cal in calibrations:
+                        r = cal.get('resolution', {})
+                        if r:
+                            resolutions.append(f"{r.get('width', '?')}x{r.get('height', '?')}")
+
+                    # Current pipeline info
+                    pipelines = cam.get('pipelineSettings', [])
+                    current_idx = cam.get('currentPipelineIndex', 0)
+                    current_pipeline = None
+                    if pipelines and current_idx < len(pipelines):
+                        cp = pipelines[current_idx]
+                        current_pipeline = {
+                            'index': current_idx,
+                            'name': cp.get('pipelineNickname', f'Pipeline {current_idx}'),
+                            'type': cp.get('pipelineType', 'unknown'),
+                        }
+
+                    engine_cameras.append({
+                        'name': cam.get('nickname', cam.get('uniqueName', f'Camera {i}')),
+                        'uniqueName': cam.get('uniqueName', ''),
+                        'devicePath': cam.get('path', 'N/A'),
+                        'index': i,
+                        'calibrated': bool(calibrations),
+                        'calibrationCount': len(calibrations),
+                        'calibratedResolutions': resolutions,
+                        'pipelineCount': len(pipelines),
+                        'currentPipeline': current_pipeline,
+                        'inputStreamPort': input_port,
+                        'outputStreamPort': output_port,
+                        'inputStreamUrl': f'/stream/{i}/input',
+                        'outputStreamUrl': f'/stream/{i}/output',
+                        'directInputUrl': f'http://{ENGINE_HOST}:{input_port}/stream.mjpg',
+                        'directOutputUrl': f'http://{ENGINE_HOST}:{output_port}/stream.mjpg',
+                        'inputStreamStatus': self._check_stream_port(input_port),
+                        'outputStreamStatus': self._check_stream_port(output_port),
+                    })
+            conn.close()
+        except Exception:
+            pass
+
+        self._send_json({
+            'systemCameras': system_cameras,
+            'engineCameras': engine_cameras,
+            'engineHost': ENGINE_HOST,
+            'enginePort': ENGINE_PORT,
+            'streamBasePort': STREAM_BASE_PORT,
+        })
 
     def _api_engine_settings(self):
         """Get detection engine settings (proxied)."""
