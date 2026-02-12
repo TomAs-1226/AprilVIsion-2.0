@@ -43,6 +43,7 @@ import threading
 import struct
 import hashlib
 import base64
+import io
 
 # Optional: WebSocket client + MessagePack for live PV data
 try:
@@ -337,6 +338,166 @@ def _start_target_poller():
     t.start()
 
 
+def _read_http_response(sock, max_header_bytes=65536):
+    """Read an HTTP response from a socket and return (status, headers, body_start)."""
+    header_buf = b""
+    while b"\r\n\r\n" not in header_buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("Connection closed reading headers")
+        header_buf += chunk
+        if len(header_buf) > max_header_bytes:
+            raise ConnectionError("Header too large")
+
+    header_end = header_buf.index(b"\r\n\r\n") + 4
+    headers_raw = header_buf[:header_end]
+    body_start = header_buf[header_end:]
+
+    status_line = headers_raw.split(b"\r\n", 1)[0]
+    status_parts = status_line.split(b" ", 2)
+    if len(status_parts) < 2:
+        raise ConnectionError("Malformed HTTP status line")
+    status_code = int(status_parts[1])
+
+    headers = {}
+    for line in headers_raw.split(b"\r\n")[1:]:
+        if not line or b":" not in line:
+            continue
+        key, value = line.split(b":", 1)
+        headers[key.strip().lower()] = value.strip()
+
+    return status_code, headers, body_start
+
+
+def _extract_first_jpeg(data, boundary=None):
+    """Extract the first JPEG payload from bytes that may contain MJPEG multipart data."""
+    # Fast path: contiguous JPEG markers.
+    start = data.find(b"\xff\xd8")
+    if start >= 0:
+        end = data.find(b"\xff\xd9", start + 2)
+        if end > start:
+            return data[start:end + 2]
+
+    if boundary:
+        # Boundary can be quoted or prefixed with -- in content-type.
+        b = boundary.strip().strip('"')
+        if b.startswith("--"):
+            b = b[2:]
+        marker = ("--" + b).encode("ascii", errors="ignore")
+        parts = data.split(marker)
+        for part in parts:
+            hdr_end = part.find(b"\r\n\r\n")
+            if hdr_end < 0:
+                continue
+            payload = part[hdr_end + 4:]
+            s = payload.find(b"\xff\xd8")
+            e = payload.find(b"\xff\xd9", s + 2) if s >= 0 else -1
+            if s >= 0 and e > s:
+                return payload[s:e + 2]
+
+    return None
+
+
+def _fetch_camera_frame(cam_idx, stream_type="output", timeout=2.5):
+    """Fetch a single JPEG frame from PhotonVision stream sources.
+
+    Returns JPEG bytes or None.
+    """
+    dedicated_port = STREAM_BASE_PORT + (cam_idx * 2) + (1 if stream_type == "output" else 0)
+    candidates = [
+        (ENGINE_HOST, dedicated_port, "/stream.mjpg"),
+        (ENGINE_HOST, dedicated_port, "/stream"),
+        (ENGINE_HOST, dedicated_port, "/?action=stream"),
+        # Some PV builds may expose streams from the main HTTP server.
+        (ENGINE_HOST, ENGINE_PORT, f"/api/camera/{cam_idx}/{stream_type}.mjpg"),
+        (ENGINE_HOST, ENGINE_PORT, f"/api/stream/{cam_idx}/{stream_type}"),
+        (ENGINE_HOST, ENGINE_PORT, f"/stream/{cam_idx}/{stream_type}"),
+    ]
+
+    for host, port, path in candidates:
+        sock = None
+        try:
+            sock = socket.create_connection((host, port), timeout=timeout)
+            sock.settimeout(timeout)
+            req = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: {host}:{port}\r\n"
+                f"User-Agent: AprilVision-Bridge/3.2\r\n"
+                f"Accept: multipart/x-mixed-replace,image/jpeg,*/*\r\n"
+                f"Connection: close\r\n\r\n"
+            )
+            sock.sendall(req.encode("ascii", errors="ignore"))
+
+            status, headers, body = _read_http_response(sock)
+            if status != 200:
+                continue
+
+            ctype = headers.get(b"content-type", b"").decode("ascii", errors="ignore").lower()
+            boundary = None
+            if "boundary=" in ctype:
+                boundary = ctype.split("boundary=", 1)[1].split(";", 1)[0].strip()
+
+            # Read enough bytes to capture at least one JPEG frame.
+            buf = io.BytesIO()
+            if body:
+                buf.write(body)
+
+            deadline = time.time() + timeout
+            while time.time() < deadline and buf.tell() < 2_000_000:
+                frame = _extract_first_jpeg(buf.getvalue(), boundary=boundary)
+                if frame:
+                    return frame
+                try:
+                    chunk = sock.recv(65536)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                buf.write(chunk)
+
+            frame = _extract_first_jpeg(buf.getvalue(), boundary=boundary)
+            if frame:
+                return frame
+        except Exception:
+            pass
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+    return None
+
+
+def _extract_ws_payloads(payload):
+    """Yield dict payload candidates from PV websocket frames.
+
+    PV versions may emit:
+      - direct dict payloads
+      - envelope payloads containing data/message/payload
+      - list batches of any of the above
+    """
+    if isinstance(payload, list):
+        for item in payload:
+            for d in _extract_ws_payloads(item):
+                yield d
+        return
+
+    if not isinstance(payload, dict):
+        return
+
+    yield payload
+
+    for wrapped_key in ("data", "payload", "message", "results"):
+        wrapped = payload.get(wrapped_key)
+        if isinstance(wrapped, dict):
+            yield wrapped
+        elif isinstance(wrapped, list):
+            for item in wrapped:
+                if isinstance(item, dict):
+                    yield item
+
+
 def _target_poll_loop():
     """Continuously try all data sources in priority order, retrying forever.
 
@@ -475,68 +636,75 @@ def _process_pv_ws_data(data):
       - FPS, latency metrics
       - General settings
     """
-    if not isinstance(data, dict):
-        return
-
     with _targets_lock:
-        _latest_targets["last_update"] = time.time()
-        _latest_targets["nt_connected"] = True  # WS is our "connection"
+        had_payload = False
+        for data_item in _extract_ws_payloads(data):
+            had_payload = True
+            _latest_targets["last_update"] = time.time()
+            _latest_targets["nt_connected"] = True  # WS is our "connection"
 
-        # Extract camera/pipeline data from various possible formats
-        # PV sends different shaped data depending on version and event type
+            # Camera configurations (full state dump on connect)
+            cam_data = (data_item.get("cameras") or data_item.get("cameraSettings")
+                        or data_item.get("cameraConfigurations") or data_item.get("configuredCameras"))
 
-        # Camera configurations (full state dump on connect)
-        cam_data = (data.get("cameras") or data.get("cameraSettings")
-                    or data.get("cameraConfigurations") or data.get("configuredCameras"))
+            if cam_data:
+                if isinstance(cam_data, dict):
+                    for cam_name, cam_conf in cam_data.items():
+                        _update_camera_from_ws(cam_name, cam_conf)
+                elif isinstance(cam_data, list):
+                    for i, cam_conf in enumerate(cam_data):
+                        cam_name = (cam_conf.get("nickname") or cam_conf.get("uniqueName")
+                                    or cam_conf.get("name") or f"Camera_{i}")
+                        _update_camera_from_ws(cam_name, cam_conf)
 
-        if cam_data:
-            if isinstance(cam_data, dict):
-                # {cameraName: configObject, ...}
-                for cam_name, cam_conf in cam_data.items():
-                    _update_camera_from_ws(cam_name, cam_conf)
-            elif isinstance(cam_data, list):
-                for i, cam_conf in enumerate(cam_data):
-                    cam_name = (cam_conf.get("nickname") or cam_conf.get("uniqueName")
-                                or cam_conf.get("name") or f"Camera_{i}")
-                    _update_camera_from_ws(cam_name, cam_conf)
+            # Per-camera result updates (incremental)
+            for key in ("cameraResult", "result", "pipelineResult", "cameraResults", "pipelineResults", "results"):
+                result = data_item.get(key)
+                if not result:
+                    continue
+                if isinstance(result, dict):
+                    if any(k in result for k in ("targets", "trackedTargets", "hasTarget", "bestFiducialId", "fiducialId", "fiducialID")):
+                        cam_name = (result.get("cameraName") or result.get("nickname")
+                                    or result.get("camera") or f"Camera_{result.get('cameraIndex', 0)}")
+                        _update_result_from_ws(cam_name, result)
+                    else:
+                        for cam_name, cam_result in result.items():
+                            if isinstance(cam_result, dict):
+                                _update_result_from_ws(str(cam_name), cam_result)
+                elif isinstance(result, list):
+                    for i, cam_result in enumerate(result):
+                        if isinstance(cam_result, dict):
+                            cam_name = (cam_result.get("cameraName") or cam_result.get("nickname")
+                                        or cam_result.get("camera") or f"Camera_{cam_result.get('cameraIndex', i)}")
+                            _update_result_from_ws(cam_name, cam_result)
 
-        # Per-camera result updates (incremental)
-        for key in ("cameraResult", "result", "pipelineResult"):
-            result = data.get(key)
-            if result and isinstance(result, dict):
-                cam_name = (result.get("cameraName") or result.get("nickname")
-                            or result.get("camera") or "Camera_0")
-                _update_result_from_ws(cam_name, result)
-
-        # FPS and latency metrics
-        fps = data.get("fps")
-        latency = data.get("latency") or data.get("latencyMillis")
-        if fps is not None or latency is not None:
-            # Apply to all known cameras or a specific one
-            cam_name = data.get("cameraName") or data.get("camera")
-            if cam_name and cam_name in _latest_targets["cameras"]:
-                if fps is not None:
-                    _latest_targets["cameras"][cam_name]["fps"] = round(float(fps), 1)
-                if latency is not None:
-                    _latest_targets["cameras"][cam_name]["latencyMs"] = round(float(latency), 1)
-            else:
-                # Broadcast to all cameras
-                for cam in _latest_targets["cameras"].values():
+            fps = data_item.get("fps")
+            latency = data_item.get("latency") or data_item.get("latencyMillis")
+            if fps is not None or latency is not None:
+                cam_name = data_item.get("cameraName") or data_item.get("camera")
+                if cam_name and cam_name in _latest_targets["cameras"]:
                     if fps is not None:
-                        cam["fps"] = round(float(fps), 1)
+                        _latest_targets["cameras"][cam_name]["fps"] = round(float(fps), 1)
                     if latency is not None:
-                        cam["latencyMs"] = round(float(latency), 1)
+                        _latest_targets["cameras"][cam_name]["latencyMs"] = round(float(latency), 1)
+                else:
+                    for cam in _latest_targets["cameras"].values():
+                        if fps is not None:
+                            cam["fps"] = round(float(fps), 1)
+                        if latency is not None:
+                            cam["latencyMs"] = round(float(latency), 1)
 
-        # General settings that may contain useful info
-        general = data.get("generalSettings") or data.get("general")
-        if general and isinstance(general, dict):
-            _latest_targets.setdefault("_pv_settings", {}).update(general)
+            general = data_item.get("generalSettings") or data_item.get("general")
+            if general and isinstance(general, dict):
+                _latest_targets.setdefault("_pv_settings", {}).update(general)
 
-        # Current camera/pipeline index changes
-        if "currentCamera" in data:
-            _latest_targets["_currentCamera"] = data["currentCamera"]
-        if "currentPipeline" in data:
-            _latest_targets["_currentPipeline"] = data["currentPipeline"]
+            if "currentCamera" in data_item:
+                _latest_targets["_currentCamera"] = data_item["currentCamera"]
+            if "currentPipeline" in data_item:
+                _latest_targets["_currentPipeline"] = data_item["currentPipeline"]
+
+        if not had_payload:
+            return
 
 
 def _update_camera_from_ws(cam_name, cam_conf):
@@ -561,6 +729,7 @@ def _update_camera_from_ws(cam_name, cam_conf):
     calibrated = bool(cals)
 
     existing.update({
+        "cameraIndex": cam_conf.get("cameraIndex", existing.get("cameraIndex", 0)),
         "pipelineName": pipe_name,
         "pipelineType": pipe_type,
         "pipelineIndex": current_idx,
@@ -586,16 +755,34 @@ def _update_result_from_ws(cam_name, result):
     has_target = len(targets) > 0 if isinstance(targets, list) else bool(result.get("hasTarget"))
 
     best_target = targets[0] if targets and isinstance(targets, list) else result
-    best_id = int(best_target.get("fiducialId") or best_target.get("fid") or
-                  best_target.get("bestFiducialId") or -1)
+    try:
+        best_id = int(best_target.get("fiducialId") or best_target.get("fid") or
+                      best_target.get("bestFiducialId") or best_target.get("fiducialID") or -1)
+    except (TypeError, ValueError):
+        best_id = -1
 
     # All detected tag IDs
     all_ids = []
     if isinstance(targets, list):
         for t in targets:
-            fid = t.get("fiducialId") or t.get("fid") or -1
-            if int(fid) >= 0:
-                all_ids.append(int(fid))
+            try:
+                fid = int(t.get("fiducialId") or t.get("fid") or t.get("fiducialID") or -1)
+            except (TypeError, ValueError):
+                fid = -1
+            if fid >= 0:
+                all_ids.append(fid)
+
+    # Some PV payloads include IDs outside targets array.
+    used_ids = (result.get("fiducialIDsUsed") or result.get("fiducialIdsUsed") or
+                result.get("tagIds") or result.get("detectedTagIds"))
+    if isinstance(used_ids, list):
+        for fid in used_ids:
+            try:
+                fid_int = int(fid)
+            except (TypeError, ValueError):
+                continue
+            if fid_int >= 0 and fid_int not in all_ids:
+                all_ids.append(fid_int)
 
     # Best target data
     yaw = float(best_target.get("yaw") or best_target.get("targetYaw") or 0)
@@ -645,6 +832,7 @@ def _update_result_from_ws(cam_name, result):
                 }
 
     existing.update({
+        "cameraIndex": result.get("cameraIndex", existing.get("cameraIndex", 0)),
         "hasTarget": has_target,
         "targetYaw": round(yaw, 2),
         "targetPitch": round(pitch, 2),
@@ -724,7 +912,7 @@ def _poll_ntcore(nt):
                     except Exception:
                         pass
 
-                    for cam_name in subtables:
+                    for cam_idx, cam_name in enumerate(subtables):
                         try:
                             cam_table = pv_table.getSubTable(cam_name)
                             has_target = cam_table.getEntry("hasTarget").getBoolean(False)
@@ -789,6 +977,7 @@ def _poll_ntcore(nt):
                                 pass
 
                             _latest_targets["cameras"][cam_name] = {
+                                "cameraIndex": cam_idx,
                                 "hasTarget": has_target,
                                 "latencyMs": round(latency, 1),
                                 "targetYaw": round(target_yaw, 2),
@@ -845,11 +1034,11 @@ def _poll_api_targets():
                             pipe = pipelines[min(current_pipe_idx, len(pipelines) - 1)] if isinstance(current_pipe_idx, int) else pipelines[0]
                             if isinstance(pipe, dict):
                                 _latest_targets["cameras"][cam_name] = {
+                                    "cameraIndex": i,
                                     "hasTarget": False,
                                     "latencyMs": 0,
                                     "pipelineType": pipe.get("pipelineType", "unknown"),
                                     "pipelineName": pipe.get("pipelineNickname", pipe.get("name", f"Pipeline {current_pipe_idx}")),
-                                    "cameraIndex": i,
                                 }
         except Exception:
             pass
@@ -988,7 +1177,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         sock = None
         # cscore MJPEG server paths in order of likelihood
-        stream_paths = ["/stream.mjpg", "/?action=stream", "/"]
+        stream_paths = ["/stream.mjpg", "/stream", "/?action=stream", "/"]
         try:
             # Try each path until we get a 200
             connected = False
@@ -1004,6 +1193,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     request = (
                         f"GET {try_path} HTTP/1.1\r\n"
                         f"Host: {ENGINE_HOST}:{port}\r\n"
+                        f"User-Agent: AprilVision-Bridge/3.2\r\n"
+                        f"Accept: */*\r\n"
+                        f"Connection: keep-alive\r\n"
                         f"\r\n"
                     )
                     sock.sendall(request.encode())
@@ -1265,8 +1457,41 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return self._api_set_driver_mode()
         elif endpoint == 'performance':
             return self._api_performance()
+        elif endpoint.startswith('frame/'):
+            return self._api_frame(endpoint)
         else:
             self._send_json({"error": "Unknown endpoint"}, 404)
+
+    def _api_frame(self, endpoint):
+        """Return a single JPEG frame for a camera stream.
+
+        Endpoint: /api/av/frame/<camera_index>/<input|output>
+        Useful fallback when MJPEG streaming is blocked by browser/network.
+        """
+        try:
+            parts = endpoint.split('/')
+            if len(parts) < 2:
+                return self._send_json({"error": "Use /api/av/frame/<index>/<input|output>"}, 400)
+
+            cam_idx = int(parts[1])
+            stream_type = parts[2] if len(parts) > 2 else "output"
+            if stream_type not in ("input", "output"):
+                stream_type = "output"
+
+            frame = _fetch_camera_frame(cam_idx, stream_type=stream_type, timeout=2.5)
+            if not frame:
+                return self._send_json({"error": "No frame available", "cameraIndex": cam_idx, "streamType": stream_type}, 503)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(frame)))
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(frame)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
 
     def _api_cameras(self):
         system_cameras = get_system_cameras()
