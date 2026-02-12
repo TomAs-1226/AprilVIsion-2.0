@@ -874,6 +874,9 @@
                 </a>
 
                 <div class="nav-section-label">Utilities</div>
+                <a class="nav-link" href="#/streams" data-page="streams">
+                    <span class="nav-icon">&#128249;</span> Stream Test
+                </a>
                 <a class="nav-link" href="#/tools" data-page="tools">
                     <span class="nav-icon">&#9874;</span> Tools
                 </a>
@@ -979,6 +982,11 @@
                         <div class="action-icon">&#9825;</div>
                         <div class="action-title">Health Check</div>
                         <div class="action-desc">Run pre-match system diagnostics</div>
+                    </div>
+                    <div class="action-card" onclick="AVApp.runStreamTestSuite()">
+                        <div class="action-icon">&#128249;</div>
+                        <div class="action-title">Test Streams</div>
+                        <div class="action-desc">Validate PhotonVision feed + frame retrieval</div>
                     </div>
                     <div class="action-card" onclick="location.hash='#/pipelines'">
                         <div class="action-icon">&#9881;</div>
@@ -1223,6 +1231,42 @@
                             <button class="btn btn-blue" onclick="AVApp.checkStreamHealth()">Check Streams</button>
                             <button class="btn btn-green" onclick="AVApp.fetchCameraInfo()">Refresh Camera Info</button>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- ==================== STREAM TEST PAGE ==================== -->
+            <div class="page" id="page-streams">
+                <div class="page-header">
+                    <h1>PhotonVision Stream Test</h1>
+                    <div class="page-desc">Dedicated stream-only view + one-click test suite for camera stream validation</div>
+                </div>
+
+                <div class="alert alert-info">
+                    This page shows direct stream-only camera feeds (not the full PhotonVision website) and runs a stream validation suite against the backend bridge.
+                </div>
+
+                <div class="panel" style="margin-bottom:14px;">
+                    <div class="panel-header">Stream Test Actions</div>
+                    <div class="panel-body">
+                        <div class="btn-group">
+                            <button class="btn btn-green" onclick="AVApp.runStreamTestSuite()">Run Stream Test Suite</button>
+                            <button class="btn btn-blue" onclick="AVApp.renderStreamOnlyPage()">Refresh Stream View</button>
+                            <button class="btn" onclick="AVApp.checkStreamHealth()">Quick Port Check</button>
+                        </div>
+                        <div id="streamSuiteOutput" class="tool-output" style="margin-top:10px;min-height:70px;">
+                            Click "Run Stream Test Suite" to validate backend stream status and frame retrieval.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-title"><span class="section-icon">&#9724;</span> Stream-Only Feeds</div>
+                <div class="camera-feeds" id="streamOnlyFeedsContainer">
+                    <div class="empty-state">
+                        <div class="empty-icon">&#128247;</div>
+                        <p>Loading dedicated stream-only feeds...</p>
                     </div>
                 </div>
             </div>
@@ -1618,7 +1662,8 @@
                 '/pipelines': 'pipelines',
                 '/settings': 'settings',
                 '/tools': 'tools',
-                '/driver': 'driver'
+                '/driver': 'driver',
+                '/streams': 'streams'
             };
         }
 
@@ -1640,6 +1685,10 @@
             // Initialize driver view stream when entering
             if (pageName === 'driver') {
                 this.renderDriverView();
+            }
+
+            if (pageName === 'streams') {
+                this.renderStreamOnlyPage();
             }
         }
 
@@ -2001,6 +2050,98 @@
                     output.className = 'tool-output error';
                 }
             }
+        }
+
+
+        async runStreamTestSuite() {
+            const output = document.getElementById('streamSuiteOutput') || document.getElementById('dashActionOutputBody');
+            const box = document.getElementById('dashActionOutput');
+            if (output) {
+                output.textContent = 'Running stream test suite...';
+                output.className = 'tool-output warn';
+            }
+            if (box && output && output.id === 'dashActionOutputBody') box.style.display = 'block';
+
+            try {
+                const resp = await fetch('/api/av/stream-test-suite', { signal: AbortSignal.timeout(20000) });
+                if (!resp.ok) {
+                    if (output) {
+                        output.textContent = 'Stream test suite failed: HTTP ' + resp.status;
+                        output.className = 'tool-output error';
+                    }
+                    return;
+                }
+
+                const data = await resp.json();
+                const lines = [];
+                lines.push('PhotonVision Stream Test Suite');
+                lines.push('='.repeat(44));
+                lines.push('Engine online: ' + (data.engineOnline ? 'YES' : 'NO'));
+                lines.push('Overall pass: ' + (data.overallPass ? 'YES' : 'NO'));
+                lines.push('Cameras passing: ' + data.passingCameras + '/' + data.cameraCount);
+                lines.push('Runtime: ' + data.runtimeMs + ' ms');
+                lines.push('');
+                (data.results || []).forEach(r => {
+                    lines.push(r.camera + ' (#' + r.index + ')');
+                    lines.push('  Input  port ' + r.inputPort + ' [' + r.inputStatus + '] frame=' + (r.inputFrameOk ? 'ok' : 'fail') + ' (' + r.inputFrameBytes + ' bytes)');
+                    lines.push('  Output port ' + r.outputPort + ' [' + r.outputStatus + '] frame=' + (r.outputFrameOk ? 'ok' : 'fail') + ' (' + r.outputFrameBytes + ' bytes)');
+                    lines.push('  RESULT: ' + (r.pass ? 'PASS' : 'FAIL'));
+                    lines.push('');
+                });
+                if (data.notes && data.notes.length) {
+                    lines.push('Notes:');
+                    data.notes.forEach(n => lines.push(' - ' + n));
+                }
+
+                if (output) {
+                    output.textContent = lines.join('\n');
+                    output.className = 'tool-output ' + (data.overallPass ? 'success' : 'error');
+                }
+            } catch (e) {
+                if (output) {
+                    output.textContent = 'Stream test suite error: ' + e.message;
+                    output.className = 'tool-output error';
+                }
+            }
+        }
+
+        renderStreamOnlyPage() {
+            const container = document.getElementById('streamOnlyFeedsContainer');
+            if (!container) return;
+
+            const cameras = this.state.cameras || [];
+            if (cameras.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div><p>No cameras discovered yet. Try running stream test suite.</p></div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            cameras.forEach(cam => {
+                const card = document.createElement('div');
+                card.className = 'camera-feed-block';
+                const inUrl = this.getProxyStreamUrl(cam.index, 'input');
+                const outUrl = this.getProxyStreamUrl(cam.index, 'output');
+                card.innerHTML =
+                    '<div class="camera-feed-header">' +
+                    '<span class="feed-title">' + this.escapeHtml(cam.name || ('Camera ' + cam.index)) + '</span>' +
+                    '<span class="feed-meta"><span>Stream-only view</span><span>Index: ' + cam.index + '</span></span>' +
+                    '</div>' +
+                    '<div class="feed-pair">' +
+                        '<div class="feed-panel">' +
+                            '<span class="feed-label">Input Stream</span>' +
+                            '<img src="' + this.escapeAttr(inUrl) + '" alt="Input Stream" ' +
+                                 'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
+                                 'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
+                        '</div>' +
+                        '<div class="feed-panel">' +
+                            '<span class="feed-label">Output Stream</span>' +
+                            '<img src="' + this.escapeAttr(outUrl) + '" alt="Output Stream" ' +
+                                 'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                                 'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
+                        '</div>' +
+                    '</div>';
+                container.appendChild(card);
+            });
         }
 
         async toolStreamHealth() {

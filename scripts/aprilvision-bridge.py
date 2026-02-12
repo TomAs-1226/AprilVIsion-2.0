@@ -1498,6 +1498,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return self._api_streams()
         elif endpoint == 'stream-health':
             return self._api_stream_health()
+        elif endpoint == 'stream-test-suite':
+            return self._api_stream_test_suite()
         elif endpoint == 'camera-info':
             return self._api_camera_info()
         elif endpoint == 'engine-settings':
@@ -1745,6 +1747,70 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             'engine': ENGINE_HOST,
             'engine_online': online,
             'engine_error': err,
+        })
+
+    def _api_stream_test_suite(self):
+        """Run stream diagnostics for dashboard troubleshooting.
+
+        Verifies per-camera input/output stream reachability and grabs one
+        JPEG frame from each stream path as a practical end-to-end test.
+        """
+        started = time.time()
+        online, data, _, err = _engine_probe()
+        cam_list = _extract_cameras(data) if data else []
+
+        camera_results = []
+        passing_cameras = 0
+
+        for i, cam in enumerate(cam_list):
+            in_port, out_port = _stream_ports_for_camera(i, cam)
+            input_status = self._check_stream_port(in_port)
+            output_status = self._check_stream_port(out_port)
+
+            input_frame = _fetch_camera_frame(i, "input", timeout=2.5)
+            output_frame = _fetch_camera_frame(i, "output", timeout=2.5)
+
+            camera_ok = (
+                input_status in ("live", "responding") and
+                output_status in ("live", "responding") and
+                bool(input_frame) and bool(output_frame)
+            )
+            if camera_ok:
+                passing_cameras += 1
+
+            camera_results.append({
+                "camera": cam.get('nickname', cam.get('uniqueName', cam.get('name', f'Camera {i}'))),
+                "index": i,
+                "inputPort": in_port,
+                "outputPort": out_port,
+                "inputStatus": input_status,
+                "outputStatus": output_status,
+                "inputFrameOk": bool(input_frame),
+                "outputFrameOk": bool(output_frame),
+                "inputFrameBytes": len(input_frame) if input_frame else 0,
+                "outputFrameBytes": len(output_frame) if output_frame else 0,
+                "inputUrl": f"/stream/{i}/input",
+                "outputUrl": f"/stream/{i}/output",
+                "pass": camera_ok,
+            })
+
+        total = len(camera_results)
+        suite_pass = online and total > 0 and passing_cameras == total
+
+        self._send_json({
+            "startedAt": int(started),
+            "runtimeMs": int((time.time() - started) * 1000),
+            "engineOnline": online,
+            "engineError": err,
+            "cameraCount": total,
+            "passingCameras": passing_cameras,
+            "overallPass": suite_pass,
+            "results": camera_results,
+            "notes": [
+                "Input/output stream status must be reachable and a sample JPEG frame must be fetchable.",
+                "If status is unreachable, verify PhotonVision camera assignment and USB connection.",
+                "If frame fetch fails but port is reachable, stream may be blocked or still warming up.",
+            ],
         })
 
     def _api_camera_info(self):
