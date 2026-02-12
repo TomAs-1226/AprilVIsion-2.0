@@ -395,6 +395,43 @@
             color: var(--text-muted);
         }
 
+
+        .crop-preview-shell {
+            margin-top: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        .crop-preview-stage {
+            position: relative;
+            width: 100%;
+            max-width: 820px;
+            aspect-ratio: 16/9;
+            background: #000;
+            margin: 0 auto;
+            overflow: hidden;
+            cursor: crosshair;
+            user-select: none;
+        }
+
+        .crop-preview-stage img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            pointer-events: none;
+        }
+
+        .crop-selection-box {
+            position: absolute;
+            border: 2px solid #00ff88;
+            background: rgba(0, 255, 136, 0.15);
+            display: none;
+            pointer-events: none;
+        }
+
         /* ===== Buttons ===== */
         .btn {
             display: inline-flex;
@@ -1312,24 +1349,35 @@
                             <button class="btn" onclick="AVApp.resetCropForSelection()">Reset Selected Crop</button>
                             <button class="btn" onclick="AVApp.resetAllCrops()">Reset All Crops</button>
                         </div>
-                        <div id="cropSetupOutput" class="tool-output" style="margin-top:10px;min-height:45px;">Adjust sliders to set your preferred crop, then click Save Crop.</div>
+                        <div class="btn-group" style="margin-top:8px;">
+                            <button class="btn btn-blue" onclick="AVApp.applySnipSelection()">Apply Rectangle Selection</button>
+                            <button class="btn" onclick="AVApp.clearSnipSelection()">Clear Selection</button>
+                        </div>
+                        <div class="crop-preview-shell">
+                            <div style="padding:8px 12px;background:var(--bg-header);border-bottom:1px solid var(--border-color);font-size:0.76rem;color:var(--text-secondary);">
+                                Snipping Crop Preview: drag a rectangle on this live preview, then click "Apply Rectangle Selection".
+                            </div>
+                            <div class="crop-preview-stage" id="cropPreviewStage"
+                                 onmousedown="AVApp.startSnipSelection(event)"
+                                 onmousemove="AVApp.moveSnipSelection(event)"
+                                 onmouseup="AVApp.endSnipSelection(event)"
+                                 onmouseleave="AVApp.endSnipSelection(event)">
+                                <img id="cropPreviewImg" src="" alt="Crop Preview"
+                                     data-cam-index="0" data-stream-type="output"
+                                     onload="AVApp.handleImgLoad(this, parseInt(this.getAttribute('data-cam-index') || '0', 10), this.getAttribute('data-stream-type') || 'output')"
+                                     onerror="AVApp.handleStreamError(this, parseInt(this.getAttribute('data-cam-index') || '0', 10), this.getAttribute('data-stream-type') || 'output')">
+                                <div id="cropSelectionBox" class="crop-selection-box"></div>
+                            </div>
+                        </div>
+                        <div id="cropSetupOutput" class="tool-output" style="margin-top:10px;min-height:45px;">Adjust sliders or drag a rectangle on preview, then click Save Crop.</div>
                     </div>
                 </div>
 
                 <div class="section-title"><span class="section-icon">&#9724;</span> Stream-Only Feeds</div>
-                <div id="streamRenderHint" class="alert alert-info" style="margin-bottom:10px;">Rendering mode: custom stream cards.</div>
                 <div class="camera-feeds" id="streamOnlyFeedsContainer">
                     <div class="empty-state">
                         <div class="empty-icon">&#128247;</div>
                         <p>Loading dedicated stream-only feeds...</p>
-                    </div>
-                </div>
-                <div id="pvNativeStreamContainer" style="display:none;border:1px solid var(--border-color);border-radius:10px;overflow:hidden;background:#000;">
-                    <div style="padding:10px 12px;background:var(--bg-header);border-bottom:1px solid var(--border-color);font-size:0.8rem;color:var(--text-secondary);">
-                        Cropped PhotonVision stream region (full UI remains available in Pipeline Config tab).
-                    </div>
-                    <div style="position:relative;height:760px;overflow:hidden;background:#000;">
-                        <iframe id="pvNativeStreamFrame" src="/pv/#/cameras" style="position:absolute;top:-80px;left:-210px;width:1850px;height:1080px;border:0;transform:scale(1.05);transform-origin:top left;background:#000;"></iframe>
                     </div>
                 </div>
             </div>
@@ -1688,7 +1736,6 @@
                 allianceColor: localStorage.getItem('av_alliance') || 'blue',
                 driverMode: false,
                 distanceHistory: [],      // last N distance readings for chart
-                streamRenderMode: localStorage.getItem('av_stream_render_mode') || 'custom',
                 backend_ws_connected: false,
                 frontend_ws_connected: false,
                 cropProfiles: (() => { try { return JSON.parse(localStorage.getItem('av_stream_crops') || '{}'); } catch (e) { return {}; } })(),
@@ -1706,6 +1753,8 @@
             this.MAX_DISTANCE_HISTORY = 60;
             this._pvWs = null;          // direct WebSocket to PV engine
             this._pvWsRetries = 0;
+            this._snipDrag = null;
+            this._snipSelection = null;
             this.init();
         }
 
@@ -2227,6 +2276,7 @@
             const xv = document.getElementById('cropXVal'); if (xv) xv.textContent = String(c.x);
             const yv = document.getElementById('cropYVal'); if (yv) yv.textContent = String(c.y);
             const zv = document.getElementById('cropZoomVal'); if (zv) zv.textContent = c.zoom.toFixed(2);
+            this.refreshCropPreviewSource();
         }
 
         onCropControlChange() {
@@ -2246,6 +2296,7 @@
             const yv = document.getElementById('cropYVal'); if (yv) yv.textContent = String(Math.round(y));
             const zv = document.getElementById('cropZoomVal'); if (zv) zv.textContent = zoom.toFixed(2);
             this.applyCropToAllVisibleStreams();
+            this.refreshCropPreviewSource();
         }
 
         saveCropProfiles() {
@@ -2267,6 +2318,7 @@
             delete this.state.cropProfiles[key];
             this.loadCropControlsForSelection();
             this.applyCropToAllVisibleStreams();
+            this.refreshCropPreviewSource();
         }
 
         resetAllCrops() {
@@ -2283,43 +2335,138 @@
             }
         }
 
-        setStreamRenderMode(mode) {
-            this.state.streamRenderMode = mode === 'native' ? 'native' : 'custom';
-            localStorage.setItem('av_stream_render_mode', this.state.streamRenderMode);
-            this.renderStreamOnlyPage();
+        refreshCropPreviewSource() {
+            const img = document.getElementById('cropPreviewImg');
+            const camSel = document.getElementById('cropCamSelect');
+            const streamSel = document.getElementById('cropStreamSelect');
+            if (!img || !camSel || !streamSel) return;
+
+            const camIdx = parseInt(camSel.value || '0', 10);
+            const st = streamSel.value || 'output';
+            img.setAttribute('data-cam-index', String(camIdx));
+            img.setAttribute('data-stream-type', st);
+            img.setAttribute('data-proxy-url', this.getProxyStreamUrl(camIdx, st));
+            img.setAttribute('data-direct-url', this.getDirectStreamUrl(camIdx, st));
+            img.setAttribute('data-frame-url', this.getFrameFallbackUrl(camIdx, st));
+            this.applyCropToImage(img, camIdx, st);
+
+            const current = (img.getAttribute('src') || '').split('?')[0];
+            const desired = this.getDirectStreamUrl(camIdx, st);
+            if (!current || current !== desired) {
+                img.src = desired;
+            }
         }
 
-        renderStreamModeControls() {
-            const customBtn = document.getElementById('btnStreamModeCustom');
-            const nativeBtn = document.getElementById('btnStreamModeNative');
-            const hint = document.getElementById('streamRenderHint');
-            const customContainer = document.getElementById('streamOnlyFeedsContainer');
-            const nativeContainer = document.getElementById('pvNativeStreamContainer');
-            const isNative = this.state.streamRenderMode === 'native';
+        _stagePosToPct(stage, x, y) {
+            const r = stage.getBoundingClientRect();
+            const px = Math.max(0, Math.min(1, (x - r.left) / Math.max(1, r.width)));
+            const py = Math.max(0, Math.min(1, (y - r.top) / Math.max(1, r.height)));
+            return { px, py };
+        }
 
-            if (customBtn) customBtn.className = 'btn' + (isNative ? '' : ' btn-blue');
-            if (nativeBtn) nativeBtn.className = 'btn' + (isNative ? ' btn-blue' : '');
-            if (hint) {
-                hint.textContent = isNative
-                    ? 'Rendering mode: cropped PhotonVision native cameras page.'
-                    : 'Rendering mode: custom stream cards with direct/proxy/frame fallbacks.';
+        startSnipSelection(event) {
+            const stage = document.getElementById('cropPreviewStage');
+            if (!stage) return;
+            const { px, py } = this._stagePosToPct(stage, event.clientX, event.clientY);
+            this._snipDrag = { x0: px, y0: py, x1: px, y1: py };
+            this._snipSelection = null;
+            this._renderSnipSelection();
+        }
+
+        moveSnipSelection(event) {
+            if (!this._snipDrag) return;
+            const stage = document.getElementById('cropPreviewStage');
+            if (!stage) return;
+            const { px, py } = this._stagePosToPct(stage, event.clientX, event.clientY);
+            this._snipDrag.x1 = px;
+            this._snipDrag.y1 = py;
+            this._renderSnipSelection();
+        }
+
+        endSnipSelection(event) {
+            if (!this._snipDrag) return;
+            if (event) this.moveSnipSelection(event);
+            const d = this._snipDrag;
+            const x0 = Math.min(d.x0, d.x1);
+            const y0 = Math.min(d.y0, d.y1);
+            const x1 = Math.max(d.x0, d.x1);
+            const y1 = Math.max(d.y0, d.y1);
+            const w = x1 - x0;
+            const h = y1 - y0;
+            this._snipDrag = null;
+            if (w < 0.02 || h < 0.02) {
+                this._snipSelection = null;
+            } else {
+                this._snipSelection = { x: x0, y: y0, w, h };
             }
-            if (customContainer) customContainer.style.display = isNative ? 'none' : 'grid';
-            if (nativeContainer) nativeContainer.style.display = isNative ? 'block' : 'none';
+            this._renderSnipSelection();
+        }
+
+        _renderSnipSelection() {
+            const box = document.getElementById('cropSelectionBox');
+            if (!box) return;
+            const s = this._snipDrag ? {
+                x: Math.min(this._snipDrag.x0, this._snipDrag.x1),
+                y: Math.min(this._snipDrag.y0, this._snipDrag.y1),
+                w: Math.abs(this._snipDrag.x1 - this._snipDrag.x0),
+                h: Math.abs(this._snipDrag.y1 - this._snipDrag.y0),
+            } : this._snipSelection;
+
+            if (!s) {
+                box.style.display = 'none';
+                return;
+            }
+            box.style.display = 'block';
+            box.style.left = (s.x * 100) + '%';
+            box.style.top = (s.y * 100) + '%';
+            box.style.width = (s.w * 100) + '%';
+            box.style.height = (s.h * 100) + '%';
+        }
+
+        applySnipSelection() {
+            if (!this._snipSelection) {
+                const out = document.getElementById('cropSetupOutput');
+                if (out) {
+                    out.textContent = 'Draw a rectangle on the preview first.';
+                    out.className = 'tool-output warn';
+                }
+                return;
+            }
+            const camSel = document.getElementById('cropCamSelect');
+            const streamSel = document.getElementById('cropStreamSelect');
+            if (!camSel || !streamSel) return;
+
+            const camIdx = parseInt(camSel.value || '0', 10);
+            const st = streamSel.value || 'output';
+            const r = this._snipSelection;
+            const cx = (r.x + (r.w / 2)) * 100;
+            const cy = (r.y + (r.h / 2)) * 100;
+            const zoom = Math.max(1, Math.min(2.2, 1 / Math.max(r.w, r.h)));
+
+            this.state.cropProfiles[this.getCropKey(camIdx, st)] = {
+                x: Math.round(cx),
+                y: Math.round(cy),
+                zoom: Number(zoom.toFixed(2))
+            };
+            this.loadCropControlsForSelection();
+            this.applyCropToAllVisibleStreams();
+
+            const out = document.getElementById('cropSetupOutput');
+            if (out) {
+                out.textContent = 'Rectangle applied. Click Save Crop to persist after restart.';
+                out.className = 'tool-output success';
+            }
+        }
+
+        clearSnipSelection() {
+            this._snipSelection = null;
+            this._snipDrag = null;
+            this._renderSnipSelection();
         }
 
         renderStreamOnlyPage() {
             const container = document.getElementById('streamOnlyFeedsContainer');
             if (!container) return;
-
-            this.renderStreamModeControls();
-            if (this.state.streamRenderMode === 'native') {
-                const iframe = document.getElementById('pvNativeStreamFrame');
-                if (iframe && !iframe.getAttribute('src')) iframe.setAttribute('src', '/pv/#/cameras');
-                this.loadCropControlsForSelection();
-                this.applyCropToAllVisibleStreams();
-                return;
-            }
 
             const cameras = this.state.cameras || [];
             if (cameras.length === 0) {
@@ -2370,6 +2517,7 @@
                 container.appendChild(card);
             });
             this.applyCropToAllVisibleStreams();
+            this.refreshCropPreviewSource();
         }
 
         async toolStreamHealth() {
