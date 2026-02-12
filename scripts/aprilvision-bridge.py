@@ -295,7 +295,75 @@ def _extract_cameras(data):
             item_keys = set(val[0].keys())
             if item_keys & camera_indicators:
                 return val
+
+    # Nested settings payloads (seen in some 2026+ builds)
+    for nested_key in ("settings", "generalSettings", "state", "config"):
+        nested = data.get(nested_key)
+        if isinstance(nested, dict):
+            nested_cams = _extract_cameras(nested)
+            if nested_cams:
+                return nested_cams
     return []
+
+
+def _stream_ports_for_camera(cam_idx, cam_obj=None):
+    """Return (input_port, output_port) for a camera index.
+
+    Prefers per-camera ports published by PhotonVision (WS/settings), falling
+    back to the historical base-port convention.
+    """
+    default_input = STREAM_BASE_PORT + (cam_idx * 2)
+    default_output = default_input + 1
+
+    if isinstance(cam_obj, dict):
+        in_port = cam_obj.get("inputStreamPort")
+        out_port = cam_obj.get("outputStreamPort")
+        if isinstance(in_port, int) and in_port > 0 and isinstance(out_port, int) and out_port > 0:
+            return in_port, out_port
+
+    for cam in _latest_targets["cameras"].values():
+        if not isinstance(cam, dict):
+            continue
+        if int(cam.get("cameraIndex", -1)) == int(cam_idx):
+            in_port = cam.get("inputStreamPort")
+            out_port = cam.get("outputStreamPort")
+            if isinstance(in_port, int) and in_port > 0 and isinstance(out_port, int) and out_port > 0:
+                return in_port, out_port
+
+    return default_input, default_output
+
+
+def _camera_name_for_index(cam_idx):
+    """Resolve camera name from cached state by index."""
+    target = int(cam_idx)
+    for name, cam in _latest_targets["cameras"].items():
+        if isinstance(cam, dict) and int(cam.get("cameraIndex", -1)) == target:
+            return name
+    return None
+
+
+def _pose_from_transform(transform):
+    """Normalize PhotonVision transform payloads into {x,y,z,rx,ry,rz}.
+
+    Supports both nested shape:
+      {translation:{x,y,z}, rotation:{x,y,z}}
+    and flat shape:
+      {x,y,z,angle_x,angle_y,angle_z}
+    """
+    if not isinstance(transform, dict):
+        return None
+
+    translation = transform.get("translation") if isinstance(transform.get("translation"), dict) else transform
+    rotation = transform.get("rotation") if isinstance(transform.get("rotation"), dict) else {}
+
+    return {
+        "x": round(float(translation.get("x", 0)), 4),
+        "y": round(float(translation.get("y", 0)), 4),
+        "z": round(float(translation.get("z", 0)), 4),
+        "rx": round(float(rotation.get("angle_x", rotation.get("x", transform.get("angle_x", 0)))), 2),
+        "ry": round(float(rotation.get("angle_y", rotation.get("y", transform.get("angle_y", 0)))), 2),
+        "rz": round(float(rotation.get("angle_z", rotation.get("z", transform.get("angle_z", 0)))), 2),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -658,7 +726,7 @@ def _process_pv_ws_data(data):
                         _update_camera_from_ws(cam_name, cam_conf)
 
             # Per-camera result updates (incremental)
-            for key in ("cameraResult", "result", "pipelineResult", "cameraResults", "pipelineResults", "results"):
+            for key in ("cameraResult", "result", "pipelineResult", "cameraResults", "pipelineResults", "results", "updatePipelineResult"):
                 result = data_item.get(key)
                 if not result:
                     continue
@@ -670,7 +738,9 @@ def _process_pv_ws_data(data):
                     else:
                         for cam_name, cam_result in result.items():
                             if isinstance(cam_result, dict):
-                                _update_result_from_ws(str(cam_name), cam_result)
+                                cam_idx = cam_result.get("cameraIndex", cam_name)
+                                resolved_name = _camera_name_for_index(cam_idx)
+                                _update_result_from_ws(resolved_name or str(cam_name), cam_result)
                 elif isinstance(result, list):
                     for i, cam_result in enumerate(result):
                         if isinstance(cam_result, dict):
@@ -678,8 +748,10 @@ def _process_pv_ws_data(data):
                                         or cam_result.get("camera") or f"Camera_{cam_result.get('cameraIndex', i)}")
                             _update_result_from_ws(cam_name, cam_result)
 
-            fps = data_item.get("fps")
-            latency = data_item.get("latency") or data_item.get("latencyMillis")
+            metrics = data_item.get("metrics") if isinstance(data_item.get("metrics"), dict) else {}
+            fps = data_item.get("fps", metrics.get("fps"))
+            latency = (data_item.get("latency") or data_item.get("latencyMillis") or
+                       metrics.get("latency") or metrics.get("latencyMillis"))
             if fps is not None or latency is not None:
                 cam_name = data_item.get("cameraName") or data_item.get("camera")
                 if cam_name and cam_name in _latest_targets["cameras"]:
@@ -736,6 +808,8 @@ def _update_camera_from_ws(cam_name, cam_conf):
         "pipelineCount": len(pipelines) if isinstance(pipelines, list) else 0,
         "calibrated": calibrated,
         "cameraPath": cam_conf.get("path") or cam_conf.get("cameraPath") or "",
+        "inputStreamPort": cam_conf.get("inputStreamPort", existing.get("inputStreamPort")),
+        "outputStreamPort": cam_conf.get("outputStreamPort", existing.get("outputStreamPort")),
         "driverMode": cam_conf.get("driverMode", False),
     })
     # Preserve any existing target data (don't overwrite live results with config)
@@ -775,6 +849,9 @@ def _update_result_from_ws(cam_name, result):
     # Some PV payloads include IDs outside targets array.
     used_ids = (result.get("fiducialIDsUsed") or result.get("fiducialIdsUsed") or
                 result.get("tagIds") or result.get("detectedTagIds"))
+    if not used_ids and isinstance(result.get("multitagResult"), dict):
+        used_ids = (result["multitagResult"].get("fiducialIDsUsed") or
+                    result["multitagResult"].get("fiducialIdsUsed"))
     if isinstance(used_ids, list):
         for fid in used_ids:
             try:
@@ -794,34 +871,15 @@ def _update_result_from_ws(cam_name, result):
     pose_data = None
     best_cam_to_target = best_target.get("bestCameraToTarget") or best_target.get("cameraToTarget")
     if best_cam_to_target and isinstance(best_cam_to_target, dict):
-        translation = best_cam_to_target.get("translation") or {}
-        rotation = best_cam_to_target.get("rotation") or {}
-        pose_data = {
-            "x": round(float(translation.get("x", 0)), 4),
-            "y": round(float(translation.get("y", 0)), 4),
-            "z": round(float(translation.get("z", 0)), 4),
-            "rx": round(float(rotation.get("x", 0)), 2),
-            "ry": round(float(rotation.get("y", 0)), 2),
-            "rz": round(float(rotation.get("z", 0)), 2),
-        }
+        pose_data = _pose_from_transform(best_cam_to_target)
 
     # Multi-tag pose estimate
     multitag = result.get("multiTagResult") or result.get("multitagResult")
     multitag_pose = None
     if multitag and isinstance(multitag, dict):
-        est = multitag.get("estimatedPose") or multitag.get("best") or multitag
+        est = multitag.get("estimatedPose") or multitag.get("best") or multitag.get("bestTransform") or multitag
         if isinstance(est, dict):
-            mt_trans = est.get("translation") or {}
-            mt_rot = est.get("rotation") or {}
-            if mt_trans:
-                multitag_pose = {
-                    "x": round(float(mt_trans.get("x", 0)), 4),
-                    "y": round(float(mt_trans.get("y", 0)), 4),
-                    "z": round(float(mt_trans.get("z", 0)), 4),
-                    "rx": round(float(mt_rot.get("x", 0)), 2),
-                    "ry": round(float(mt_rot.get("y", 0)), 2),
-                    "rz": round(float(mt_rot.get("z", 0)), 2),
-                }
+            multitag_pose = _pose_from_transform(est)
             # Update robot pose from multi-tag
             if multitag_pose and (multitag_pose["x"] != 0 or multitag_pose["y"] != 0):
                 _latest_targets["robot_pose"] = {
@@ -1171,9 +1229,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return self._send_error(400, "Bad Request", "Camera index must be a number")
 
         stream_type = parts[2] if len(parts) > 2 else 'input'
-        port = STREAM_BASE_PORT + (cam_idx * 2)
-        if stream_type == 'output':
-            port += 1
+        input_port, output_port = _stream_ports_for_camera(cam_idx)
+        port = output_port if stream_type == 'output' else input_port
 
         sock = None
         # cscore MJPEG server paths in order of likelihood
@@ -1505,8 +1562,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     'source': 'engine',
                     'index': i,
                     'connected': True,
-                    'inputStreamPort': STREAM_BASE_PORT + (i * 2),
-                    'outputStreamPort': STREAM_BASE_PORT + (i * 2) + 1,
+                    'inputStreamPort': _stream_ports_for_camera(i, cam)[0],
+                    'outputStreamPort': _stream_ports_for_camera(i, cam)[1],
                 })
         all_cameras = system_cameras + engine_cameras
         self._send_json({
@@ -1568,8 +1625,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 'index': i,
                 'inputUrl': f'/stream/{i}/input',
                 'outputUrl': f'/stream/{i}/output',
-                'inputPort': STREAM_BASE_PORT + (i * 2),
-                'outputPort': STREAM_BASE_PORT + (i * 2) + 1,
+                'inputPort': _stream_ports_for_camera(i, cam)[0],
+                'outputPort': _stream_ports_for_camera(i, cam)[1],
             })
         self._send_json({'streams': streams, 'engine_online': online, 'engine_error': err})
 
@@ -1616,13 +1673,13 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         # Check stream ports for first 4 possible cameras
         results['stream_probes'] = []
         for i in range(4):
-            port = STREAM_BASE_PORT + (i * 2)
+            in_port, out_port = _stream_ports_for_camera(i)
             results['stream_probes'].append({
                 'camera_index': i,
-                'input_port': port,
-                'output_port': port + 1,
-                'input_status': self._check_stream_port(port),
-                'output_status': self._check_stream_port(port + 1),
+                'input_port': in_port,
+                'output_port': out_port,
+                'input_status': self._check_stream_port(in_port),
+                'output_status': self._check_stream_port(out_port),
             })
 
         self._send_json(results)
@@ -1653,8 +1710,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         if cam_list:
             for i, cam in enumerate(cam_list):
-                input_port = STREAM_BASE_PORT + (i * 2)
-                output_port = input_port + 1
+                input_port, output_port = _stream_ports_for_camera(i, cam)
                 results.append({
                     'camera': cam.get('nickname', cam.get('uniqueName', cam.get('name', f'Camera {i}'))),
                     'index': i,
@@ -1669,8 +1725,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             # No cameras found in engine config - still probe the first few ports
             # in case streams are running even though settings API differs
             for i in range(4):
-                input_port = STREAM_BASE_PORT + (i * 2)
-                output_port = input_port + 1
+                input_port, output_port = _stream_ports_for_camera(i)
                 input_status = self._check_stream_port(input_port)
                 output_status = self._check_stream_port(output_port)
                 if input_status != 'unreachable' or output_status != 'unreachable':
@@ -1700,8 +1755,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         cam_list = _extract_cameras(data) if data else []
 
         for i, cam in enumerate(cam_list):
-            input_port = STREAM_BASE_PORT + (i * 2)
-            output_port = input_port + 1
+            input_port, output_port = _stream_ports_for_camera(i, cam)
             calibrations = cam.get('calibrations', cam.get('cameraCalibrations', []))
             if not isinstance(calibrations, list):
                 calibrations = []
@@ -1810,7 +1864,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         # 4. Streams alive
         streams_live = 0
         for i in range(len(cam_list)):
-            port = STREAM_BASE_PORT + (i * 2) + 1  # output stream
+            _, port = _stream_ports_for_camera(i)  # output stream
             if self._check_stream_port(port) == 'live':
                 streams_live += 1
         checks.append({
