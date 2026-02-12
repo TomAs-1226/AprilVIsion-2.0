@@ -9,6 +9,9 @@ Type=simple
 User=photonvision
 Group=photonvision
 WorkingDirectory=/opt/aprilvision
+# NOTE: This file is a template. setup.sh --deploy generates the actual service
+# with the correct --team flag. Edit /etc/systemd/system/aprilvision-dashboard.service
+# for the live version, or re-run: sudo ./setup.sh --deploy --team YOUR_TEAM
 ExecStart=/usr/bin/python3 /opt/aprilvision/bridge.py --port 5801 --engine-port 5800 --web-dir /opt/aprilvision/web
 Restart=always
 RestartSec=3

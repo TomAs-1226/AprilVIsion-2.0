@@ -1480,6 +1480,11 @@
                     this.state.uptime = data.uptime || null;
                     this.state.consecutiveFailures = 0;
 
+                    // Team number from bridge --team flag
+                    if (data.team_number) {
+                        this.state.teamNumber = data.team_number;
+                    }
+
                     if (data.cameras && Array.isArray(data.cameras)) {
                         this.state.cameras = data.cameras;
                     }
@@ -2461,7 +2466,16 @@
             verEl.textContent = s.version;
 
             if (s.teamNumber) {
-                ntEl.textContent = '10.' + Math.floor(s.teamNumber / 100) + '.' + (s.teamNumber % 100) + '.2:1735';
+                const t = String(s.teamNumber);
+                let ip;
+                if (t.length <= 2) {
+                    ip = '10.0.' + t + '.2';
+                } else if (t.length === 3) {
+                    ip = '10.' + t[0] + '.' + t.substring(1) + '.2';
+                } else {
+                    ip = '10.' + t.substring(0, t.length - 2) + '.' + t.substring(t.length - 2) + '.2';
+                }
+                ntEl.textContent = ip + ':5810';
             }
         }
 

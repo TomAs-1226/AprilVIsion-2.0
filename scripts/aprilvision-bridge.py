@@ -48,6 +48,8 @@ PROXY_PORT = 5801
 ENGINE_HOST = "127.0.0.1"
 ENGINE_PORT = 5800
 STREAM_BASE_PORT = 1181
+TEAM_NUMBER = 0          # Set via --team; used for NT server address and dashboard display
+NT_SERVER = "127.0.0.1"  # Overridden when --team is set (10.TE.AM.2)
 
 # Path to custom dashboard files – resolved at import time, overridable via --web-dir
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -312,12 +314,22 @@ def _target_poll_loop():
 
 
 def _try_ntcore():
-    """Try to import and initialize ntcore for NetworkTables data."""
+    """Try to import and initialize ntcore for NetworkTables data.
+
+    Connects to the NT server based on the configured team number:
+      - If TEAM_NUMBER is set, connects to 10.TE.AM.2 (roboRIO)
+      - Falls back to 127.0.0.1 (local PV NT server for testing)
+    """
+    nt_host = NT_SERVER
     try:
         import ntcore
         inst = ntcore.NetworkTableInstance.getDefault()
         inst.startClient4("AprilVision Dashboard")
-        inst.setServer("127.0.0.1", 1735)
+        if TEAM_NUMBER > 0:
+            # Connect to roboRIO by team number (ntcore resolves mDNS)
+            inst.setServerTeam(TEAM_NUMBER)
+        else:
+            inst.setServer(nt_host, 1735)
         with _targets_lock:
             _latest_targets["source"] = "ntcore"
         return inst
@@ -325,7 +337,7 @@ def _try_ntcore():
         pass
     try:
         from networktables import NetworkTables
-        NetworkTables.initialize(server="127.0.0.1")
+        NetworkTables.initialize(server=nt_host)
         with _targets_lock:
             _latest_targets["source"] = "ntcore"
         return NetworkTables
@@ -916,6 +928,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             'uptime': int(time.time() - START_TIME),
             'cameras': cameras_out,
             'camera_count': len(cameras_out),
+            'team_number': TEAM_NUMBER if TEAM_NUMBER > 0 else None,
+            'nt_server': NT_SERVER,
         })
 
     def _api_streams(self):
@@ -1297,6 +1311,12 @@ def main():
     print("=" * 60)
     print(f"  Dashboard:       http://0.0.0.0:{PROXY_PORT}")
     print(f"  Engine (hidden): http://{ENGINE_HOST}:{ENGINE_PORT}")
+    if TEAM_NUMBER > 0:
+        print(f"  Team Number:     {TEAM_NUMBER}")
+        print(f"  NT Server:       {NT_SERVER}")
+    else:
+        print(f"  Team Number:     (not set - use --team)")
+        print(f"  NT Server:       {NT_SERVER} (local)")
     print(f"  Web directory:   {WEB_DIR}")
     index_ok = os.path.isfile(os.path.join(WEB_DIR, "index.html"))
     if index_ok:
@@ -1327,17 +1347,39 @@ def main():
         server.shutdown()
 
 
+def _team_to_ip(team):
+    """Convert FRC team number to roboRIO IP (10.TE.AM.2)."""
+    if team <= 0:
+        return "127.0.0.1"
+    t = str(team)
+    if len(t) <= 2:
+        return f"10.0.{t}.2"
+    elif len(t) == 3:
+        return f"10.{t[0]}.{t[1:]}.2"
+    else:
+        return f"10.{t[:2]}.{t[2:]}.2"
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="AprilVision 3.2 Dashboard Server")
     parser.add_argument("--port", type=int, default=PROXY_PORT)
     parser.add_argument("--engine-port", type=int, default=ENGINE_PORT)
+    parser.add_argument("--team", type=int, default=0,
+                        help="FRC team number (sets NT server to 10.TE.AM.2)")
+    parser.add_argument("--nt-server", type=str, default=None,
+                        help="NetworkTables server address (overrides --team)")
     parser.add_argument("--web-dir", type=str, default=None,
                         help="Path to the web/ directory containing index.html")
     parser.add_argument("--pv-port", type=int, default=None, help="(deprecated)")
     args = parser.parse_args()
     PROXY_PORT = args.port
     ENGINE_PORT = args.engine_port if args.pv_port is None else args.pv_port
+    if args.team > 0:
+        TEAM_NUMBER = args.team
+        NT_SERVER = _team_to_ip(args.team)
+    if args.nt_server:
+        NT_SERVER = args.nt_server
     if args.web_dir:
         WEB_DIR = os.path.abspath(args.web_dir)
     main()

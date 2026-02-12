@@ -11,6 +11,7 @@
 # Options:
 #   --team TEAM       Set team number (e.g., 1234)
 #   --install-only    Only install service (skip engine download)
+#   --deploy          Quick redeploy: copy files + restart services (no engine/Java)
 #   --dev             Development mode (no service install)
 #   --clean           Remove existing installation first
 #   --help            Show this help
@@ -18,6 +19,8 @@
 # Examples:
 #   ./setup.sh --team 1234          # Full setup for team 1234
 #   ./setup.sh --clean --team 5678  # Clean install for team 5678
+#   ./setup.sh --deploy             # Redeploy dashboard files + restart
+#   ./setup.sh --deploy --team 5805 # Redeploy + update team number
 #===============================================================================
 
 set -e
@@ -40,6 +43,7 @@ TEAM_NUMBER=""
 INSTALL_ONLY=false
 DEV_MODE=false
 CLEAN_INSTALL=false
+DEPLOY_ONLY=false
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/photonvision"
 DASHBOARD_DIR="/opt/aprilvision"
@@ -150,6 +154,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --install-only)
             INSTALL_ONLY=true
+            shift
+            ;;
+        --deploy)
+            DEPLOY_ONLY=true
             shift
             ;;
         --dev)
@@ -503,6 +511,12 @@ WantedBy=multi-user.target
 EOF
 
     # AprilVision dashboard service
+    # Build ExecStart with optional --team flag
+    local BRIDGE_CMD="/usr/bin/python3 ${DASHBOARD_DIR}/bridge.py --port 5801 --engine-port 5800 --web-dir ${DASHBOARD_DIR}/web"
+    if [[ -n "$TEAM_NUMBER" && "$TEAM_NUMBER" != "0" && "$TEAM_NUMBER" != "0000" ]]; then
+        BRIDGE_CMD="${BRIDGE_CMD} --team ${TEAM_NUMBER}"
+    fi
+
     sudo tee "/etc/systemd/system/aprilvision-dashboard.service" > /dev/null << EOF
 [Unit]
 Description=AprilVision 3.2 - Dashboard Service
@@ -514,7 +528,7 @@ Type=simple
 User=photonvision
 Group=photonvision
 WorkingDirectory=${DASHBOARD_DIR}
-ExecStart=/usr/bin/python3 ${DASHBOARD_DIR}/bridge.py --port 5801 --engine-port 5800
+ExecStart=${BRIDGE_CMD}
 Restart=always
 RestartSec=3
 TimeoutStartSec=15
@@ -696,6 +710,28 @@ print_completion() {
 
 main() {
     print_banner
+
+    # Quick deploy mode: just copy files + restart (no engine/Java/user setup)
+    if $DEPLOY_ONLY; then
+        log_info "Deploy mode: updating dashboard files and restarting service"
+        if [[ -n "$TEAM_NUMBER" && "$TEAM_NUMBER" != "0" ]]; then
+            configure_team
+        fi
+        install_files
+        install_services
+        # Restart services
+        sudo systemctl daemon-reload
+        sudo systemctl restart aprilvision-dashboard 2>/dev/null || true
+        sleep 1
+        if systemctl is-active --quiet aprilvision-dashboard 2>/dev/null; then
+            log_success "Dashboard service restarted"
+        else
+            log_warn "Dashboard may still be starting. Check: journalctl -u aprilvision-dashboard -n 20"
+        fi
+        verify_installation
+        exit 0
+    fi
+
     check_root
     check_os_compatibility
     detect_architecture
