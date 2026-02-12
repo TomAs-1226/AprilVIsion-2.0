@@ -343,9 +343,39 @@
         .camera-preview-card .cam-thumb {
             width: 100%;
             height: 200px;
-            object-fit: contain;
+            object-fit: cover;
             background: #000;
             display: block;
+        }
+
+        .camera-preview-streams {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1px;
+            background: #000;
+        }
+
+        .camera-preview-streams .cam-stream {
+            position: relative;
+            background: #000;
+        }
+
+        .camera-preview-streams .cam-stream-label {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            z-index: 2;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            font-size: 0.62rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .camera-preview-streams .cam-thumb {
+            height: 160px;
         }
 
         .camera-preview-card .cam-info {
@@ -1639,6 +1669,8 @@
                 driverMode: false,
                 distanceHistory: [],      // last N distance readings for chart
                 streamRenderMode: localStorage.getItem('av_stream_render_mode') || 'custom',
+                backend_ws_connected: false,
+                frontend_ws_connected: false,
             };
             this.pollTimer = null;
             this.cameraPollTimer = null;
@@ -1766,7 +1798,7 @@
                     this.state.proxyOnline = data.proxy_online !== undefined ? data.proxy_online : true;
                     this.state.version = data.version || 'v3.2.0';
                     this.state.uptime = data.uptime || null;
-                    this.state.ws_connected = data.ws_connected || false;
+                    this.state.backend_ws_connected = data.ws_connected || false;
                     this.state.data_source = data.data_source || 'none';
                     this.state.consecutiveFailures = 0;
 
@@ -1963,16 +1995,16 @@
                     this._pvWs.onopen = () => {
                         console.log('[AV] PV WebSocket connected via', wsUrl);
                         this._pvWsRetries = 0;
-                        this.state.ws_connected = true;
+                        this.state.frontend_ws_connected = true;
                     };
 
                     this._pvWs.onmessage = (event) => {
-                        if (event.data) this.state.ws_connected = true;
+                        if (event.data) this.state.frontend_ws_connected = true;
                     };
 
                     this._pvWs.onclose = () => {
                         console.log('[AV] PV WebSocket closed:', wsUrl);
-                        this.state.ws_connected = false;
+                        this.state.frontend_ws_connected = false;
                         this._pvWs = null;
 
                         // If direct failed and proxy candidate exists, try proxy immediately.
@@ -1987,7 +2019,7 @@
                     };
 
                     this._pvWs.onerror = () => {
-                        this.state.ws_connected = false;
+                        this.state.frontend_ws_connected = false;
                     };
                 } catch (e) {
                     if (idx + 1 < candidates.length) {
@@ -2861,7 +2893,7 @@
             }
             this.setDot('dotProxy', 'txtProxy', s.proxyOnline, false);
             // PV data link (WebSocket to engine)
-            const wsConnected = s.ws_connected || (s.targets && s.targets.wsConnected);
+            const wsConnected = s.backend_ws_connected || s.frontend_ws_connected || (s.targets && s.targets.wsConnected);
             const dataSource = s.data_source || (s.targets && s.targets.dataSource) || 'none';
             if (wsConnected) {
                 this.setDot('dotWebsocket', 'txtWebsocket', true, false);
@@ -2984,9 +3016,9 @@
                 return;
             }
 
-            // Only re-render if camera count changed
+            // Re-render when camera count changes OR preview layout is stale.
             const existing = container.querySelectorAll('.camera-preview-card');
-            if (existing.length === cameras.length) {
+            if (existing.length === cameras.length && container.querySelector('.camera-preview-streams')) {
                 this.refreshBrokenImages(container);
                 return;
             }
@@ -2997,16 +3029,35 @@
                 card.className = 'camera-preview-card';
                 card.setAttribute('data-cam-index', cam.index);
 
-                const directUrl = this.getDirectStreamUrl(cam.index, 'output');
-                const proxyUrl = this.getProxyStreamUrl(cam.index, 'output');
-                const frameUrl = this.getFrameFallbackUrl(cam.index, 'output');
+                const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
+                const proxyInputUrl = this.getProxyStreamUrl(cam.index, 'input');
+                const frameInputUrl = this.getFrameFallbackUrl(cam.index, 'input');
+
+                const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
+                const proxyOutputUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const frameOutputUrl = this.getFrameFallbackUrl(cam.index, 'output');
+
                 card.innerHTML =
-                    '<img class="cam-thumb" src="' + this.escapeAttr(directUrl) + '" alt="' + this.escapeAttr(cam.name) + '" ' +
-                        'data-direct-url="' + this.escapeAttr(directUrl) + '" ' +
-                        'data-proxy-url="' + this.escapeAttr(proxyUrl) + '" ' +
-                        'data-frame-url="' + this.escapeAttr(frameUrl) + '" ' +
-                        'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
-                        'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')" loading="lazy">' +
+                    '<div class="camera-preview-streams">' +
+                        '<div class="cam-stream">' +
+                            '<span class="cam-stream-label">Input</span>' +
+                            '<img class="cam-thumb" src="' + this.escapeAttr(directInputUrl) + '" alt="' + this.escapeAttr((cam.name || 'Camera ' + cam.index) + ' Input') + '" ' +
+                                'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
+                                'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
+                                'data-frame-url="' + this.escapeAttr(frameInputUrl) + '" ' +
+                                'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
+                                'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')" loading="lazy">' +
+                        '</div>' +
+                        '<div class="cam-stream">' +
+                            '<span class="cam-stream-label">Processed</span>' +
+                            '<img class="cam-thumb" src="' + this.escapeAttr(directOutputUrl) + '" alt="' + this.escapeAttr((cam.name || 'Camera ' + cam.index) + ' Output') + '" ' +
+                                'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
+                                'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
+                                'data-frame-url="' + this.escapeAttr(frameOutputUrl) + '" ' +
+                                'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                                'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')" loading="lazy">' +
+                        '</div>' +
+                    '</div>' +
                     '<div class="cam-info">' +
                     '<span class="cam-name">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
                     '<span class="cam-index">#' + cam.index + (cam.calibrated ? ' &#10003;' : '') + '</span>' +
