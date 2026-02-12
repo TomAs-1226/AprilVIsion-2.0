@@ -386,7 +386,14 @@ def _poll_ntcore(nt):
                             target_skew = cam_table.getEntry("targetSkew").getDouble(0)
                             best_id = cam_table.getEntry("targetFiducialId").getDouble(-1)
 
-                            # 3D pose if available
+                            # Pipeline FPS (heartbeat counter)
+                            fps = 0
+                            try:
+                                fps = cam_table.getEntry("heartbeat").getDouble(0)
+                            except Exception:
+                                pass
+
+                            # 3D pose of best target
                             pose_data = None
                             try:
                                 bp = cam_table.getEntry("targetPose")
@@ -403,6 +410,35 @@ def _poll_ntcore(nt):
                             except Exception:
                                 pass
 
+                            # Multi-tag: read ALL detected fiducial IDs
+                            # PV publishes targetFiducialIds (plural) as int array
+                            all_tag_ids = []
+                            try:
+                                ids_arr = cam_table.getEntry("targetFiducialIds").getIntegerArray([])
+                                all_tag_ids = [int(x) for x in ids_arr if x >= 0]
+                            except Exception:
+                                pass
+                            # Fallback: at least include the best target
+                            if not all_tag_ids and int(best_id) >= 0:
+                                all_tag_ids = [int(best_id)]
+
+                            # Multi-tag pose estimate (field-space)
+                            multitag_pose = None
+                            try:
+                                mt = cam_table.getEntry("multiTagBestPose")
+                                mt_arr = mt.getDoubleArray([])
+                                if len(mt_arr) >= 3:
+                                    multitag_pose = {
+                                        "x": round(mt_arr[0], 4),
+                                        "y": round(mt_arr[1], 4),
+                                        "z": round(mt_arr[2], 4),
+                                        "rx": round(mt_arr[3], 2) if len(mt_arr) > 3 else 0,
+                                        "ry": round(mt_arr[4], 2) if len(mt_arr) > 4 else 0,
+                                        "rz": round(mt_arr[5], 2) if len(mt_arr) > 5 else 0,
+                                    }
+                            except Exception:
+                                pass
+
                             _latest_targets["cameras"][cam_name] = {
                                 "hasTarget": has_target,
                                 "latencyMs": round(latency, 1),
@@ -411,7 +447,11 @@ def _poll_ntcore(nt):
                                 "targetArea": round(target_area, 2),
                                 "targetSkew": round(target_skew, 2),
                                 "bestFiducialId": int(best_id),
+                                "allTagIds": all_tag_ids,
+                                "tagCount": len(all_tag_ids),
                                 "pose": pose_data,
+                                "multitagPose": multitag_pose,
+                                "fps": fps,
                             }
                         except Exception:
                             pass
@@ -865,6 +905,12 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return self._api_targets()
         elif endpoint == 'match-readiness':
             return self._api_match_readiness()
+        elif endpoint == 'set-pipeline' and method == 'POST':
+            return self._api_set_pipeline()
+        elif endpoint == 'set-driver-mode' and method == 'POST':
+            return self._api_set_driver_mode()
+        elif endpoint == 'performance':
+            return self._api_performance()
         else:
             self._send_json({"error": "Unknown endpoint"}, 404)
 
@@ -1222,6 +1268,102 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             'allPass': all_pass,
             'summary': 'MATCH READY' if all_critical else 'NOT READY - critical checks failed',
         })
+
+    def _api_set_pipeline(self):
+        """Switch the active pipeline for a camera via engine API."""
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+            cam_index = body.get("cameraIndex", 0)
+            pipe_index = body.get("pipelineIndex", 0)
+            # PV API: POST /api/v1/settings with JSON body
+            payload = json.dumps({
+                "cameraIndex": cam_index,
+                "pipelineIndex": pipe_index,
+            }).encode()
+            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=5)
+            conn.request("POST", "/api/v1/setPipeline",
+                         body=payload,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            if resp.status < 300:
+                self._send_json({"ok": True, "cameraIndex": cam_index, "pipelineIndex": pipe_index})
+            else:
+                # Try alternate API path
+                conn2 = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=5)
+                conn2.request("POST", f"/api/settings/camera/{cam_index}/pipeline/{pipe_index}",
+                              headers={"Content-Type": "application/json"})
+                resp2 = conn2.getresponse()
+                resp2.read()
+                conn2.close()
+                self._send_json({"ok": resp2.status < 300, "cameraIndex": cam_index, "pipelineIndex": pipe_index})
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _api_set_driver_mode(self):
+        """Toggle driver mode for a camera (streams only, no processing)."""
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+            cam_index = body.get("cameraIndex", 0)
+            enabled = body.get("enabled", True)
+            payload = json.dumps({
+                "cameraIndex": cam_index,
+                "driverMode": enabled,
+            }).encode()
+            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=5)
+            conn.request("POST", "/api/v1/setDriverMode",
+                         body=payload,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            self._send_json({"ok": resp.status < 300, "cameraIndex": cam_index, "driverMode": enabled})
+        except Exception as e:
+            self._send_json({"ok": False, "error": str(e)}, 500)
+
+    def _api_performance(self):
+        """Return performance metrics: FPS, latency, CPU, memory."""
+        perf = {"cameras": {}, "system": {}}
+        with _targets_lock:
+            for cam_name, cam_data in _latest_targets["cameras"].items():
+                perf["cameras"][cam_name] = {
+                    "fps": cam_data.get("fps", 0),
+                    "latencyMs": cam_data.get("latencyMs", 0),
+                    "tagCount": cam_data.get("tagCount", 0),
+                    "hasTarget": cam_data.get("hasTarget", False),
+                }
+        # System metrics
+        try:
+            with open("/proc/loadavg", "r") as f:
+                parts = f.read().split()
+                perf["system"]["loadAvg1m"] = float(parts[0])
+                perf["system"]["loadAvg5m"] = float(parts[1])
+        except Exception:
+            pass
+        try:
+            with open("/proc/meminfo", "r") as f:
+                mem = {}
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        mem[parts[0].rstrip(':')] = int(parts[1])
+                total = mem.get("MemTotal", 1)
+                avail = mem.get("MemAvailable", total)
+                perf["system"]["memUsedPct"] = round(100 * (1 - avail / total), 1)
+                perf["system"]["memTotalMB"] = round(total / 1024)
+                perf["system"]["memAvailMB"] = round(avail / 1024)
+        except Exception:
+            pass
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                perf["system"]["cpuTempC"] = round(int(f.read().strip()) / 1000, 1)
+        except Exception:
+            pass
+        perf["system"]["uptimeS"] = int(time.time() - START_TIME)
+        self._send_json(perf)
 
     def _api_engine_settings(self):
         """Get detection engine settings (proxied)."""

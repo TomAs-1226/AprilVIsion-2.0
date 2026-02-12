@@ -230,9 +230,17 @@ install_dependencies() {
             unzip \
             v4l-utils \
             python3 \
+            python3-pip \
+            python3-numpy \
             libatomic1 \
             libglib2.0-0
         log_success "System dependencies installed"
+
+        # Install Python packages (OpenCV, numpy)
+        log_info "Installing Python packages (OpenCV, numpy)..."
+        pip3 install --break-system-packages opencv-contrib-python numpy 2>/dev/null \
+            || pip3 install opencv-contrib-python numpy 2>/dev/null \
+            || log_warn "pip install failed - try: pip3 install -r ${SCRIPT_DIR}/requirements.txt"
     else
         log_success "System dependencies already installed"
     fi

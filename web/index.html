@@ -868,6 +868,11 @@
                     <span class="nav-icon">&#9881;</span> Settings
                 </a>
 
+                <div class="nav-section-label">Competition</div>
+                <a class="nav-link" href="#/driver" data-page="driver">
+                    <span class="nav-icon">&#127919;</span> Driver View
+                </a>
+
                 <div class="nav-section-label">Utilities</div>
                 <a class="nav-link" href="#/tools" data-page="tools">
                     <span class="nav-icon">&#9874;</span> Tools
@@ -1082,6 +1087,43 @@
                     </div>
                 </div>
 
+                <!-- Alliance + Controls Bar -->
+                <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+                    <!-- Alliance Color Selector -->
+                    <div class="panel" style="flex:0 0 auto;margin:0;">
+                        <div class="panel-body" style="padding:8px 12px;display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Alliance:</span>
+                            <button id="allianceBlueBtn" onclick="AVApp.setAlliance('blue')" style="
+                                padding:4px 14px;border-radius:6px;font-size:0.75rem;font-weight:700;cursor:pointer;border:2px solid #3b82f6;
+                                background:rgba(59,130,246,0.2);color:#3b82f6;transition:all 0.2s;
+                            ">BLUE</button>
+                            <button id="allianceRedBtn" onclick="AVApp.setAlliance('red')" style="
+                                padding:4px 14px;border-radius:6px;font-size:0.75rem;font-weight:700;cursor:pointer;border:2px solid #ef4444;
+                                background:transparent;color:#ef4444;transition:all 0.2s;
+                            ">RED</button>
+                        </div>
+                    </div>
+
+                    <!-- Quick Pipeline Switcher -->
+                    <div class="panel" style="flex:1;min-width:200px;margin:0;">
+                        <div class="panel-body" style="padding:8px 12px;display:flex;align-items:center;gap:8px;" id="quickPipelineSwitcher">
+                            <span style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Pipeline:</span>
+                            <span style="font-size:0.78rem;color:var(--text-secondary);">Loading cameras...</span>
+                        </div>
+                    </div>
+
+                    <!-- Driver Mode Toggle -->
+                    <div class="panel" style="flex:0 0 auto;margin:0;">
+                        <div class="panel-body" style="padding:8px 12px;display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Driver Mode:</span>
+                            <button id="driverModeToggle" onclick="AVApp.toggleDriverMode()" style="
+                                padding:4px 14px;border-radius:6px;font-size:0.75rem;font-weight:700;cursor:pointer;
+                                border:2px solid var(--border-subtle);background:transparent;color:var(--text-secondary);transition:all 0.2s;
+                            ">OFF</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Field Mini-Map -->
                 <div class="section-title"><span class="section-icon">&#127759;</span> Field Position</div>
                 <div class="panel" style="margin-bottom: 20px;">
@@ -1090,6 +1132,32 @@
                         <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:0.68rem;color:var(--text-muted);">
                             <span>FRC 2026 Field (16.54m x 8.21m)</span>
                             <span id="fieldPoseLabel">No pose data</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance & Distance -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+                    <!-- Performance Monitor -->
+                    <div class="panel">
+                        <div class="panel-header">Performance Monitor</div>
+                        <div class="panel-body" id="perfMonitorPanel">
+                            <div style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:12px 0;">
+                                Waiting for performance data...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Distance Chart -->
+                    <div class="panel">
+                        <div class="panel-header">Tag Distance (Last 30s)</div>
+                        <div class="panel-body" style="padding:8px;">
+                            <canvas id="distanceChart" width="400" height="150" style="width:100%;height:auto;background:#0d1117;border-radius:4px;"></canvas>
+                            <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:0.65rem;color:var(--text-muted);">
+                                <span>-30s</span>
+                                <span id="distChartLabel">No data</span>
+                                <span>now</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1386,6 +1454,97 @@
                 </div>
             </div>
 
+            <!-- ==================== DRIVER VIEW PAGE ==================== -->
+            <div class="page" id="page-driver">
+                <div id="driverViewContainer" style="
+                    position:relative;
+                    background:#000;
+                    border-radius:12px;
+                    overflow:hidden;
+                    min-height:calc(100vh - 40px);
+                ">
+                    <!-- Main stream (full width) -->
+                    <div id="driverStreamBox" style="width:100%;background:#000;position:relative;">
+                        <img id="driverMainStream" style="width:100%;display:block;background:#111;" alt="Detection Stream">
+                        <div id="driverStreamFallback" style="
+                            display:none;width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,#0a0a1a,#111);
+                            display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:var(--text-muted);
+                        ">Waiting for camera stream...</div>
+                    </div>
+
+                    <!-- HUD Overlay -->
+                    <div id="driverHUD" style="
+                        position:absolute;top:0;left:0;right:0;bottom:0;
+                        pointer-events:none;
+                        display:flex;flex-direction:column;justify-content:space-between;
+                        padding:16px;
+                    ">
+                        <!-- Top bar -->
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                            <!-- Alliance badge -->
+                            <div id="driverAllianceBadge" style="
+                                background:rgba(59,130,246,0.8);
+                                color:#fff;font-weight:900;font-size:1.2rem;
+                                padding:6px 20px;border-radius:8px;
+                                text-transform:uppercase;letter-spacing:2px;
+                            ">BLUE ALLIANCE</div>
+
+                            <!-- Target lock indicator -->
+                            <div id="driverTargetLock" style="
+                                background:rgba(0,0,0,0.7);border:3px solid #ff3b30;
+                                border-radius:12px;padding:8px 20px;text-align:center;
+                                transition:all 0.3s ease;
+                            ">
+                                <div style="font-size:0.7rem;text-transform:uppercase;color:#ff3b30;font-weight:700;">Target</div>
+                                <div id="driverLockStatus" style="font-size:1.8rem;font-weight:900;color:#ff3b30;">NO LOCK</div>
+                            </div>
+
+                            <!-- FPS / Latency -->
+                            <div style="background:rgba(0,0,0,0.7);border-radius:8px;padding:6px 12px;text-align:right;">
+                                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Pipeline</div>
+                                <div id="driverFPS" style="font-size:1rem;font-weight:800;font-family:monospace;color:var(--accent-green);">-- FPS</div>
+                                <div id="driverLatency" style="font-size:0.7rem;font-family:monospace;color:var(--text-muted);">-- ms</div>
+                            </div>
+                        </div>
+
+                        <!-- Bottom bar -->
+                        <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+                            <!-- Detected tags -->
+                            <div id="driverTagList" style="
+                                background:rgba(0,0,0,0.7);border-radius:8px;padding:8px 12px;
+                            ">
+                                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Detected Tags</div>
+                                <div id="driverTagChips" style="display:flex;gap:6px;flex-wrap:wrap;">
+                                    <span style="color:var(--text-muted);font-size:0.78rem;">None</span>
+                                </div>
+                            </div>
+
+                            <!-- Distance -->
+                            <div style="background:rgba(0,0,0,0.7);border-radius:8px;padding:8px 16px;text-align:center;">
+                                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Distance</div>
+                                <div id="driverDistance" style="font-size:2.2rem;font-weight:900;font-family:monospace;color:var(--text-muted);">--</div>
+                            </div>
+
+                            <!-- Yaw crosshair -->
+                            <div style="background:rgba(0,0,0,0.7);border-radius:8px;padding:8px 16px;text-align:center;">
+                                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Yaw / Offset</div>
+                                <div id="driverYaw" style="font-size:1.4rem;font-weight:900;font-family:monospace;color:var(--text-muted);">--</div>
+                                <div id="driverYawBar" style="
+                                    width:120px;height:8px;background:#222;border-radius:4px;margin-top:4px;position:relative;overflow:hidden;
+                                ">
+                                    <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;background:#444;transform:translateX(-1px);"></div>
+                                    <div id="driverYawIndicator" style="
+                                        position:absolute;top:0;bottom:0;width:8px;border-radius:4px;
+                                        background:var(--accent-yellow);left:50%;transform:translateX(-4px);
+                                        transition:left 0.15s ease;
+                                    "></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </main>
     </div>
 
@@ -1414,6 +1573,10 @@
                 consecutiveFailures: 0,
                 targets: null,            // live target/pose data from /api/av/targets
                 matchReadiness: null,     // match readiness check results
+                performance: null,        // system performance data
+                allianceColor: localStorage.getItem('av_alliance') || 'blue',
+                driverMode: false,
+                distanceHistory: [],      // last N distance readings for chart
             };
             this.pollTimer = null;
             this.cameraPollTimer = null;
@@ -1423,6 +1586,7 @@
             this._streamRetryBackoff = {};
             // Stream base port for direct connection (bypass proxy)
             this.STREAM_BASE_PORT = 1181;
+            this.MAX_DISTANCE_HISTORY = 60;
             this.init();
         }
 
@@ -1445,7 +1609,8 @@
                 '/calibration': 'calibration',
                 '/pipelines': 'pipelines',
                 '/settings': 'settings',
-                '/tools': 'tools'
+                '/tools': 'tools',
+                '/driver': 'driver'
             };
         }
 
@@ -1462,6 +1627,11 @@
                 if (iframe && iframe.src === 'about:blank') {
                     iframe.src = '/pv/';
                 }
+            }
+
+            // Initialize driver view stream when entering
+            if (pageName === 'driver') {
+                this.renderDriverView();
             }
         }
 
@@ -1499,6 +1669,9 @@
             setInterval(() => this.fetchCameraInfo(), 15000);
             // Target/pose data - poll fast for real-time feel
             setInterval(() => this.fetchTargets(), 500);
+            // Performance data
+            this.fetchPerformance();
+            setInterval(() => this.fetchPerformance(), 2000);
         }
 
         startUptimeTimer() {
@@ -1634,6 +1807,8 @@
                 if (resp.ok) {
                     this.state.targets = await resp.json();
                     this.renderTargetData();
+                    this.renderDistanceChart();
+                    this.renderDriverView();
                 }
             } catch (e) {}
         }
@@ -1646,6 +1821,52 @@
                     this.renderMatchReadiness();
                 }
             } catch (e) {}
+        }
+
+        async fetchPerformance() {
+            try {
+                const resp = await fetch('/api/av/performance', { signal: AbortSignal.timeout(2000) });
+                if (resp.ok) {
+                    this.state.performance = await resp.json();
+                    this.renderPerformance();
+                }
+            } catch (e) {}
+        }
+
+        async setPipeline(camIndex, pipeIndex) {
+            try {
+                const resp = await fetch('/api/av/set-pipeline', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cameraIndex: camIndex, pipelineIndex: pipeIndex }),
+                    signal: AbortSignal.timeout(3000),
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.ok) this.fetchStatus();
+                }
+            } catch (e) {}
+        }
+
+        async setDriverMode(camIndex, enabled) {
+            try {
+                const resp = await fetch('/api/av/set-driver-mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cameraIndex: camIndex, enabled: enabled }),
+                    signal: AbortSignal.timeout(3000),
+                });
+                if (resp.ok) {
+                    this.state.driverMode = enabled;
+                }
+            } catch (e) {}
+        }
+
+        setAlliance(color) {
+            this.state.allianceColor = color;
+            localStorage.setItem('av_alliance', color);
+            this.renderDashboard();
+            this.renderDriverView();
         }
 
         /* ======================== STREAM URL HELPERS ======================== */
@@ -2006,18 +2227,31 @@
                 const cam = cams[camName];
                 const hasTarget = cam.hasTarget;
                 const dotColor = hasTarget ? 'green' : 'red';
-                const targetText = hasTarget ? 'TARGET LOCKED' : 'No Target';
+                const allIds = cam.allTagIds || [];
+                const tagCount = cam.tagCount || (cam.bestFiducialId >= 0 ? 1 : 0);
+                const targetText = hasTarget ? (tagCount > 1 ? tagCount + ' TAGS' : 'TARGET LOCKED') : 'No Target';
 
                 html += '<div style="padding:8px 0;border-bottom:1px solid var(--border-subtle);">';
                 html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
                 html += '<span style="font-weight:700;font-size:0.85rem;">' + this.escapeHtml(camName) + '</span>';
+                html += '<div style="display:flex;align-items:center;gap:6px;">';
+                if (cam.fps) html += '<span style="font-size:0.68rem;color:var(--text-muted);font-family:monospace;">' + Math.round(cam.fps) + ' FPS</span>';
                 html += '<span style="display:flex;align-items:center;gap:4px;font-size:0.75rem;font-weight:600;color:var(--accent-' + dotColor + ');">';
                 html += '<span class="dot ' + dotColor + '" style="width:6px;height:6px;"></span> ' + targetText + '</span>';
-                html += '</div>';
+                html += '</div></div>';
+
+                // Show all detected tag IDs as chips
+                if (allIds.length > 0) {
+                    html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">';
+                    allIds.forEach(function(id) {
+                        html += '<span style="display:inline-block;background:rgba(0,255,136,0.12);border:1px solid var(--accent-green);color:var(--accent-green);font-size:0.65rem;font-weight:700;padding:1px 6px;border-radius:8px;font-family:monospace;">Tag #' + id + '</span>';
+                    });
+                    html += '</div>';
+                }
 
                 if (hasTarget || cam.targetYaw !== undefined) {
                     html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px;font-size:0.72rem;">';
-                    if (cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) html += '<div><span style="color:var(--text-muted);">Tag:</span> <span style="font-family:monospace;font-weight:600;color:var(--accent-green);">#' + cam.bestFiducialId + '</span></div>';
+                    if (allIds.length === 0 && cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) html += '<div><span style="color:var(--text-muted);">Tag:</span> <span style="font-family:monospace;font-weight:600;color:var(--accent-green);">#' + cam.bestFiducialId + '</span></div>';
                     if (cam.targetYaw !== undefined) html += '<div><span style="color:var(--text-muted);">Yaw:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetYaw + '\u00B0</span></div>';
                     if (cam.targetPitch !== undefined) html += '<div><span style="color:var(--text-muted);">Pitch:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetPitch + '\u00B0</span></div>';
                     if (cam.targetArea !== undefined) html += '<div><span style="color:var(--text-muted);">Area:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetArea + '%</span></div>';
@@ -2054,19 +2288,28 @@
             const cams = t.cameras || {};
             const camNames = Object.keys(cams);
 
-            // Collect all detected tags and find closest distance
+            // Collect ALL detected tags across all cameras
             let totalTargets = 0;
             let detectedTagIds = [];
             let closestDist = null;
             let activeCams = 0;
+            let totalTags = 0;
 
             camNames.forEach(name => {
                 const cam = cams[name];
                 if (cam.hasTarget) {
                     totalTargets++;
                     activeCams++;
-                    if (cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) {
+                    // Use allTagIds if available (multi-tag)
+                    const allIds = cam.allTagIds || [];
+                    if (allIds.length > 0) {
+                        allIds.forEach(id => {
+                            detectedTagIds.push({ id: id, cam: name });
+                            totalTags++;
+                        });
+                    } else if (cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) {
                         detectedTagIds.push({ id: cam.bestFiducialId, cam: name });
+                        totalTags++;
                     }
                     // Distance from pose (x,y,z relative to camera)
                     if (cam.pose) {
@@ -2076,14 +2319,24 @@
                 }
             });
 
+            // Track distance history for chart
+            if (closestDist !== null) {
+                this.state.distanceHistory.push({ t: Date.now(), d: closestDist });
+                if (this.state.distanceHistory.length > this.MAX_DISTANCE_HISTORY) {
+                    this.state.distanceHistory.shift();
+                }
+            }
+
             if (totalTargets > 0) {
                 // Tags detected
                 icon.style.background = 'rgba(0,255,136,0.15)';
                 icon.style.borderColor = 'var(--accent-green)';
                 icon.innerHTML = '&#127919;';
-                title.textContent = totalTargets + ' Tag' + (totalTargets > 1 ? 's' : '') + ' Detected';
+                const tagLabel = totalTags + ' Tag' + (totalTags > 1 ? 's' : '') + ' Detected';
+                title.textContent = tagLabel;
                 title.style.color = 'var(--accent-green)';
                 badge.style.display = 'inline-block';
+                badge.textContent = totalTags > 1 ? 'MULTI-TAG' : 'LOCKED';
                 detail.textContent = activeCams + ' of ' + camNames.length + ' camera' + (camNames.length > 1 ? 's' : '') + ' tracking | Source: ' + (t.dataSource || 'unknown');
 
                 // Tag ID chips
@@ -2164,10 +2417,11 @@
             ctx.stroke();
             ctx.setLineDash([]);
 
-            // Alliance zones
-            ctx.fillStyle = 'rgba(59, 130, 246, 0.08)';
+            // Alliance zones - highlight own alliance side
+            const isBlue = this.state.allianceColor === 'blue';
+            ctx.fillStyle = isBlue ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.05)';
             ctx.fillRect(4, 4, w / 2 - 4, h - 8);
-            ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+            ctx.fillStyle = !isBlue ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.05)';
             ctx.fillRect(w / 2, 4, w / 2 - 4, h - 8);
 
             // Grid lines
@@ -2285,13 +2539,21 @@
             elCams.className = 'stat-value ' + (camCount > 0 ? 'green' : 'yellow');
 
             const elTags = document.getElementById('statTags');
-            // Tag count from pipeline data if available
+            // Show live detected tag count from target data
             let tagCount = 0;
-            s.cameras.forEach(c => {
-                if (c.pipelineCount) tagCount += c.pipelineCount;
-            });
-            elTags.textContent = tagCount > 0 ? tagCount : '--';
-            elTags.className = 'stat-value ' + (tagCount > 0 ? 'purple' : '');
+            if (s.targets && s.targets.cameras) {
+                Object.values(s.targets.cameras).forEach(cam => {
+                    if (cam.tagCount) tagCount += cam.tagCount;
+                    else if (cam.hasTarget && cam.bestFiducialId >= 0) tagCount++;
+                });
+            }
+            if (tagCount > 0) {
+                elTags.textContent = tagCount;
+                elTags.className = 'stat-value green';
+            } else {
+                elTags.textContent = '0';
+                elTags.className = 'stat-value yellow';
+            }
 
             // Version badge
             document.getElementById('headerVersionBadge').textContent = s.version;
@@ -2346,6 +2608,12 @@
 
             // Camera previews on dashboard
             this.renderCameraPreviews();
+
+            // Alliance, pipeline, performance, distance, driver view
+            this.updateAllianceUI();
+            this.renderQuickPipeline();
+            this.renderDistanceChart();
+            this.renderDriverView();
 
             // Sidebar latency
             const sidebarDot = document.getElementById('sidebarDot');
@@ -2573,6 +2841,342 @@
                     }
                 });
             });
+        }
+
+        /* ======================== PERFORMANCE MONITOR ======================== */
+
+        renderPerformance() {
+            const panel = document.getElementById('perfMonitorPanel');
+            if (!panel) return;
+            const p = this.state.performance;
+            if (!p) return;
+
+            let html = '';
+            // System stats
+            const sys = p.system || {};
+            html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;margin-bottom:8px;">';
+            if (sys.cpuTempC !== undefined) {
+                const tempColor = sys.cpuTempC < 60 ? 'var(--accent-green)' : sys.cpuTempC < 75 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                html += '<div><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">CPU Temp</div><div style="font-size:1rem;font-weight:800;font-family:monospace;color:' + tempColor + ';">' + sys.cpuTempC + '\u00B0C</div></div>';
+            }
+            if (sys.memUsedPct !== undefined) {
+                const memColor = sys.memUsedPct < 70 ? 'var(--accent-green)' : sys.memUsedPct < 85 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                html += '<div><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Memory</div><div style="font-size:1rem;font-weight:800;font-family:monospace;color:' + memColor + ';">' + sys.memUsedPct + '%</div></div>';
+            }
+            if (sys.loadAvg1m !== undefined) {
+                html += '<div><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Load (1m)</div><div style="font-size:1rem;font-weight:800;font-family:monospace;">' + sys.loadAvg1m.toFixed(2) + '</div></div>';
+            }
+            html += '<div><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Uptime</div><div style="font-size:1rem;font-weight:800;font-family:monospace;">' + this.formatUptime(sys.uptimeS || 0) + '</div></div>';
+            html += '</div>';
+
+            // Per-camera FPS
+            const cams = p.cameras || {};
+            const camNames = Object.keys(cams);
+            if (camNames.length > 0) {
+                html += '<div style="border-top:1px solid var(--border-subtle);padding-top:8px;">';
+                camNames.forEach(name => {
+                    const cam = cams[name];
+                    const fpsColor = cam.fps > 20 ? 'var(--accent-green)' : cam.fps > 10 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:0.75rem;">';
+                    html += '<span style="font-weight:600;">' + this.escapeHtml(name) + '</span>';
+                    html += '<div style="display:flex;gap:12px;font-family:monospace;">';
+                    html += '<span style="color:' + fpsColor + ';font-weight:700;">' + Math.round(cam.fps) + ' FPS</span>';
+                    html += '<span>' + cam.latencyMs + 'ms</span>';
+                    html += '<span style="color:var(--text-muted);">' + cam.tagCount + ' tags</span>';
+                    html += '</div></div>';
+                });
+                html += '</div>';
+            }
+            panel.innerHTML = html;
+        }
+
+        formatUptime(s) {
+            if (!s || s < 0) return '--';
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            if (h > 0) return h + 'h ' + m + 'm';
+            if (m > 0) return m + 'm ' + sec + 's';
+            return sec + 's';
+        }
+
+        /* ======================== DISTANCE CHART ======================== */
+
+        renderDistanceChart() {
+            const canvas = document.getElementById('distanceChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const hist = this.state.distanceHistory;
+            const label = document.getElementById('distChartLabel');
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, w, h);
+
+            if (hist.length < 2) {
+                ctx.fillStyle = '#484f58';
+                ctx.font = '12px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('Waiting for distance data...', w / 2, h / 2);
+                if (label) label.textContent = 'No data';
+                return;
+            }
+
+            // Y axis: 0 to max distance + 20%
+            const maxD = Math.max(...hist.map(p => p.d), 1) * 1.2;
+            const minT = hist[0].t;
+            const maxT = hist[hist.length - 1].t;
+            const tRange = Math.max(maxT - minT, 1000);
+
+            // Grid lines
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 0.5;
+            for (let i = 1; i <= 4; i++) {
+                const gy = h - (h * (i / 4));
+                ctx.beginPath();
+                ctx.moveTo(0, gy);
+                ctx.lineTo(w, gy);
+                ctx.stroke();
+                ctx.fillStyle = '#484f58';
+                ctx.font = '9px monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText((maxD * i / 4).toFixed(1) + 'm', 4, gy - 2);
+            }
+
+            // Distance line
+            ctx.beginPath();
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            hist.forEach((pt, i) => {
+                const x = ((pt.t - minT) / tRange) * w;
+                const y = h - (pt.d / maxD) * h;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Fill below line
+            ctx.lineTo(w, h);
+            ctx.lineTo(0, h);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0,255,136,0.08)';
+            ctx.fill();
+
+            // Threshold lines
+            [1.5, 3.0].forEach(threshold => {
+                if (threshold < maxD) {
+                    const ty = h - (threshold / maxD) * h;
+                    ctx.strokeStyle = threshold === 1.5 ? 'rgba(0,255,136,0.3)' : 'rgba(255,165,0,0.3)';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(0, ty);
+                    ctx.lineTo(w, ty);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            });
+
+            const lastD = hist[hist.length - 1].d;
+            if (label) label.textContent = 'Current: ' + lastD.toFixed(2) + 'm';
+        }
+
+        /* ======================== QUICK PIPELINE SWITCHER ======================== */
+
+        renderQuickPipeline() {
+            const container = document.getElementById('quickPipelineSwitcher');
+            if (!container) return;
+            const cameras = this.state.cameras;
+            if (!cameras || cameras.length === 0) return;
+
+            let html = '<span style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;flex-shrink:0;">Pipeline:</span>';
+            cameras.forEach((cam, i) => {
+                const name = cam.name || 'Camera ' + i;
+                const pipeCount = cam.pipelineCount || 0;
+                const currentPipe = cam.currentPipeline !== undefined ? cam.currentPipeline : 0;
+                html += '<div style="display:flex;align-items:center;gap:4px;">';
+                html += '<span style="font-size:0.72rem;color:var(--text-secondary);font-weight:600;">' + this.escapeHtml(name) + ':</span>';
+                if (pipeCount > 0) {
+                    html += '<select onchange="AVApp.setPipeline(' + i + ', parseInt(this.value))" style="background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;padding:2px 6px;font-size:0.72rem;cursor:pointer;">';
+                    for (let p = 0; p < pipeCount; p++) {
+                        html += '<option value="' + p + '"' + (p === currentPipe ? ' selected' : '') + '>Pipeline ' + p + '</option>';
+                    }
+                    html += '</select>';
+                } else {
+                    html += '<span style="font-size:0.72rem;color:var(--text-muted);">No pipelines</span>';
+                }
+                if (i < cameras.length - 1) html += '<span style="color:var(--border-subtle);margin:0 4px;">|</span>';
+                html += '</div>';
+            });
+            container.innerHTML = html;
+        }
+
+        toggleDriverMode() {
+            const btn = document.getElementById('driverModeToggle');
+            const newState = !this.state.driverMode;
+            // Toggle driver mode for all cameras
+            this.state.cameras.forEach((cam, i) => {
+                this.setDriverMode(i, newState);
+            });
+            if (btn) {
+                btn.textContent = newState ? 'ON' : 'OFF';
+                btn.style.borderColor = newState ? 'var(--accent-green)' : 'var(--border-subtle)';
+                btn.style.color = newState ? 'var(--accent-green)' : 'var(--text-secondary)';
+                btn.style.background = newState ? 'rgba(0,255,136,0.1)' : 'transparent';
+            }
+        }
+
+        /* ======================== ALLIANCE STYLING ======================== */
+
+        updateAllianceUI() {
+            const blueBtn = document.getElementById('allianceBlueBtn');
+            const redBtn = document.getElementById('allianceRedBtn');
+            if (!blueBtn) return;
+            const isBlue = this.state.allianceColor === 'blue';
+            blueBtn.style.background = isBlue ? 'rgba(59,130,246,0.3)' : 'transparent';
+            blueBtn.style.fontWeight = isBlue ? '900' : '700';
+            redBtn.style.background = !isBlue ? 'rgba(239,68,68,0.3)' : 'transparent';
+            redBtn.style.fontWeight = !isBlue ? '900' : '700';
+        }
+
+        /* ======================== DRIVER VIEW ======================== */
+
+        renderDriverView() {
+            const container = document.getElementById('driverViewContainer');
+            if (!container) return;
+
+            // Set up stream if not done
+            const streamImg = document.getElementById('driverMainStream');
+            const fallback = document.getElementById('driverStreamFallback');
+            if (streamImg && !streamImg.src && this.state.cameras.length > 0) {
+                const url = this.getDirectStreamUrl(0, 'output');
+                streamImg.src = url;
+                streamImg.onerror = () => {
+                    streamImg.style.display = 'none';
+                    if (fallback) fallback.style.display = 'flex';
+                    // Try proxy
+                    setTimeout(() => {
+                        streamImg.src = this.getProxyStreamUrl(0, 'output');
+                        streamImg.style.display = 'block';
+                    }, 2000);
+                };
+                streamImg.onload = () => {
+                    streamImg.style.display = 'block';
+                    if (fallback) fallback.style.display = 'none';
+                };
+            }
+
+            // Alliance badge
+            const badge = document.getElementById('driverAllianceBadge');
+            if (badge) {
+                const isBlue = this.state.allianceColor === 'blue';
+                badge.textContent = (isBlue ? 'BLUE' : 'RED') + ' ALLIANCE';
+                badge.style.background = isBlue ? 'rgba(59,130,246,0.8)' : 'rgba(239,68,68,0.8)';
+            }
+
+            // Target lock, tags, distance, yaw from target data
+            const t = this.state.targets;
+            if (!t) return;
+
+            const cams = t.cameras || {};
+            const camNames = Object.keys(cams);
+            let hasAnyTarget = false;
+            let bestYaw = 0;
+            let bestDist = null;
+            let allDetectedIds = [];
+            let bestFps = 0;
+            let bestLatency = 0;
+
+            camNames.forEach(name => {
+                const cam = cams[name];
+                if (cam.hasTarget) {
+                    hasAnyTarget = true;
+                    bestYaw = cam.targetYaw || 0;
+                    if (cam.fps) bestFps = Math.max(bestFps, cam.fps);
+                    bestLatency = cam.latencyMs || 0;
+                    const ids = cam.allTagIds || [];
+                    if (ids.length > 0) {
+                        ids.forEach(id => { if (allDetectedIds.indexOf(id) < 0) allDetectedIds.push(id); });
+                    } else if (cam.bestFiducialId >= 0) {
+                        if (allDetectedIds.indexOf(cam.bestFiducialId) < 0) allDetectedIds.push(cam.bestFiducialId);
+                    }
+                    if (cam.pose) {
+                        const d = Math.sqrt(cam.pose.x * cam.pose.x + cam.pose.y * cam.pose.y + cam.pose.z * cam.pose.z);
+                        if (d > 0 && (bestDist === null || d < bestDist)) bestDist = d;
+                    }
+                }
+            });
+
+            // Target lock
+            const lockEl = document.getElementById('driverTargetLock');
+            const lockText = document.getElementById('driverLockStatus');
+            if (lockEl && lockText) {
+                if (hasAnyTarget) {
+                    lockEl.style.borderColor = '#00ff88';
+                    lockText.textContent = allDetectedIds.length > 0 ? 'TAG #' + allDetectedIds[0] : 'LOCKED';
+                    lockText.style.color = '#00ff88';
+                    lockEl.querySelector('div').style.color = '#00ff88';
+                } else {
+                    lockEl.style.borderColor = '#ff3b30';
+                    lockText.textContent = 'NO LOCK';
+                    lockText.style.color = '#ff3b30';
+                    lockEl.querySelector('div').style.color = '#ff3b30';
+                }
+            }
+
+            // FPS/Latency
+            const fpsEl = document.getElementById('driverFPS');
+            const latEl = document.getElementById('driverLatency');
+            if (fpsEl) fpsEl.textContent = Math.round(bestFps) + ' FPS';
+            if (latEl) latEl.textContent = bestLatency + ' ms';
+
+            // Tag chips
+            const chips = document.getElementById('driverTagChips');
+            if (chips) {
+                if (allDetectedIds.length > 0) {
+                    chips.innerHTML = allDetectedIds.map(id =>
+                        '<span style="background:rgba(0,255,136,0.2);border:1px solid #00ff88;color:#00ff88;padding:2px 10px;border-radius:12px;font-size:0.78rem;font-weight:800;font-family:monospace;">Tag #' + id + '</span>'
+                    ).join('');
+                } else {
+                    chips.innerHTML = '<span style="color:var(--text-muted);font-size:0.78rem;">None in view</span>';
+                }
+            }
+
+            // Distance
+            const distEl = document.getElementById('driverDistance');
+            if (distEl) {
+                if (bestDist !== null) {
+                    distEl.textContent = bestDist.toFixed(2) + 'm';
+                    distEl.style.color = bestDist < 1.5 ? '#00ff88' : bestDist < 3 ? '#f59e0b' : '#ff3b30';
+                } else {
+                    distEl.textContent = '--';
+                    distEl.style.color = 'var(--text-muted)';
+                }
+            }
+
+            // Yaw
+            const yawEl = document.getElementById('driverYaw');
+            const yawInd = document.getElementById('driverYawIndicator');
+            if (yawEl) {
+                if (hasAnyTarget) {
+                    yawEl.textContent = bestYaw.toFixed(1) + '\u00B0';
+                    const abortThreshold = 30;
+                    const yawColor = Math.abs(bestYaw) < 3 ? '#00ff88' : Math.abs(bestYaw) < 10 ? '#f59e0b' : '#ff3b30';
+                    yawEl.style.color = yawColor;
+                    if (yawInd) {
+                        const pct = 50 + (bestYaw / abortThreshold) * 50;
+                        yawInd.style.left = Math.max(0, Math.min(100, pct)) + '%';
+                        yawInd.style.background = yawColor;
+                    }
+                } else {
+                    yawEl.textContent = '--';
+                    yawEl.style.color = 'var(--text-muted)';
+                    if (yawInd) { yawInd.style.left = '50%'; yawInd.style.background = '#444'; }
+                }
+            }
         }
 
         renderCalibrationStatus() {
