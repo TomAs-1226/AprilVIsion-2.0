@@ -24,20 +24,20 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 /**
- * Vision subsystem using PhotonVision for AprilTag detection and pose estimation.
+ * Vision subsystem for AprilVision 3.2 AprilTag detection and pose estimation.
  *
- * AprilVision 2.0 - Custom Vision System built on PhotonVision libraries.
+ * AprilVision 3.2 - Custom FRC Vision System.
  *
- * This subsystem manages multiple PhotonVision cameras and provides
- * pose estimates for robot localization. It uses PhotonVision's
+ * This subsystem manages multiple vision cameras and provides
+ * pose estimates for robot localization. It uses the
  * MULTI_TAG_PNP_ON_COPROCESSOR strategy for best accuracy.
  *
- * Camera names must match those configured in the PhotonVision web UI
+ * Camera names must match those configured in the AprilVision dashboard
  * (accessed at http://coprocessor-ip:5801).
  */
 public class VisionSubsystem extends SubsystemBase {
 
-    // PhotonVision cameras - names must match PhotonVision config
+    // Vision cameras - names must match dashboard config
     private final PhotonCamera frontCamera;
     private final PhotonCamera leftCamera;
     private final PhotonCamera rightCamera;
@@ -79,10 +79,10 @@ public class VisionSubsystem extends SubsystemBase {
 
     /**
      * Creates a new VisionSubsystem.
-     * Camera names must match PhotonVision configuration.
+     * Camera names must match AprilVision dashboard configuration.
      */
     public VisionSubsystem() {
-        // Initialize PhotonVision cameras
+        // Initialize vision cameras
         frontCamera = new PhotonCamera("front");
         leftCamera = new PhotonCamera("left");
         rightCamera = new PhotonCamera("right");
@@ -91,7 +91,7 @@ public class VisionSubsystem extends SubsystemBase {
         AprilTagFieldLayout fieldLayout = AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
 
         // Create pose estimators
-        // MULTI_TAG_PNP_ON_COPROCESSOR: PhotonVision computes multi-tag pose
+        // MULTI_TAG_PNP_ON_COPROCESSOR: computes multi-tag pose
         // on the coprocessor for best performance. Falls back to LOWEST_AMBIGUITY
         // when only one tag is visible.
         frontPoseEstimator = new PhotonPoseEstimator(

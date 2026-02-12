@@ -1,8 +1,8 @@
-# AprilVision 2.0 - Robot Code Examples
+# AprilVision 3.2 - Robot Code Examples
 
-Java/WPILib examples for integrating AprilVision 2.0 vision data into your robot code.
+Java/WPILib examples for integrating AprilVision 3.2 vision data into your robot code.
 
-These examples use **PhotonLib** (PhotonVision's official Java library) to receive
+These examples use **PhotonLib** (vision integration library) to receive
 AprilTag detection data over NetworkTables from the coprocessor.
 
 ## Prerequisites
@@ -24,7 +24,7 @@ dependencies {
 ## Files
 
 ### VisionSubsystem.java
-Multi-camera subsystem managing 3 PhotonVision cameras (front, left, right).
+Multi-camera subsystem managing 3 vision cameras (front, left, right).
 - `PhotonPoseEstimator` per camera with `MULTI_TAG_PNP_ON_COPROCESSOR` strategy
 - Distance-based standard deviation scaling (trusts closer tags more)
 - Tag visibility queries across all cameras

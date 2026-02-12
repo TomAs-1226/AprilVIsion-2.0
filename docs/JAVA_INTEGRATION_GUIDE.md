@@ -1,12 +1,12 @@
-# AprilVision 2.0 - PhotonLib Java Integration Guide
+# AprilVision 3.2 - Java Integration Guide
 
-> Step-by-step guide to integrating AprilVision 2.0 vision data into your FRC robot code using PhotonLib.
+> Step-by-step guide to integrating AprilVision 3.2 vision data into your FRC robot code using PhotonLib.
 
 ---
 
 ## Overview
 
-AprilVision 2.0 uses **PhotonVision** as its detection engine. Your robot code uses **PhotonLib** (PhotonVision's official Java library) to receive AprilTag detection data over NetworkTables.
+AprilVision 3.2 uses an integrated detection engine. Your robot code uses **PhotonLib** (vision integration library) to receive AprilTag detection data over NetworkTables.
 
 This guide walks through everything from initial setup to multi-camera pose estimation.
 

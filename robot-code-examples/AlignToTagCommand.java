@@ -13,11 +13,11 @@ import frc.robot.subsystems.DriveSubsystem;
 import frc.robot.subsystems.VisionSubsystem;
 
 /**
- * Command to automatically align the robot to an AprilTag using PhotonVision.
+ * Command to automatically align the robot to an AprilTag.
  *
- * AprilVision 2.0 - Custom Vision System built on PhotonVision libraries.
+ * AprilVision 3.2.
  *
- * This command uses PhotonVision's target data to drive the robot toward
+ * This command uses vision target data to drive the robot toward
  * a specific AprilTag. It uses PID control on the tag's relative position
  * from the camera.
  *
@@ -120,7 +120,7 @@ public class AlignToTagCommand extends Command {
         targetEverSeen = true;
         PhotonTrackedTarget t = target.get();
 
-        // PhotonVision gives us the target's position relative to the camera
+        // Get the target's position relative to the camera
         // as a Transform3d (best camera to target transform)
         Transform3d camToTarget = t.getBestCameraToTarget();
 

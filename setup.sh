@@ -1,16 +1,16 @@
 #!/bin/bash
 #===============================================================================
-# AprilVision 2.0 - Custom FRC Vision System powered by PhotonVision
+# AprilVision 3.2 - Custom FRC Vision System
 # Complete One-Script Setup
 #
-# This script downloads PhotonVision, installs all dependencies, and sets up
-# a complete vision system with a custom dashboard.
+# This script downloads the detection engine, installs all dependencies, and
+# sets up a complete vision system with a custom dashboard.
 #
 # Usage: ./setup.sh [OPTIONS]
 #
 # Options:
 #   --team TEAM       Set team number (e.g., 1234)
-#   --install-only    Only install service (skip PhotonVision download)
+#   --install-only    Only install service (skip engine download)
 #   --dev             Development mode (no service install)
 #   --clean           Remove existing installation first
 #   --help            Show this help
@@ -30,7 +30,7 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# PhotonVision version
+# Engine version
 PV_VERSION="v2026.2.2"
 PV_JAR_NAME="photonvision-${PV_VERSION}-linuxarm64.jar"
 PV_DOWNLOAD_URL="https://github.com/PhotonVision/photonvision/releases/download/${PV_VERSION}"
@@ -68,27 +68,27 @@ print_banner() {
     echo ""
     echo -e "${CYAN}"
     cat << 'BANNER'
-       _            _ _ __   ___     _             ____    ___
-      / \   _ __  _(_) |\ \ / (_)___(_) ___  _ __ |___ \  / _ \
-     / _ \ | '_ \| '_| | \ V /| / __| |/ _ \| '_ \  __) || | | |
-    / ___ \| |_) | | | |  | | | \__ \ | (_) | | | |/ __/ | |_| |
-   /_/   \_\ .__/|_| |_|  |_| |_|___/_|\___/|_| |_|_____(_)___/
+       _            _ _ __   ___     _             _____ ____
+      / \   _ __  _(_) |\ \ / (_)___(_) ___  _ __ |___ /|___ \
+     / _ \ | '_ \| '_| | \ V /| / __| |/ _ \| '_ \  |_ \  __) |
+    / ___ \| |_) | | | |  | | | \__ \ | (_) | | | |___) |/ __/
+   /_/   \_\ .__/|_| |_|  |_| |_|___/_|\___/|_| |_|____/|_____|
            |_|
 BANNER
     echo -e "${NC}"
     echo -e "${GREEN}================================================================${NC}"
     echo -e "${GREEN}|${NC}  ${YELLOW}FRC Competition Vision System${NC}                              ${GREEN}|${NC}"
-    echo -e "${GREEN}|${NC}  ${CYAN}Detection Engine: PhotonVision ${PV_VERSION}${NC}                  ${GREEN}|${NC}"
+    echo -e "${GREEN}|${NC}  ${CYAN}AprilVision 3.2 Detection Engine${NC}                           ${GREEN}|${NC}"
     echo -e "${GREEN}|${NC}  Built by Team 1226 for FRC 2026 Season                     ${GREEN}|${NC}"
     echo -e "${GREEN}================================================================${NC}"
     echo ""
     echo -e "  ${YELLOW}What you get:${NC}"
-    echo "    - PhotonVision ${PV_VERSION} AprilTag detection engine"
+    echo "    - AprilVision 3.2 AprilTag detection engine"
     echo "    - Multi-tag PnP on coprocessor for accurate poses"
     echo "    - Custom branded dashboard with system health monitoring"
     echo "    - Auto-start systemd services with crash recovery"
     echo "    - Pre-match health check + competition match mode"
-    echo "    - Drop-in Java robot code with PhotonLib integration"
+    echo "    - Drop-in Java robot code with Vision Library (PhotonLib) integration"
     echo ""
 }
 
@@ -182,16 +182,16 @@ detect_architecture() {
         aarch64|arm64)
             PV_JAR_NAME="photonvision-${PV_VERSION}-linuxarm64.jar"
             JAVA_ARCH="arm64"
-            log_success "ARM64 detected - using arm64 PhotonVision JAR"
+            log_success "ARM64 detected - using arm64 engine JAR"
             ;;
         x86_64|amd64)
             PV_JAR_NAME="photonvision-${PV_VERSION}-linuxx64.jar"
             JAVA_ARCH="amd64"
-            log_success "x86_64 detected - using x64 PhotonVision JAR"
+            log_success "x86_64 detected - using x64 engine JAR"
             ;;
         *)
             log_error "Unsupported architecture: $ARCH"
-            log_error "PhotonVision requires ARM64 or x86_64"
+            log_error "AprilVision requires ARM64 or x86_64"
             exit 1
             ;;
     esac
@@ -248,7 +248,7 @@ install_java() {
         fi
     fi
 
-    log_info "Installing Java 17 JDK (required by PhotonVision)..."
+    log_info "Installing Java 17 JDK (required by detection engine)..."
     sudo apt-get update
     sudo apt-get install -y openjdk-17-jdk-headless
 
@@ -263,29 +263,29 @@ install_java() {
 }
 
 #===============================================================================
-# Step 4: Download PhotonVision
+# Step 4: Download Detection Engine
 #===============================================================================
 
 download_photonvision() {
-    log_info "Setting up PhotonVision ${PV_VERSION}..."
+    log_info "Setting up detection engine ${PV_VERSION}..."
 
     # Create installation directory
     sudo mkdir -p "${INSTALL_DIR}"
 
     # Check if JAR already exists
     if [[ -f "${INSTALL_DIR}/photonvision.jar" ]] && ! $CLEAN_INSTALL; then
-        log_success "PhotonVision JAR already present at ${INSTALL_DIR}/photonvision.jar"
+        log_success "Engine JAR already present at ${INSTALL_DIR}/photonvision.jar"
         log_info "Use --clean to force re-download"
         return
     fi
 
     if $CLEAN_INSTALL && [[ -d "${INSTALL_DIR}" ]]; then
-        log_info "Cleaning existing PhotonVision installation..."
+        log_info "Cleaning existing engine installation..."
         sudo rm -f "${INSTALL_DIR}/photonvision.jar"
     fi
 
     local DOWNLOAD_URL="${PV_DOWNLOAD_URL}/${PV_JAR_NAME}"
-    log_info "Downloading PhotonVision from: ${DOWNLOAD_URL}"
+    log_info "Downloading engine from: ${DOWNLOAD_URL}"
     log_info "This may take a few minutes (JAR is ~115 MB)..."
 
     # Download with retry logic
@@ -295,7 +295,7 @@ download_photonvision() {
 
     while [[ $retries -lt $max_retries ]]; do
         if sudo wget -q --show-progress -O "${INSTALL_DIR}/photonvision.jar" "$DOWNLOAD_URL"; then
-            log_success "PhotonVision ${PV_VERSION} downloaded successfully"
+            log_success "Detection engine ${PV_VERSION} downloaded successfully"
             return
         fi
 
@@ -307,7 +307,7 @@ download_photonvision() {
         fi
     done
 
-    log_error "Failed to download PhotonVision after $max_retries attempts"
+    log_error "Failed to download detection engine after $max_retries attempts"
     log_error "Download manually from: https://github.com/PhotonVision/photonvision/releases"
     log_error "Place the JAR at: ${INSTALL_DIR}/photonvision.jar"
     exit 1
@@ -347,8 +347,8 @@ configure_team() {
         log_success "Config updated with team $TEAM_NUMBER"
     fi
 
-    # Update PhotonVision's network config
-    # PhotonVision uses its own settings directory
+    # Update engine network config
+    # The engine uses its own settings directory
     sudo mkdir -p "${INSTALL_DIR}/photonvision_config/network"
     sudo tee "${INSTALL_DIR}/photonvision_config/network/networkSettings.json" > /dev/null << EOF
 {
@@ -365,7 +365,7 @@ configure_team() {
     "setDHCPcommand": ""
 }
 EOF
-    log_success "PhotonVision network configured for team $TEAM_NUMBER"
+    log_success "Engine network configured for team $TEAM_NUMBER"
 }
 
 #===============================================================================
@@ -378,7 +378,7 @@ setup_user_and_permissions() {
     # Create photonvision user if it doesn't exist
     if ! id -u photonvision &>/dev/null; then
         log_info "Creating photonvision user..."
-        sudo useradd -r -s /usr/sbin/nologin -d "${INSTALL_DIR}" -c "PhotonVision Service" photonvision
+        sudo useradd -r -s /usr/sbin/nologin -d "${INSTALL_DIR}" -c "AprilVision Engine Service" photonvision
         log_success "User photonvision created"
     else
         log_success "User photonvision already exists"
@@ -391,8 +391,8 @@ setup_user_and_permissions() {
     UDEV_RULES="/etc/udev/rules.d/99-photonvision.rules"
     log_info "Creating udev rules for camera access..."
     sudo tee "$UDEV_RULES" > /dev/null << 'EOF'
-# AprilVision 2.0 (PhotonVision) - Camera Access Rules
-# Give photonvision user access to all video devices
+# AprilVision 3.2 - Camera Access Rules
+# Give engine user access to all video devices
 
 # V4L2 video devices
 KERNEL=="video[0-9]*", MODE="0666", GROUP="video"
@@ -409,7 +409,7 @@ EOF
     # Set resource limits for real-time performance
     LIMITS_FILE="/etc/security/limits.d/photonvision.conf"
     sudo tee "$LIMITS_FILE" > /dev/null << 'EOF'
-# AprilVision 2.0 (PhotonVision) - Resource Limits
+# AprilVision 3.2 - Resource Limits
 photonvision soft rtprio 99
 photonvision hard rtprio 99
 photonvision soft memlock unlimited
@@ -470,11 +470,10 @@ install_services() {
     sudo systemctl stop photonvision 2>/dev/null || true
     sudo systemctl stop aprilvision-dashboard 2>/dev/null || true
 
-    # PhotonVision main service
+    # Detection engine service
     sudo tee "/etc/systemd/system/photonvision.service" > /dev/null << EOF
 [Unit]
-Description=AprilVision 2.0 - PhotonVision Detection Engine
-Documentation=https://docs.photonvision.org
+Description=AprilVision 3.2 - Detection Engine
 After=network.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -497,16 +496,16 @@ LimitMEMLOCK=infinity
 Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk-${JAVA_ARCH}"
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=photonvision
+SyslogIdentifier=aprilvision-engine
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # AprilVision custom dashboard service
+    # AprilVision dashboard service
     sudo tee "/etc/systemd/system/aprilvision-dashboard.service" > /dev/null << EOF
 [Unit]
-Description=AprilVision 2.0 - Custom Monitoring Dashboard
+Description=AprilVision 3.2 - Dashboard Service
 After=photonvision.service
 Requires=photonvision.service
 
@@ -515,7 +514,7 @@ Type=simple
 User=photonvision
 Group=photonvision
 WorkingDirectory=${DASHBOARD_DIR}
-ExecStart=/usr/bin/python3 ${DASHBOARD_DIR}/bridge.py
+ExecStart=/usr/bin/python3 ${DASHBOARD_DIR}/bridge.py --port 5801 --engine-port 5800
 Restart=always
 RestartSec=3
 TimeoutStartSec=15
@@ -547,9 +546,9 @@ EOF
             sleep 2
 
             if systemctl is-active --quiet photonvision; then
-                log_success "PhotonVision service started"
+                log_success "Detection engine service started"
             else
-                log_warn "PhotonVision may still be starting. Check: sudo systemctl status photonvision"
+                log_warn "Detection engine may still be starting. Check: sudo systemctl status photonvision"
             fi
 
             if systemctl is-active --quiet aprilvision-dashboard; then
@@ -572,12 +571,12 @@ verify_installation() {
     echo "Installation Summary:"
     echo "------------------------------------------------------------"
 
-    # Check PhotonVision JAR
+    # Check engine JAR
     if [[ -f "${INSTALL_DIR}/photonvision.jar" ]]; then
         local jar_size=$(du -h "${INSTALL_DIR}/photonvision.jar" | awk '{print $1}')
-        echo -e "  PhotonVision JAR:  ${GREEN}OK${NC} (${jar_size})"
+        echo -e "  Engine JAR:        ${GREEN}OK${NC} (${jar_size})"
     else
-        echo -e "  PhotonVision JAR:  ${RED}MISSING${NC}"
+        echo -e "  Engine JAR:        ${RED}MISSING${NC}"
     fi
 
     # Check Java
@@ -596,9 +595,9 @@ verify_installation() {
 
     # Check services
     if systemctl is-enabled --quiet photonvision 2>/dev/null; then
-        echo -e "  PV Service:        ${GREEN}Enabled${NC}"
+        echo -e "  Engine Service:    ${GREEN}Enabled${NC}"
     else
-        echo -e "  PV Service:        ${YELLOW}Not enabled${NC}"
+        echo -e "  Engine Service:    ${YELLOW}Not enabled${NC}"
     fi
 
     if systemctl is-enabled --quiet aprilvision-dashboard 2>/dev/null; then
@@ -609,9 +608,9 @@ verify_installation() {
 
     # Check if running
     if systemctl is-active --quiet photonvision 2>/dev/null; then
-        echo -e "  PV Status:         ${GREEN}Running${NC}"
+        echo -e "  Engine Status:     ${GREEN}Running${NC}"
     else
-        echo -e "  PV Status:         ${YELLOW}Not running${NC}"
+        echo -e "  Engine Status:     ${YELLOW}Not running${NC}"
     fi
 
     if systemctl is-active --quiet aprilvision-dashboard 2>/dev/null; then
@@ -626,14 +625,14 @@ verify_installation() {
     echo "------------------------------------------------------------"
     echo ""
     echo "Access Points:"
-    echo "  PhotonVision UI:     http://${IP_ADDR}:5800"
+    echo "  Detection Engine:      http://${IP_ADDR}:5800"
     echo "  AprilVision Dashboard: http://${IP_ADDR}:5801"
     echo ""
     echo "Commands:"
     echo "  Start all:    sudo systemctl start photonvision aprilvision-dashboard"
     echo "  Stop all:     sudo systemctl stop photonvision aprilvision-dashboard"
-    echo "  PV status:    sudo systemctl status photonvision"
-    echo "  PV logs:      journalctl -u photonvision -f"
+    echo "  Engine status: sudo systemctl status photonvision"
+    echo "  Engine logs:  journalctl -u photonvision -f"
     echo "  Dash logs:    journalctl -u aprilvision-dashboard -f"
     echo ""
 
@@ -653,8 +652,8 @@ print_completion() {
     echo ""
     echo -e "${GREEN}================================================================${NC}"
     echo -e "${GREEN}|${NC}                                                              ${GREEN}|${NC}"
-    echo -e "${GREEN}|${NC}  ${YELLOW}AprilVision 2.0 - Setup Complete!${NC}                          ${GREEN}|${NC}"
-    echo -e "${GREEN}|${NC}  ${CYAN}Detection Engine: PhotonVision ${PV_VERSION}${NC}                  ${GREEN}|${NC}"
+    echo -e "${GREEN}|${NC}  ${YELLOW}AprilVision 3.2 - Setup Complete!${NC}                          ${GREEN}|${NC}"
+    echo -e "${GREEN}|${NC}  ${CYAN}AprilVision 3.2 Detection Engine${NC}                            ${GREEN}|${NC}"
     echo -e "${GREEN}|${NC}                                                              ${GREEN}|${NC}"
     echo -e "${GREEN}================================================================${NC}"
     echo ""
@@ -669,7 +668,7 @@ print_completion() {
     echo "  2. Run a health check to verify everything:"
     echo "     ${YELLOW}./scripts/health_check.sh${NC}"
     echo ""
-    echo "  3. Add PhotonLib to your robot project's build.gradle:"
+    echo "  3. Add Vision Library (PhotonLib) to your robot project's build.gradle:"
     echo "     ${YELLOW}implementation 'org.photonvision:photonlib-java:${PV_VERSION}'${NC}"
     echo ""
     echo "  4. Copy robot code examples from:"

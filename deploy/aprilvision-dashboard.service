@@ -1,5 +1,5 @@
 [Unit]
-Description=AprilVision 2.0 - Custom Branding Reverse Proxy
+Description=AprilVision 3.2 - Dashboard Service
 Documentation=https://github.com/TomAs-1226/AprilVIsion-2.0
 After=photonvision.service
 Requires=photonvision.service
@@ -9,7 +9,7 @@ Type=simple
 User=photonvision
 Group=photonvision
 WorkingDirectory=/opt/aprilvision
-ExecStart=/usr/bin/python3 /opt/aprilvision/bridge.py --port 5801 --pv-port 5800
+ExecStart=/usr/bin/python3 /opt/aprilvision/bridge.py --port 5801 --engine-port 5800
 Restart=always
 RestartSec=3
 TimeoutStartSec=15

@@ -15,21 +15,21 @@ import frc.robot.subsystems.DriveSubsystem;
 import frc.robot.subsystems.VisionSubsystem;
 
 /**
- * Example RobotContainer showing AprilVision 2.0 + PhotonLib integration.
+ * Example RobotContainer showing AprilVision 3.2 vision integration.
  *
- * AprilVision 2.0 - Custom Vision System built on PhotonVision libraries.
+ * AprilVision 3.2.
  *
  * This demonstrates:
- * - Setting up VisionSubsystem with PhotonVision cameras
+ * - Setting up VisionSubsystem
  * - Fusing vision poses into SwerveDrivePoseEstimator
  * - Binding auto-align commands to buttons
  * - Using vision data in autonomous routines
  *
  * Prerequisites:
- * - PhotonVision running on coprocessor (setup with ./setup.sh)
+ * - AprilVision running on coprocessor (setup with ./setup.sh)
  * - PhotonLib dependency in build.gradle:
  *     implementation 'org.photonvision:photonlib-java:v2026.2.2'
- * - Cameras named "front", "left", "right" in PhotonVision UI
+ * - Cameras named "front", "left", "right" in AprilVision dashboard
  */
 public class RobotContainerExample {
 
@@ -47,7 +47,7 @@ public class RobotContainerExample {
 
     private void configureBindings() {
         // ====================================================================
-        // Driver Controls - Auto-Alignment using PhotonVision
+        // Driver Controls - Auto-Alignment
         // ====================================================================
 
         // A button - Align to tag 7 (close range, for scoring)
@@ -90,7 +90,7 @@ public class RobotContainerExample {
     /**
      * Call this from Robot.java's robotPeriodic() to fuse vision with odometry.
      *
-     * This is the core integration point - it feeds PhotonVision pose estimates
+     * This is the core integration point - it feeds vision pose estimates
      * into WPILib's SwerveDrivePoseEstimator with appropriate trust levels.
      */
     public void updateVisionPoseEstimator() {

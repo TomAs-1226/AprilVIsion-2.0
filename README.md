@@ -1,11 +1,11 @@
 <p align="center">
   <img src="https://img.shields.io/badge/FRC-2026-blue?style=for-the-badge" alt="FRC 2026">
-  <img src="https://img.shields.io/badge/PhotonVision-v2026.2.2-orange?style=for-the-badge" alt="PhotonVision v2026.2.2">
+  <img src="https://img.shields.io/badge/AprilVision-v3.2.0-orange?style=for-the-badge" alt="AprilVision v3.2.0">
   <img src="https://img.shields.io/badge/Platform-ARM64%20%7C%20x86__64-green?style=for-the-badge" alt="Platform">
   <img src="https://img.shields.io/badge/License-MIT-purple?style=for-the-badge" alt="License">
 </p>
 
-# AprilVision 2.0
+# AprilVision 3.2
 
 **The FRC vision system that sets up in 60 seconds and just works.**
 
@@ -19,30 +19,48 @@ That's it. Your coprocessor is now a competition-ready vision system.
 
 ---
 
-## Why AprilVision 2.0?
+## Why AprilVision 3.2?
 
-Most FRC teams spend hours wrestling with vision setup, debugging NetworkTables connections, and fighting service configurations. AprilVision 2.0 eliminates all of that.
+Most FRC teams spend hours wrestling with vision setup, debugging NetworkTables connections, and fighting service configurations. AprilVision 3.2 eliminates all of that.
 
-| Problem | AprilVision 2.0 Solution |
+| Problem | AprilVision 3.2 Solution |
 |---------|--------------------------|
 | Complex multi-step installs | Single `./setup.sh` command |
 | Services don't survive reboot | Systemd auto-start + auto-recovery |
-| Raw PhotonVision UI is confusing | Custom branded dashboard at `:5801` |
+| No integrated dashboard | Custom branded dashboard at `:5801` |
 | No robot code examples | Complete Java examples with multi-camera support |
 | Manual network configuration | Auto-detects team number and roboRIO IP |
 | No health monitoring | Built-in health check + match mode scripts |
 | Debugging during competition | Camera snapshot diagnostics for post-match review |
+| Camera calibration is confusing | ArUco calibration helper script |
+| Network issues hard to diagnose | Built-in network diagnostics tool |
 
-### What's Under the Hood
+---
 
-AprilVision 2.0 runs **PhotonVision v2026.2.2** as its detection engine - the same battle-tested library used by thousands of FRC teams. On top of that, it adds:
+## Features
 
-- **One-script deployment** - Installs Java 17, downloads PhotonVision, configures services, sets up cameras
-- **Custom reverse proxy** - Rebrands the web UI, injects monitoring overlays, adds system health indicators
-- **Match mode** - Competition-optimized settings that reduce latency and prioritize detection accuracy
-- **Health monitoring** - Pre-match diagnostic script that checks every component in seconds
-- **Camera snapshot tool** - Save diagnostic frames for post-match analysis
-- **Complete robot code** - Drop-in Java subsystem, auto-align command, and full integration example
+### Core Vision
+- **AprilTag Detection** - tag36h11 fiducial detection with multi-tag PnP
+- **Multi-Camera Support** - Run up to 3 cameras (front, left, right) simultaneously
+- **Coprocessor Pose Estimation** - MULTI_TAG_PNP_ON_COPROCESSOR for best accuracy
+- **NetworkTables 4.0** - Low-latency data streaming to roboRIO
+
+### Dashboard and Monitoring
+- **Custom Dashboard** at port 5801 with system health indicators
+- **Pre-Match Health Check** - One command verifies every component
+- **Match Mode** - Competition-optimized CPU, memory, and priority settings
+- **Camera Snapshot** - Save diagnostic frames for post-match analysis
+
+### Setup and Deployment
+- **One-Script Install** - Java 17, engine, services, permissions in one command
+- **Systemd Services** - Auto-start with crash recovery on reboot
+- **Architecture Detection** - Automatically selects ARM64 or x86_64 builds
+
+### New in 3.2
+- **ArUco Calibration Helper** - Generate ChArUco boards and check calibration status
+- **Network Diagnostics** - Test NetworkTables connectivity, latency, and port availability
+- **WebSocket Tunneling** - Improved data transport for real-time camera feeds
+- **3D Pose Pipeline** - Enhanced multi-tag 3D pose estimation with ambiguity filtering
 
 ---
 
@@ -63,10 +81,10 @@ cd AprilVIsion-2.0
 | 1 | Detects ARM64 or x86_64 architecture |
 | 2 | Installs system packages (`curl`, `wget`, `v4l-utils`, `python3`) |
 | 3 | Installs Java 17 JDK |
-| 4 | Downloads PhotonVision v2026.2.2 JAR (~115 MB) with retry logic |
-| 5 | Creates `photonvision` system user with camera permissions |
+| 4 | Downloads detection engine JAR (~115 MB) with retry logic |
+| 5 | Creates system user with camera permissions |
 | 6 | Configures NetworkTables for your team's roboRIO |
-| 7 | Installs the custom dashboard reverse proxy |
+| 7 | Installs the custom dashboard |
 | 8 | Installs + enables two systemd services |
 | 9 | Starts everything and verifies it's running |
 
@@ -87,7 +105,26 @@ http://<coprocessor-ip>:5801
 
 Then run **camera calibration** - this is critical for accurate pose estimation.
 
-### 3. Add PhotonLib to Robot Code
+### 3. 3D Pose Setup
+
+For accurate 3D pose estimation with multi-tag PnP:
+
+1. **Calibrate each camera** through the dashboard calibration tool
+2. **Measure camera mounting positions** precisely (in meters from robot center)
+3. **Update Transform3d values** in `VisionSubsystem.java`:
+   ```java
+   // x = forward, y = left, z = up (meters from robot center)
+   private static final Transform3d FRONT_ROBOT_TO_CAM = new Transform3d(
+       new Translation3d(0.25, 0.0, 0.50),
+       new Rotation3d(0, 0, 0)
+   );
+   ```
+4. **Verify with ArUco calibration check**:
+   ```bash
+   python3 scripts/aruco_calibration.py --check
+   ```
+
+### 4. Add PhotonLib to Robot Code
 
 In your robot project's `build.gradle`:
 
@@ -101,12 +138,12 @@ dependencies {
 }
 ```
 
-### 4. Drop In the Robot Code
+### 5. Drop In the Robot Code
 
 Copy from `robot-code-examples/` into your project:
 
 ```java
-// VisionSubsystem.java - Manages 3 PhotonVision cameras with pose estimation
+// VisionSubsystem.java - Manages 3 vision cameras with pose estimation
 PhotonCamera frontCamera = new PhotonCamera("front");
 PhotonPoseEstimator poseEstimator = new PhotonPoseEstimator(
     fieldLayout,
@@ -118,7 +155,7 @@ PhotonPoseEstimator poseEstimator = new PhotonPoseEstimator(
 Optional<EstimatedRobotPose> pose = poseEstimator.update(frontCamera.getLatestResult());
 ```
 
-### 5. Fuse Vision with Odometry
+### 6. Fuse Vision with Odometry
 
 ```java
 // Feed vision into SwerveDrivePoseEstimator
@@ -146,16 +183,16 @@ Run before every match to verify your vision system is ready:
 ```
 
 ```
-AprilVision 2.0 - System Health Check
+AprilVision 3.2 - System Health Check
 ======================================
-  PhotonVision Service .... RUNNING
-  Dashboard Proxy ......... RUNNING
-  Java 17 ................ OK (17.0.x)
-  PhotonVision JAR ....... OK (114M)
-  Camera Devices ......... 3 found
-  Network (roboRIO) ...... REACHABLE
-  Disk Space ............. OK (2.1G free)
-  Memory ................. OK (412M / 4096M)
+  Detection Engine ......... RUNNING
+  Dashboard Proxy .......... RUNNING
+  Java 17 ................. OK (17.0.x)
+  Engine Binary ............ OK (114M)
+  Camera Devices ........... 3 found
+  Network (roboRIO) ....... REACHABLE
+  Disk Space .............. OK (2.1G free)
+  Memory .................. OK (412M / 4096M)
 --------------------------------------
   RESULT: ALL SYSTEMS GO
 ```
@@ -172,7 +209,7 @@ This:
 - Sets CPU governor to `performance` for lowest latency
 - Increases Java heap to 768MB for smoother processing
 - Disables non-essential system services to free resources
-- Enables real-time thread priority for PhotonVision
+- Enables real-time thread priority for the detection engine
 - Logs the change so you can review post-match
 
 Disable after practice:
@@ -187,9 +224,27 @@ List all connected cameras and their capabilities:
 ./scripts/detect_cameras.sh
 ```
 
-### Update PhotonVision
+### ArUco Calibration Helper
 
-Upgrade to a newer PhotonVision release:
+Generate a ChArUco board for camera calibration or check calibration status:
+```bash
+# Generate a calibration board image
+python3 scripts/aruco_calibration.py --generate
+
+# Check if cameras are calibrated
+python3 scripts/aruco_calibration.py --check
+```
+
+### Network Diagnostics
+
+Test connectivity to roboRIO and check all vision system ports:
+```bash
+./scripts/network_diagnostics.sh
+```
+
+### Update Detection Engine
+
+Upgrade to a newer engine release:
 ```bash
 ./scripts/update_photonvision.sh v2026.3.0
 ```
@@ -203,7 +258,7 @@ Upgrade to a newer PhotonVision release:
 |              COPROCESSOR (Orange Pi / RPi / x86)          |
 |                                                           |
 |  +----------------------------------------------------+  |
-|  |  PhotonVision Engine (Port 5800, internal)          |  |
+|  |  Detection Engine (Port 5800, internal)             |  |
 |  |  - AprilTag detection (tag36h11)                    |  |
 |  |  - Multi-tag PnP on coprocessor                     |  |
 |  |  - Camera calibration + MJPEG streams               |  |
@@ -211,7 +266,7 @@ Upgrade to a newer PhotonVision release:
 |  +----------------------------------------------------+  |
 |                          |                                |
 |  +----------------------------------------------------+  |
-|  |  AprilVision Proxy (Port 5801, team-facing)         |  |
+|  |  AprilVision Dashboard (Port 5801, team-facing)     |  |
 |  |  - Custom branded UI overlay                        |  |
 |  |  - System health indicators                         |  |
 |  |  - Camera feed passthrough                          |  |
@@ -283,7 +338,7 @@ private static final Transform3d FRONT_ROBOT_TO_CAM = new Transform3d(
 | Flag | Description |
 |------|-------------|
 | `--team XXXX` | Set team number |
-| `--install-only` | Reinstall services without downloading PhotonVision |
+| `--install-only` | Reinstall services without downloading engine |
 | `--dev` | Development mode (no service install) |
 | `--clean` | Clean install (re-downloads everything) |
 
@@ -304,18 +359,20 @@ AprilVIsion-2.0/
 +-- scripts/
 |   +-- aprilvision-bridge.py            # Reverse proxy with branding
 |   +-- detect_cameras.sh               # Camera detection utility
-|   +-- update_photonvision.sh          # PhotonVision version updater
+|   +-- update_photonvision.sh          # Engine version updater
 |   +-- health_check.sh                 # Pre-match system diagnostics
 |   +-- match_mode.sh                   # Competition optimization toggle
+|   +-- aruco_calibration.py            # ArUco calibration helper
+|   +-- network_diagnostics.sh          # Network connectivity tester
 +-- deploy/
-|   +-- photonvision.service            # Systemd: PhotonVision engine
-|   +-- aprilvision-dashboard.service   # Systemd: Dashboard proxy
+|   +-- photonvision.service            # Systemd: Detection engine
+|   +-- aprilvision-dashboard.service   # Systemd: Dashboard service
 +-- robot-code-examples/
 |   +-- VisionSubsystem.java           # Multi-camera subsystem
 |   +-- AlignToTagCommand.java         # Auto-align to AprilTag
 |   +-- RobotContainerExample.java     # Full wiring example
 +-- docs/
-    +-- JAVA_INTEGRATION_GUIDE.md       # Step-by-step PhotonLib guide
+    +-- JAVA_INTEGRATION_GUIDE.md       # Step-by-step integration guide
 ```
 
 ---
@@ -323,7 +380,7 @@ AprilVIsion-2.0/
 ## Robot Code Examples
 
 ### VisionSubsystem.java
-Multi-camera subsystem managing 3 PhotonVision cameras with:
+Multi-camera subsystem managing 3 vision cameras with:
 - `PhotonPoseEstimator` per camera using `MULTI_TAG_PNP_ON_COPROCESSOR`
 - Distance-based standard deviation scaling (trusts closer tags more)
 - Tag visibility queries across all cameras
@@ -348,7 +405,7 @@ Full integration showing:
 
 ## Troubleshooting
 
-### PhotonVision won't start
+### Detection engine won't start
 ```bash
 java -version                            # Must show 17.x
 journalctl -u photonvision -n 50         # Check error logs
@@ -362,17 +419,18 @@ ls -la /dev/video*                       # Check permissions
 ./setup.sh --install-only                # Re-apply permissions
 ```
 
-### Dashboard proxy not loading
+### Dashboard not loading
 ```bash
-curl http://localhost:5800               # Is PhotonVision itself running?
-journalctl -u aprilvision-dashboard -f   # Check proxy logs
+curl http://localhost:5800               # Is the detection engine running?
+journalctl -u aprilvision-dashboard -f   # Check dashboard logs
 sudo systemctl restart aprilvision-dashboard
 ```
 
 ### NetworkTables not connecting
 1. Verify team number: `cat config/config.yml`
 2. Ping roboRIO: `ping 10.XX.YY.2`
-3. Check PhotonVision network settings at `:5801` > Settings > Network
+3. Run diagnostics: `./scripts/network_diagnostics.sh`
+4. Check network settings at `:5801` > Settings > Network
 
 ### Run the full diagnostic
 ```bash
@@ -383,9 +441,9 @@ sudo systemctl restart aprilvision-dashboard
 
 ## Credits
 
-- **[PhotonVision](https://photonvision.org)** - Detection engine and PhotonLib
-- **[WPILib](https://wpilib.org)** - FRC framework and NetworkTables
-- **Team 1226** - AprilVision 2.0 development and testing
+- **WPILib** - FRC framework and NetworkTables
+- **PhotonLib** - Vision integration library for robot code
+- **Team 1226** - AprilVision development and testing
 
 ---
 

@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AprilVision 2.0 - FRC Vision System</title>
+    <title>AprilVision 3.2 - FRC Vision System</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230d1117'/><text x='50' y='68' font-size='55' text-anchor='middle' fill='%2300ff88' font-family='sans-serif' font-weight='bold'>AV</text></svg>">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -16,152 +17,81 @@
             align-items: center;
             padding: 30px 20px;
         }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        h1 {
-            font-size: 2.5rem;
-            color: #00ff88;
-            margin-bottom: 4px;
-            letter-spacing: -0.5px;
-        }
-        .version {
-            color: #58a6ff;
-            font-size: 0.85rem;
-            font-weight: 600;
-            margin-bottom: 6px;
-        }
-        .subtitle {
-            color: #8b949e;
-            font-size: 1rem;
-        }
+        .header { text-align: center; margin-bottom: 30px; }
+        h1 { font-size: 2.5rem; color: #00ff88; margin-bottom: 4px; letter-spacing: -0.5px; }
+        .version { color: #58a6ff; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; }
+        .subtitle { color: #8b949e; font-size: 1rem; }
         .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-            max-width: 700px;
-            width: 100%;
-            margin-bottom: 20px;
+            display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+            max-width: 700px; width: 100%; margin-bottom: 20px;
         }
         .card {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 10px;
-            padding: 18px;
-            transition: border-color 0.2s;
+            background: #161b22; border: 1px solid #30363d;
+            border-radius: 10px; padding: 18px; transition: border-color 0.2s;
         }
         .card:hover { border-color: #58a6ff; }
-        .card-title {
-            font-size: 0.8rem;
-            color: #8b949e;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-        }
-        .card-value {
-            font-size: 1.6rem;
-            font-weight: 700;
-            color: #e6edf3;
-        }
+        .card-title { font-size: 0.8rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .card-value { font-size: 1.6rem; font-weight: 700; color: #e6edf3; }
         .card-value.green { color: #00ff88; }
         .card-value.red { color: #f85149; }
         .card-value.blue { color: #58a6ff; }
         .card-value.yellow { color: #d29922; }
-        .links {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            max-width: 700px;
-            width: 100%;
-            margin-bottom: 20px;
-        }
+        .links { display: flex; flex-direction: column; gap: 12px; max-width: 700px; width: 100%; margin-bottom: 20px; }
         a.link-card {
-            display: block;
-            padding: 16px 20px;
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 10px;
-            color: #58a6ff;
-            text-decoration: none;
-            font-size: 1.05rem;
-            font-weight: 600;
-            transition: all 0.2s;
+            display: block; padding: 16px 20px; background: #161b22;
+            border: 1px solid #30363d; border-radius: 10px; color: #58a6ff;
+            text-decoration: none; font-size: 1.05rem; font-weight: 600; transition: all 0.2s;
         }
-        a.link-card:hover {
-            background: #1f2937;
-            border-color: #58a6ff;
-            transform: translateY(-2px);
-        }
-        a.link-card .desc {
-            display: block;
-            color: #8b949e;
-            font-size: 0.82rem;
-            font-weight: 400;
-            margin-top: 4px;
+        a.link-card:hover { background: #1f2937; border-color: #58a6ff; transform: translateY(-2px); }
+        a.link-card .desc { display: block; color: #8b949e; font-size: 0.82rem; font-weight: 400; margin-top: 4px; }
+        a.link-card .badge {
+            display: inline-block; background: #8957e5; color: #fff; font-size: 0.7rem;
+            padding: 2px 6px; border-radius: 4px; margin-left: 8px; vertical-align: middle; font-weight: 700;
         }
         .status-table {
-            max-width: 700px;
-            width: 100%;
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 20px;
+            max-width: 700px; width: 100%; background: #161b22;
+            border: 1px solid #30363d; border-radius: 10px; overflow: hidden; margin-bottom: 20px;
         }
         .status-table-header {
-            padding: 12px 18px;
-            background: #1c2333;
-            border-bottom: 1px solid #30363d;
-            font-size: 0.8rem;
-            color: #8b949e;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            padding: 12px 18px; background: #1c2333; border-bottom: 1px solid #30363d;
+            font-size: 0.8rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px;
         }
         .status-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 18px;
-            border-bottom: 1px solid #21262d;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 18px; border-bottom: 1px solid #21262d;
         }
         .status-row:last-child { border-bottom: none; }
         .status-label { color: #8b949e; font-size: 0.9rem; }
-        .status-dot {
-            width: 8px; height: 8px;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 8px;
-        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
         .status-dot.green { background: #00ff88; box-shadow: 0 0 6px #00ff8855; }
         .status-dot.red { background: #f85149; box-shadow: 0 0 6px #f8514955; }
         .status-dot.yellow { background: #d29922; box-shadow: 0 0 6px #d2992255; }
-        .status-value {
-            color: #e6edf3;
-            font-weight: 600;
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
+        .status-value { color: #e6edf3; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; }
+        .camera-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 18px; border-bottom: 1px solid #21262d;
         }
-        .footer {
-            margin-top: auto;
-            padding-top: 20px;
-            color: #484f58;
-            font-size: 0.75rem;
-            text-align: center;
+        .camera-item:last-child { border-bottom: none; }
+        .camera-name { color: #e6edf3; font-weight: 600; font-size: 0.9rem; }
+        .camera-device { color: #8b949e; font-size: 0.8rem; }
+        .info-box {
+            max-width: 700px; width: 100%; background: #161b22;
+            border: 1px solid #30363d; border-radius: 10px; padding: 18px; margin-bottom: 20px;
         }
+        .info-box h3 { color: #58a6ff; font-size: 0.95rem; margin-bottom: 10px; }
+        .info-box p, .info-box li { color: #8b949e; font-size: 0.85rem; line-height: 1.6; }
+        .info-box ol { padding-left: 20px; }
+        .info-box code { background: #0d1117; padding: 1px 6px; border-radius: 3px; color: #e6edf3; font-size: 0.82rem; }
+        .footer { margin-top: auto; padding-top: 20px; color: #484f58; font-size: 0.75rem; text-align: center; }
         .footer a { color: #484f58; text-decoration: none; }
         .footer a:hover { color: #8b949e; }
-        @media (max-width: 600px) {
-            .grid { grid-template-columns: 1fr; }
-            h1 { font-size: 2rem; }
-        }
+        @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } h1 { font-size: 2rem; } }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>AprilVision 2.0</h1>
-        <div class="version">Powered by PhotonVision v2026.2.2</div>
+        <h1>AprilVision 3.2</h1>
+        <div class="version">v3.2.0 - FRC 2026</div>
         <p class="subtitle">FRC Competition Vision System</p>
     </div>
 
@@ -193,12 +123,31 @@
             System Health Check
             <span class="desc" id="health-desc">Run pre-match diagnostics on all components</span>
         </a>
+        <a class="link-card" href="#" onclick="takeSnapshot(); return false;">
+            Camera Snapshot <span class="badge">NEW</span>
+            <span class="desc" id="snap-desc">Save diagnostic camera data for post-match analysis</span>
+        </a>
+        <a class="link-card" href="#" onclick="showCalibrationGuide(); return false;">
+            Calibration Guide <span class="badge">NEW</span>
+            <span class="desc" id="calib-desc">ArUco/ChArUco camera calibration for accurate 3D pose estimation</span>
+        </a>
+    </div>
+
+    <!-- Camera Detection -->
+    <div class="status-table">
+        <div class="status-table-header">Detected Cameras</div>
+        <div id="camera-list-content">
+            <div class="camera-item">
+                <span class="camera-name">Scanning...</span>
+                <span class="camera-device">Detecting cameras</span>
+            </div>
+        </div>
     </div>
 
     <div class="status-table">
         <div class="status-table-header">System Status</div>
         <div class="status-row">
-            <span class="status-label">PhotonVision Service</span>
+            <span class="status-label">Detection Engine</span>
             <span class="status-value"><span class="status-dot" id="pv-dot"></span><span id="pv-status">Checking...</span></span>
         </div>
         <div class="status-row">
@@ -206,17 +155,37 @@
             <span class="status-value"><span class="status-dot green"></span>Running</span>
         </div>
         <div class="status-row">
-            <span class="status-label">Proxy Port</span>
+            <span class="status-label">WebSocket Tunnel</span>
+            <span class="status-value"><span class="status-dot green"></span>Enabled</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Dashboard Port</span>
             <span class="status-value">5801</span>
         </div>
         <div class="status-row">
-            <span class="status-label">Engine Port</span>
-            <span class="status-value">5800 (internal)</span>
+            <span class="status-label">3D Pose Estimation</span>
+            <span class="status-value"><span class="status-dot" id="pose3d-dot"></span><span id="pose3d-status">Checking...</span></span>
         </div>
     </div>
 
+    <!-- 3D Tag Tracking Info -->
+    <div class="info-box" id="3d-info-box">
+        <h3>Enabling 3D Tag Tracking</h3>
+        <p>3D pose estimation requires camera calibration. Without calibration, the 3D toggle is disabled in the pipeline settings. To enable it:</p>
+        <ol>
+            <li>Open the <strong>Vision Dashboard</strong> link above</li>
+            <li>Go to the <strong>Cameras</strong> tab and select your camera</li>
+            <li>Click <strong>Calibration</strong> in the sidebar</li>
+            <li>Print a ChArUco board (run <code>./scripts/aruco_calibration.py --generate</code>)</li>
+            <li>Take 15-25 photos of the board from different angles and distances</li>
+            <li>Click <strong>Calibrate</strong> and wait for it to complete</li>
+            <li>Once calibrated, go to the <strong>AprilTag pipeline</strong> and toggle <strong>3D</strong> on</li>
+        </ol>
+        <p style="margin-top: 8px; color: #d29922;">Repeat calibration for each camera. Accurate calibration is critical for pose accuracy.</p>
+    </div>
+
     <div class="footer">
-        AprilVision 2.0 &mdash; Built by <a href="https://github.com/TomAs-1226">Team 1226</a>
+        AprilVision 3.2 &mdash; Built by <a href="https://github.com/TomAs-1226">Team 1226</a>
     </div>
 
     <script>
@@ -238,26 +207,24 @@
             const pvStatus = document.getElementById('pv-status');
             const cameraEl = document.getElementById('camera-count');
             const tagEl = document.getElementById('tag-count');
+            const pose3dDot = document.getElementById('pose3d-dot');
+            const pose3dStatus = document.getElementById('pose3d-status');
 
             try {
-                const resp = await fetch('/api/settings/general', {
-                    signal: AbortSignal.timeout(3000)
-                });
+                const resp = await fetch('/api/settings/general', { signal: AbortSignal.timeout(3000) });
                 if (resp.ok) {
                     pvOnline = true;
                     engineEl.textContent = 'Online';
                     engineEl.className = 'card-value green';
                     pvDot.className = 'status-dot green';
                     pvStatus.textContent = 'Online';
-
-                    // Try to get camera and target info
                     try {
                         const data = await resp.json();
                         if (data && data.cameras) {
                             cameraEl.textContent = data.cameras.length;
                             cameraEl.className = 'card-value ' + (data.cameras.length > 0 ? 'green' : 'yellow');
                         }
-                    } catch { /* camera data not available in this endpoint */ }
+                    } catch {}
                 } else {
                     pvOnline = false;
                     engineEl.textContent = 'Error';
@@ -271,12 +238,68 @@
                 engineEl.className = 'card-value yellow';
                 pvDot.className = 'status-dot yellow';
                 pvStatus.textContent = 'Starting...';
-                cameraEl.textContent = '--';
-                cameraEl.className = 'card-value';
-                tagEl.textContent = '--';
-                tagEl.className = 'card-value';
+                cameraEl.textContent = '--'; cameraEl.className = 'card-value';
+                tagEl.textContent = '--'; tagEl.className = 'card-value';
+            }
+
+            // Check 3D status via camera calibration
+            try {
+                const camResp = await fetch('/api/settings/cameras', { signal: AbortSignal.timeout(3000) });
+                if (camResp.ok) {
+                    const camData = await camResp.json();
+                    let calibrated = false, camCount = 0;
+                    if (Array.isArray(camData)) {
+                        camCount = camData.length;
+                        if (camCount > 0) {
+                            cameraEl.textContent = camCount;
+                            cameraEl.className = 'card-value green';
+                        }
+                        for (const cam of camData) {
+                            if (cam.calibrations && cam.calibrations.length > 0) { calibrated = true; break; }
+                        }
+                    }
+                    if (calibrated) {
+                        pose3dDot.className = 'status-dot green';
+                        pose3dStatus.textContent = 'Available (Calibrated)';
+                    } else if (camCount > 0) {
+                        pose3dDot.className = 'status-dot yellow';
+                        pose3dStatus.textContent = 'Needs Calibration';
+                    } else {
+                        pose3dDot.className = 'status-dot red';
+                        pose3dStatus.textContent = 'No Cameras';
+                    }
+                }
+            } catch {}
+        }
+
+        async function detectCameras() {
+            const listEl = document.getElementById('camera-list-content');
+            try {
+                const resp = await fetch('/api/aprilvision/cameras', { signal: AbortSignal.timeout(5000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.cameras && data.cameras.length > 0) {
+                        listEl.innerHTML = '';
+                        data.cameras.forEach(function(cam) {
+                            const item = document.createElement('div');
+                            item.className = 'camera-item';
+                            item.innerHTML = '<span class="camera-name">' + escapeHtml(cam.name) + '</span>' +
+                                '<span class="camera-device">' + escapeHtml(cam.device) +
+                                ' <span style="color:#00ff88;font-size:0.75rem;">(' + cam.source + ')</span></span>';
+                            listEl.appendChild(item);
+                        });
+                        document.getElementById('camera-count').textContent = data.count;
+                        document.getElementById('camera-count').className = 'card-value ' + (data.count > 0 ? 'green' : 'yellow');
+                    } else {
+                        listEl.innerHTML = '<div class="camera-item"><span class="camera-name" style="color:#d29922;">No cameras detected</span><span class="camera-device">Check USB connections</span></div>';
+                    }
+                }
+            } catch {
+                listEl.innerHTML = '<div class="camera-item"><span class="camera-name" style="color:#8b949e;">Camera API unavailable</span><span class="camera-device">Engine may be starting</span></div>';
             }
         }
+
+        function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
         function updateUptime() {
             document.getElementById('uptime-value').textContent = formatUptime(Date.now() - startTime);
@@ -285,17 +308,39 @@
         function runHealthCheck() {
             const desc = document.getElementById('health-desc');
             if (pvOnline) {
-                desc.textContent = 'Engine: Online | Proxy: Running | Status: All systems go';
+                desc.textContent = 'Engine: Online | Proxy: Running | WebSocket: Active | All systems go';
                 desc.style.color = '#00ff88';
             } else {
-                desc.textContent = 'Engine: Offline | Check: sudo systemctl status photonvision';
+                desc.textContent = 'Engine: Offline | Run: ./scripts/health_check.sh on the coprocessor';
                 desc.style.color = '#f85149';
             }
         }
 
-        checkStatus();
-        updateUptime();
+        async function takeSnapshot() {
+            const desc = document.getElementById('snap-desc');
+            desc.textContent = 'Saving snapshot...'; desc.style.color = '#d29922';
+            try {
+                const resp = await fetch('/api/aprilvision/snapshot', { method: 'POST' });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    desc.textContent = 'Snapshot saved at ' + data.timestamp + ' (' + data.files.length + ' cameras)';
+                    desc.style.color = '#00ff88';
+                } else { desc.textContent = 'Snapshot failed - engine may be offline'; desc.style.color = '#f85149'; }
+            } catch { desc.textContent = 'Snapshot failed - connection error'; desc.style.color = '#f85149'; }
+        }
+
+        function showCalibrationGuide() {
+            const box = document.getElementById('3d-info-box');
+            box.scrollIntoView({ behavior: 'smooth' });
+            box.style.borderColor = '#58a6ff';
+            setTimeout(function() { box.style.borderColor = '#30363d'; }, 2000);
+            document.getElementById('calib-desc').textContent = 'See calibration steps below. Run: ./scripts/aruco_calibration.py --generate';
+            document.getElementById('calib-desc').style.color = '#58a6ff';
+        }
+
+        checkStatus(); detectCameras(); updateUptime();
         setInterval(checkStatus, 5000);
+        setInterval(detectCameras, 15000);
         setInterval(updateUptime, 1000);
     </script>
 </body>

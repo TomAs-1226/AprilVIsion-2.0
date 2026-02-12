@@ -1,6 +1,6 @@
 #!/bin/bash
 #===============================================================================
-# AprilVision 2.0 - Pre-Match System Health Check
+# AprilVision 3.2 - Pre-Match System Health Check
 #
 # Run this before every match to verify all vision components are operational.
 # Exit code 0 = all systems go, non-zero = issues found.
@@ -45,15 +45,15 @@ fail() {
 
 if ! $QUIET; then
     echo ""
-    echo -e "${CYAN}AprilVision 2.0 - System Health Check${NC}"
+    echo -e "${CYAN}AprilVision 3.2 - System Health Check${NC}"
     echo "======================================"
 fi
 
-# --- PhotonVision Service ---
+# --- Detection Engine Service ---
 if systemctl is-active --quiet photonvision 2>/dev/null; then
-    pass "PhotonVision Service" "RUNNING"
+    pass "Detection Engine" "RUNNING"
 else
-    fail "PhotonVision Service" "NOT RUNNING"
+    fail "Detection Engine" "NOT RUNNING"
 fi
 
 # --- Dashboard Service ---
@@ -76,13 +76,13 @@ else
     fail "Java" "NOT INSTALLED"
 fi
 
-# --- PhotonVision JAR ---
+# --- Engine Binary ---
 PV_JAR="/opt/photonvision/photonvision.jar"
 if [[ -f "$PV_JAR" ]]; then
     JAR_SIZE=$(du -h "$PV_JAR" | awk '{print $1}')
-    pass "PhotonVision JAR" "OK ($JAR_SIZE)"
+    pass "Engine Binary" "OK ($JAR_SIZE)"
 else
-    fail "PhotonVision JAR" "MISSING"
+    fail "Engine Binary" "MISSING"
 fi
 
 # --- Camera Devices ---
@@ -114,12 +114,12 @@ else
     warn "Network (roboRIO)" "CONFIG NOT FOUND"
 fi
 
-# --- PhotonVision HTTP ---
+# --- Engine HTTP ---
 if command -v curl &>/dev/null; then
     if curl -s --max-time 3 http://localhost:5800 &>/dev/null; then
-        pass "PhotonVision HTTP" "RESPONDING (:5800)"
+        pass "Engine HTTP" "RESPONDING (:5800)"
     else
-        warn "PhotonVision HTTP" "NOT RESPONDING"
+        warn "Engine HTTP" "NOT RESPONDING"
     fi
 fi
 

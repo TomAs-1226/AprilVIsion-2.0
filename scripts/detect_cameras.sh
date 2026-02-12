@@ -1,6 +1,6 @@
 #!/bin/bash
 #===============================================================================
-# AprilVision 2.0 - Camera Detection Utility
+# AprilVision 3.2 - Camera Detection Utility
 #
 # Lists all connected video devices and their capabilities.
 # Use this to verify cameras are detected before configuring in the dashboard.
@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo ""
-echo -e "${CYAN}AprilVision 2.0 - Camera Detection${NC}"
+echo -e "${CYAN}AprilVision 3.2 - Camera Detection${NC}"
 echo "==================================="
 echo ""
 

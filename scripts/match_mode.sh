@@ -1,6 +1,6 @@
 #!/bin/bash
 #===============================================================================
-# AprilVision 2.0 - Match Mode
+# AprilVision 3.2 - Match Mode
 #
 # Optimizes the coprocessor for competition performance.
 # Enable before matches, disable for practice/development.
@@ -29,7 +29,7 @@ log_warn() { echo -e "${YELLOW}[MATCH]${NC} $1"; }
 
 enable_match_mode() {
     echo ""
-    echo -e "${CYAN}AprilVision 2.0 - Enabling Match Mode${NC}"
+    echo -e "${CYAN}AprilVision 3.2 - Enabling Match Mode${NC}"
     echo "======================================"
 
     # Set CPU governor to performance
@@ -42,14 +42,14 @@ enable_match_mode() {
         log_warn "CPU governor not available (may already be performance)"
     fi
 
-    # Increase PhotonVision heap
+    # Increase engine heap
     PV_SERVICE="/etc/systemd/system/photonvision.service"
     if [[ -f "$PV_SERVICE" ]]; then
         if grep -q "Xmx512m" "$PV_SERVICE"; then
             sudo sed -i 's/-Xmx512m/-Xmx768m/' "$PV_SERVICE"
             sudo systemctl daemon-reload
             log_ok "Java heap increased to 768MB"
-            log_info "Restarting PhotonVision with new memory settings..."
+            log_info "Restarting detection engine with new memory settings..."
             sudo systemctl restart photonvision
             sleep 3
             sudo systemctl restart aprilvision-dashboard
@@ -63,7 +63,7 @@ enable_match_mode() {
     PV_PID=$(pgrep -f "photonvision.jar" 2>/dev/null || true)
     if [[ -n "$PV_PID" ]]; then
         sudo renice -n -10 -p "$PV_PID" > /dev/null 2>&1 || true
-        log_ok "PhotonVision process priority raised (PID $PV_PID)"
+        log_ok "Detection engine process priority raised (PID $PV_PID)"
     fi
 
     # Reduce kernel swappiness
@@ -95,7 +95,7 @@ enable_match_mode() {
 
 disable_match_mode() {
     echo ""
-    echo -e "${CYAN}AprilVision 2.0 - Disabling Match Mode${NC}"
+    echo -e "${CYAN}AprilVision 3.2 - Disabling Match Mode${NC}"
     echo "======================================="
 
     # Reset CPU governor
@@ -106,14 +106,14 @@ disable_match_mode() {
         log_ok "CPU governor reset to ondemand"
     fi
 
-    # Restore PhotonVision heap
+    # Restore engine heap
     PV_SERVICE="/etc/systemd/system/photonvision.service"
     if [[ -f "$PV_SERVICE" ]]; then
         if grep -q "Xmx768m" "$PV_SERVICE"; then
             sudo sed -i 's/-Xmx768m/-Xmx512m/' "$PV_SERVICE"
             sudo systemctl daemon-reload
             log_ok "Java heap restored to 512MB"
-            log_info "Restarting PhotonVision with normal memory settings..."
+            log_info "Restarting detection engine with normal memory settings..."
             sudo systemctl restart photonvision
             sleep 3
             sudo systemctl restart aprilvision-dashboard
@@ -138,7 +138,7 @@ disable_match_mode() {
 
 show_status() {
     echo ""
-    echo -e "${CYAN}AprilVision 2.0 - Match Mode Status${NC}"
+    echo -e "${CYAN}AprilVision 3.2 - Match Mode Status${NC}"
     echo "====================================="
 
     if [[ -f "$STATE_FILE" ]] && grep -q "enabled" "$STATE_FILE"; then
@@ -153,7 +153,7 @@ show_status() {
         echo "  CPU governor: $GOV"
     fi
 
-    # Show PV heap
+    # Show engine heap
     PV_SERVICE="/etc/systemd/system/photonvision.service"
     if [[ -f "$PV_SERVICE" ]]; then
         HEAP=$(grep -o 'Xmx[0-9]*m' "$PV_SERVICE" 2>/dev/null || echo "unknown")

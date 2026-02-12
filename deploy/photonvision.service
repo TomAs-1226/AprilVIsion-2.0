@@ -1,6 +1,5 @@
 [Unit]
-Description=AprilVision 2.0 - PhotonVision Detection Engine
-Documentation=https://docs.photonvision.org
+Description=AprilVision 3.2 - Detection Engine
 After=network.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -22,7 +21,7 @@ LimitRTPRIO=99
 LimitMEMLOCK=infinity
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=photonvision
+SyslogIdentifier=aprilvision-engine
 
 [Install]
 WantedBy=multi-user.target

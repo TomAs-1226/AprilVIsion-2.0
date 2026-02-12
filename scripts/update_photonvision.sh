@@ -1,8 +1,8 @@
 #!/bin/bash
 #===============================================================================
-# AprilVision 2.0 - Update PhotonVision Engine
+# AprilVision 3.2 - Engine Updater
 #
-# Downloads and installs a new version of PhotonVision.
+# Downloads and installs a new version of the detection engine.
 # Automatically backs up the current JAR before updating.
 #
 # Usage: ./scripts/update_photonvision.sh [VERSION]
@@ -22,7 +22,7 @@ INSTALL_DIR="/opt/photonvision"
 
 if [[ -z "$VERSION" ]]; then
     echo ""
-    echo -e "${CYAN}AprilVision 2.0 - PhotonVision Updater${NC}"
+    echo -e "${CYAN}AprilVision 3.2 - Engine Updater${NC}"
     echo ""
     echo "Usage: $0 <version>"
     echo "Example: $0 v2026.3.0"
@@ -33,8 +33,8 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 echo ""
-echo -e "${CYAN}AprilVision 2.0 - Updating PhotonVision Engine${NC}"
-echo "================================================"
+echo -e "${CYAN}AprilVision 3.2 - Updating Detection Engine${NC}"
+echo "============================================="
 
 # Detect architecture
 ARCH=$(uname -m)
@@ -105,7 +105,7 @@ sleep 3
 sudo systemctl start aprilvision-dashboard
 
 echo ""
-echo -e "${GREEN}PhotonVision updated to ${VERSION}${NC}"
+echo -e "${GREEN}Detection engine updated to ${VERSION}${NC}"
 echo ""
 echo "Verify with: sudo systemctl status photonvision"
 echo "Health check: ./scripts/health_check.sh"
