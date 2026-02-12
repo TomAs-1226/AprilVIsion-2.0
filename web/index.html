@@ -1931,57 +1931,83 @@
         /* ======================== PV WEBSOCKET (live data) ======================== */
 
         connectPVWebSocket() {
-            // Connect directly to PV's WebSocket through the bridge tunnel
-            // Bridge tunnels all WebSocket upgrades to PV at ws://engine:5800
+            // Prefer direct PhotonVision engine websocket first.
+            // This avoids proxy/tunnel edge cases and gives the most reliable live feed.
             const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = proto + '//' + window.location.host + '/websocket_data';
+            const host = window.location.hostname;
+            const candidates = [
+                proto + '//' + host + ':5800/websocket_data',
+                proto + '//' + window.location.host + '/websocket_data'
+            ];
 
-            try {
-                this._pvWs = new WebSocket(wsUrl);
-                this._pvWs.binaryType = 'arraybuffer';
+            const tryConnect = (idx) => {
+                const wsUrl = candidates[idx] || candidates[0];
+                try {
+                    this._pvWs = new WebSocket(wsUrl);
+                    this._pvWs.binaryType = 'arraybuffer';
 
-                this._pvWs.onopen = () => {
-                    console.log('[AV] PV WebSocket connected');
-                    this._pvWsRetries = 0;
-                };
-
-                this._pvWs.onmessage = (event) => {
-                    // PV sends MessagePack binary frames
-                    // We can't decode without a msgpack library in the browser,
-                    // but we CAN detect that data is flowing (connection is live)
-                    if (event.data) {
+                    this._pvWs.onopen = () => {
+                        console.log('[AV] PV WebSocket connected via', wsUrl);
+                        this._pvWsRetries = 0;
                         this.state.ws_connected = true;
-                    }
-                };
+                    };
 
-                this._pvWs.onclose = () => {
-                    console.log('[AV] PV WebSocket closed, reconnecting...');
-                    this.state.ws_connected = false;
-                    this._pvWs = null;
-                    // Exponential backoff reconnect
+                    this._pvWs.onmessage = (event) => {
+                        if (event.data) this.state.ws_connected = true;
+                    };
+
+                    this._pvWs.onclose = () => {
+                        console.log('[AV] PV WebSocket closed:', wsUrl);
+                        this.state.ws_connected = false;
+                        this._pvWs = null;
+
+                        // If direct failed and proxy candidate exists, try proxy immediately.
+                        if (idx + 1 < candidates.length && this._pvWsRetries === 0) {
+                            tryConnect(idx + 1);
+                            return;
+                        }
+
+                        const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
+                        this._pvWsRetries++;
+                        setTimeout(() => this.connectPVWebSocket(), delay);
+                    };
+
+                    this._pvWs.onerror = () => {
+                        this.state.ws_connected = false;
+                    };
+                } catch (e) {
+                    if (idx + 1 < candidates.length) {
+                        tryConnect(idx + 1);
+                        return;
+                    }
+                    console.log('[AV] WebSocket error:', e);
                     const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
                     this._pvWsRetries++;
                     setTimeout(() => this.connectPVWebSocket(), delay);
-                };
+                }
+            };
 
-                this._pvWs.onerror = () => {
-                    // onclose will fire after this
-                    this.state.ws_connected = false;
-                };
-            } catch (e) {
-                console.log('[AV] WebSocket error:', e);
-                const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
-                this._pvWsRetries++;
-                setTimeout(() => this.connectPVWebSocket(), delay);
-            }
+            tryConnect(0);
         }
 
         /* ======================== STREAM URL HELPERS ======================== */
 
         getDirectStreamUrl(camIdx, type) {
-            // Direct to cscore MJPEG - bypasses proxy entirely
+            // Direct to PhotonVision camera stream port (prefer discovered dynamic ports).
             const host = window.location.hostname;
-            const port = this.STREAM_BASE_PORT + (camIdx * 2) + (type === 'output' ? 1 : 0);
+            let inPort = this.STREAM_BASE_PORT + (camIdx * 2);
+            let outPort = inPort + 1;
+
+            const info = this.state.cameraInfo && Array.isArray(this.state.cameraInfo.engineCameras)
+                ? this.state.cameraInfo.engineCameras.find(c => c.index === camIdx)
+                : null;
+
+            if (info) {
+                if (info.inputStreamPort) inPort = info.inputStreamPort;
+                if (info.outputStreamPort) outPort = info.outputStreamPort;
+            }
+
+            const port = type === 'output' ? outPort : inPort;
             return 'http://' + host + ':' + port + '/stream.mjpg';
         }
 
@@ -2121,6 +2147,10 @@
                 card.className = 'camera-feed-block';
                 const inUrl = this.getProxyStreamUrl(cam.index, 'input');
                 const outUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const directIn = this.getDirectStreamUrl(cam.index, 'input');
+                const directOut = this.getDirectStreamUrl(cam.index, 'output');
+                const frameIn = this.getFrameFallbackUrl(cam.index, 'input');
+                const frameOut = this.getFrameFallbackUrl(cam.index, 'output');
                 card.innerHTML =
                     '<div class="camera-feed-header">' +
                     '<span class="feed-title">' + this.escapeHtml(cam.name || ('Camera ' + cam.index)) + '</span>' +
@@ -2129,13 +2159,19 @@
                     '<div class="feed-pair">' +
                         '<div class="feed-panel">' +
                             '<span class="feed-label">Input Stream</span>' +
-                            '<img src="' + this.escapeAttr(inUrl) + '" alt="Input Stream" ' +
+                            '<img src="' + this.escapeAttr(directIn) + '" alt="Input Stream" ' +
+                                 'data-proxy-url="' + this.escapeAttr(inUrl) + '" ' +
+                                 'data-direct-url="' + this.escapeAttr(directIn) + '" ' +
+                                 'data-frame-url="' + this.escapeAttr(frameIn) + '" ' +
                                  'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
                                  'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
                         '</div>' +
                         '<div class="feed-panel">' +
                             '<span class="feed-label">Output Stream</span>' +
-                            '<img src="' + this.escapeAttr(outUrl) + '" alt="Output Stream" ' +
+                            '<img src="' + this.escapeAttr(directOut) + '" alt="Output Stream" ' +
+                                 'data-proxy-url="' + this.escapeAttr(outUrl) + '" ' +
+                                 'data-direct-url="' + this.escapeAttr(directOut) + '" ' +
+                                 'data-frame-url="' + this.escapeAttr(frameOut) + '" ' +
                                  'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
                                  'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
                         '</div>' +
