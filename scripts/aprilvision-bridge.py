@@ -43,6 +43,7 @@ import threading
 import struct
 import hashlib
 import base64
+import io
 
 # Optional: WebSocket client + MessagePack for live PV data
 try:
@@ -335,6 +336,137 @@ def _start_target_poller():
     """
     t = threading.Thread(target=_target_poll_loop, daemon=True)
     t.start()
+
+
+def _read_http_response(sock, max_header_bytes=65536):
+    """Read an HTTP response from a socket and return (status, headers, body_start)."""
+    header_buf = b""
+    while b"\r\n\r\n" not in header_buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("Connection closed reading headers")
+        header_buf += chunk
+        if len(header_buf) > max_header_bytes:
+            raise ConnectionError("Header too large")
+
+    header_end = header_buf.index(b"\r\n\r\n") + 4
+    headers_raw = header_buf[:header_end]
+    body_start = header_buf[header_end:]
+
+    status_line = headers_raw.split(b"\r\n", 1)[0]
+    status_parts = status_line.split(b" ", 2)
+    if len(status_parts) < 2:
+        raise ConnectionError("Malformed HTTP status line")
+    status_code = int(status_parts[1])
+
+    headers = {}
+    for line in headers_raw.split(b"\r\n")[1:]:
+        if not line or b":" not in line:
+            continue
+        key, value = line.split(b":", 1)
+        headers[key.strip().lower()] = value.strip()
+
+    return status_code, headers, body_start
+
+
+def _extract_first_jpeg(data, boundary=None):
+    """Extract the first JPEG payload from bytes that may contain MJPEG multipart data."""
+    # Fast path: contiguous JPEG markers.
+    start = data.find(b"\xff\xd8")
+    if start >= 0:
+        end = data.find(b"\xff\xd9", start + 2)
+        if end > start:
+            return data[start:end + 2]
+
+    if boundary:
+        # Boundary can be quoted or prefixed with -- in content-type.
+        b = boundary.strip().strip('"')
+        if b.startswith("--"):
+            b = b[2:]
+        marker = ("--" + b).encode("ascii", errors="ignore")
+        parts = data.split(marker)
+        for part in parts:
+            hdr_end = part.find(b"\r\n\r\n")
+            if hdr_end < 0:
+                continue
+            payload = part[hdr_end + 4:]
+            s = payload.find(b"\xff\xd8")
+            e = payload.find(b"\xff\xd9", s + 2) if s >= 0 else -1
+            if s >= 0 and e > s:
+                return payload[s:e + 2]
+
+    return None
+
+
+def _fetch_camera_frame(cam_idx, stream_type="output", timeout=2.5):
+    """Fetch a single JPEG frame from PhotonVision stream sources.
+
+    Returns JPEG bytes or None.
+    """
+    dedicated_port = STREAM_BASE_PORT + (cam_idx * 2) + (1 if stream_type == "output" else 0)
+    candidates = [
+        (ENGINE_HOST, dedicated_port, "/stream.mjpg"),
+        (ENGINE_HOST, dedicated_port, "/stream"),
+        (ENGINE_HOST, dedicated_port, "/?action=stream"),
+        # Some PV builds may expose streams from the main HTTP server.
+        (ENGINE_HOST, ENGINE_PORT, f"/api/camera/{cam_idx}/{stream_type}.mjpg"),
+        (ENGINE_HOST, ENGINE_PORT, f"/api/stream/{cam_idx}/{stream_type}"),
+        (ENGINE_HOST, ENGINE_PORT, f"/stream/{cam_idx}/{stream_type}"),
+    ]
+
+    for host, port, path in candidates:
+        sock = None
+        try:
+            sock = socket.create_connection((host, port), timeout=timeout)
+            sock.settimeout(timeout)
+            req = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: {host}:{port}\r\n"
+                f"User-Agent: AprilVision-Bridge/3.2\r\n"
+                f"Accept: multipart/x-mixed-replace,image/jpeg,*/*\r\n"
+                f"Connection: close\r\n\r\n"
+            )
+            sock.sendall(req.encode("ascii", errors="ignore"))
+
+            status, headers, body = _read_http_response(sock)
+            if status != 200:
+                continue
+
+            ctype = headers.get(b"content-type", b"").decode("ascii", errors="ignore").lower()
+            boundary = None
+            if "boundary=" in ctype:
+                boundary = ctype.split("boundary=", 1)[1].split(";", 1)[0].strip()
+
+            # Read enough bytes to capture at least one JPEG frame.
+            buf = io.BytesIO()
+            if body:
+                buf.write(body)
+
+            deadline = time.time() + timeout
+            while time.time() < deadline and buf.tell() < 2_000_000:
+                frame = _extract_first_jpeg(buf.getvalue(), boundary=boundary)
+                if frame:
+                    return frame
+                try:
+                    chunk = sock.recv(65536)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                buf.write(chunk)
+
+            frame = _extract_first_jpeg(buf.getvalue(), boundary=boundary)
+            if frame:
+                return frame
+        except Exception:
+            pass
+        finally:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+    return None
 
 
 def _target_poll_loop():
@@ -1312,8 +1444,41 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return self._api_set_driver_mode()
         elif endpoint == 'performance':
             return self._api_performance()
+        elif endpoint.startswith('frame/'):
+            return self._api_frame(endpoint)
         else:
             self._send_json({"error": "Unknown endpoint"}, 404)
+
+    def _api_frame(self, endpoint):
+        """Return a single JPEG frame for a camera stream.
+
+        Endpoint: /api/av/frame/<camera_index>/<input|output>
+        Useful fallback when MJPEG streaming is blocked by browser/network.
+        """
+        try:
+            parts = endpoint.split('/')
+            if len(parts) < 2:
+                return self._send_json({"error": "Use /api/av/frame/<index>/<input|output>"}, 400)
+
+            cam_idx = int(parts[1])
+            stream_type = parts[2] if len(parts) > 2 else "output"
+            if stream_type not in ("input", "output"):
+                stream_type = "output"
+
+            frame = _fetch_camera_frame(cam_idx, stream_type=stream_type, timeout=2.5)
+            if not frame:
+                return self._send_json({"error": "No frame available", "cameraIndex": cam_idx, "streamType": stream_type}, 503)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(frame)))
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(frame)
+        except Exception as e:
+            self._send_json({"error": str(e)}, 500)
 
     def _api_cameras(self):
         system_cameras = get_system_cameras()

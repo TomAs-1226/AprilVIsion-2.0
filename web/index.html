@@ -1939,6 +1939,10 @@
             return '/stream/' + camIdx + '/' + type;
         }
 
+        getFrameFallbackUrl(camIdx, type) {
+            return '/api/av/frame/' + camIdx + '/' + type;
+        }
+
         async checkStreamHealth() {
             const output = document.getElementById('streamDebugOutput');
             if (output) {
@@ -2771,10 +2775,12 @@
 
                 const directUrl = this.getDirectStreamUrl(cam.index, 'output');
                 const proxyUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const frameUrl = this.getFrameFallbackUrl(cam.index, 'output');
                 card.innerHTML =
                     '<img class="cam-thumb" src="' + this.escapeAttr(directUrl) + '" alt="' + this.escapeAttr(cam.name) + '" ' +
                         'data-direct-url="' + this.escapeAttr(directUrl) + '" ' +
                         'data-proxy-url="' + this.escapeAttr(proxyUrl) + '" ' +
+                        'data-frame-url="' + this.escapeAttr(frameUrl) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')" loading="lazy">' +
                     '<div class="cam-info">' +
@@ -2850,6 +2856,8 @@
                 const proxyOutputUrl = this.getProxyStreamUrl(cam.index, 'output');
                 const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
                 const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
+                const frameInputUrl = this.getFrameFallbackUrl(cam.index, 'input');
+                const frameOutputUrl = this.getFrameFallbackUrl(cam.index, 'output');
                 const calibIcon = cam.calibrated ? '&#10003; Calibrated' : '&#9888; Not Calibrated';
                 const calibColor = cam.calibrated ? 'var(--accent-green)' : 'var(--accent-yellow)';
 
@@ -2876,6 +2884,7 @@
                     '<img src="' + this.escapeAttr(proxyInputUrl) + '" alt="Input Stream" ' +
                         'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
                         'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
+                        'data-frame-url="' + this.escapeAttr(frameInputUrl) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
                     '</div>' +
@@ -2885,6 +2894,7 @@
                     '<img src="' + this.escapeAttr(proxyOutputUrl) + '" alt="Output Stream" ' +
                         'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
                         'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
+                        'data-frame-url="' + this.escapeAttr(frameOutputUrl) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
                     '</div>' +
@@ -3385,9 +3395,10 @@
         }
 
         handleStreamError(img, camIdx, streamType) {
-            // Smart fallback: proxy failed -> try direct -> retry with backoff
+            // Smart fallback: proxy failed -> direct -> single-frame fallback -> retry with backoff
             const directUrl = img.getAttribute('data-direct-url');
             const proxyUrl = img.getAttribute('data-proxy-url');
+            const frameUrl = img.getAttribute('data-frame-url');
             const currentSrc = (img.getAttribute('src') || '').split('?')[0];
 
             img.style.opacity = '0.3';
@@ -3418,6 +3429,18 @@
                 return;
             }
 
+            // If both MJPEG endpoints failed, try bridge frame fallback.
+            if (frameUrl && currentSrc !== frameUrl) {
+                if (badge) {
+                    badge.className = 'feed-status connecting';
+                    badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Trying frame fallback...';
+                }
+                const modeEl = document.getElementById('streamMode-' + camIdx);
+                if (modeEl) modeEl.textContent = 'frame-fallback';
+                img.src = frameUrl;
+                return;
+            }
+
             // Both failed - show placeholder with target data, retry in background
             if (badge) {
                 badge.className = 'feed-status error';
@@ -3445,14 +3468,23 @@
             if (this._cameraRefreshTimers[key]) return;
 
             const attempt = this._streamRetryBackoff[key] || 0;
-            const delay = Math.min(2000 * Math.pow(2, attempt), 16000);
+            const delay = Math.min(1500 * Math.pow(2, attempt), 12000);
             this._streamRetryBackoff[key] = attempt + 1;
 
             this._cameraRefreshTimers[key] = setTimeout(() => {
                 delete this._cameraRefreshTimers[key];
-                // Alternate between proxy and direct on retries (proxy preferred)
-                const tryProxy = attempt % 2 === 0;
-                const url = (tryProxy && proxyUrl) ? proxyUrl : (directUrl || proxyUrl);
+                // Retry cycle: proxy -> direct -> frame fallback.
+                const modeEl = document.getElementById('streamMode-' + camIdx);
+                let url = proxyUrl || directUrl || frameUrl;
+                if (attempt % 3 === 1 && directUrl) {
+                    url = directUrl;
+                    if (modeEl) modeEl.textContent = 'direct';
+                } else if (attempt % 3 === 2 && frameUrl) {
+                    url = frameUrl;
+                    if (modeEl) modeEl.textContent = 'frame-fallback';
+                } else {
+                    if (modeEl) modeEl.textContent = 'proxy';
+                }
                 img.style.display = '';
                 img.style.opacity = '1';
                 img.src = url + '?_t=' + Date.now();
