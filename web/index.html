@@ -1256,6 +1256,10 @@
                             <button class="btn btn-blue" onclick="AVApp.renderStreamOnlyPage()">Refresh Stream View</button>
                             <button class="btn" onclick="AVApp.checkStreamHealth()">Quick Port Check</button>
                         </div>
+                        <div class="btn-group" style="margin-top:8px;">
+                            <button class="btn" id="btnStreamModeCustom" onclick="AVApp.setStreamRenderMode('custom')">Custom Stream Cards</button>
+                            <button class="btn" id="btnStreamModeNative" onclick="AVApp.setStreamRenderMode('native')">PhotonVision Native (Cropped)</button>
+                        </div>
                         <div id="streamSuiteOutput" class="tool-output" style="margin-top:10px;min-height:70px;">
                             Click "Run Stream Test Suite" to validate backend stream status and frame retrieval.
                         </div>
@@ -1263,10 +1267,19 @@
                 </div>
 
                 <div class="section-title"><span class="section-icon">&#9724;</span> Stream-Only Feeds</div>
+                <div id="streamRenderHint" class="alert alert-info" style="margin-bottom:10px;">Rendering mode: custom stream cards.</div>
                 <div class="camera-feeds" id="streamOnlyFeedsContainer">
                     <div class="empty-state">
                         <div class="empty-icon">&#128247;</div>
                         <p>Loading dedicated stream-only feeds...</p>
+                    </div>
+                </div>
+                <div id="pvNativeStreamContainer" style="display:none;border:1px solid var(--border-color);border-radius:10px;overflow:hidden;background:#000;">
+                    <div style="padding:10px 12px;background:var(--bg-header);border-bottom:1px solid var(--border-color);font-size:0.8rem;color:var(--text-secondary);">
+                        Cropped PhotonVision stream region (full UI remains available in Pipeline Config tab).
+                    </div>
+                    <div style="position:relative;height:760px;overflow:hidden;background:#000;">
+                        <iframe id="pvNativeStreamFrame" src="/pv/#/cameras" style="position:absolute;top:-80px;left:-210px;width:1850px;height:1080px;border:0;transform:scale(1.05);transform-origin:top left;background:#000;"></iframe>
                     </div>
                 </div>
             </div>
@@ -1625,6 +1638,7 @@
                 allianceColor: localStorage.getItem('av_alliance') || 'blue',
                 driverMode: false,
                 distanceHistory: [],      // last N distance readings for chart
+                streamRenderMode: localStorage.getItem('av_stream_render_mode') || 'custom',
             };
             this.pollTimer = null;
             this.cameraPollTimer = null;
@@ -2131,9 +2145,41 @@
             }
         }
 
+        setStreamRenderMode(mode) {
+            this.state.streamRenderMode = mode === 'native' ? 'native' : 'custom';
+            localStorage.setItem('av_stream_render_mode', this.state.streamRenderMode);
+            this.renderStreamOnlyPage();
+        }
+
+        renderStreamModeControls() {
+            const customBtn = document.getElementById('btnStreamModeCustom');
+            const nativeBtn = document.getElementById('btnStreamModeNative');
+            const hint = document.getElementById('streamRenderHint');
+            const customContainer = document.getElementById('streamOnlyFeedsContainer');
+            const nativeContainer = document.getElementById('pvNativeStreamContainer');
+            const isNative = this.state.streamRenderMode === 'native';
+
+            if (customBtn) customBtn.className = 'btn' + (isNative ? '' : ' btn-blue');
+            if (nativeBtn) nativeBtn.className = 'btn' + (isNative ? ' btn-blue' : '');
+            if (hint) {
+                hint.textContent = isNative
+                    ? 'Rendering mode: cropped PhotonVision native cameras page.'
+                    : 'Rendering mode: custom stream cards with direct/proxy/frame fallbacks.';
+            }
+            if (customContainer) customContainer.style.display = isNative ? 'none' : 'grid';
+            if (nativeContainer) nativeContainer.style.display = isNative ? 'block' : 'none';
+        }
+
         renderStreamOnlyPage() {
             const container = document.getElementById('streamOnlyFeedsContainer');
             if (!container) return;
+
+            this.renderStreamModeControls();
+            if (this.state.streamRenderMode === 'native') {
+                const iframe = document.getElementById('pvNativeStreamFrame');
+                if (iframe && !iframe.getAttribute('src')) iframe.setAttribute('src', '/pv/#/cameras');
+                return;
+            }
 
             const cameras = this.state.cameras || [];
             if (cameras.length === 0) {
