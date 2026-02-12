@@ -49,11 +49,23 @@ ENGINE_HOST = "127.0.0.1"
 ENGINE_PORT = 5800
 STREAM_BASE_PORT = 1181
 
-# Path to custom dashboard files
-WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web")
-# Also check the installed location
-if not os.path.isdir(WEB_DIR):
-    WEB_DIR = "/opt/aprilvision/web"
+# Path to custom dashboard files – resolved at import time, overridable via --web-dir
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_WEB_SEARCH_PATHS = [
+    os.path.join(_SCRIPT_DIR, "..", "web"),           # repo: scripts/../web
+    os.path.join(_SCRIPT_DIR, "web"),                 # scripts/web (flat layout)
+    "/opt/aprilvision/web",                           # deployed location
+    os.path.join(os.getcwd(), "web"),                 # cwd/web
+]
+WEB_DIR = None
+for _p in _WEB_SEARCH_PATHS:
+    _p = os.path.abspath(_p)
+    if os.path.isdir(_p) and os.path.isfile(os.path.join(_p, "index.html")):
+        WEB_DIR = _p
+        break
+if WEB_DIR is None:
+    # Last resort: use the first candidate and let the 404 handler explain what's wrong
+    WEB_DIR = os.path.abspath(_WEB_SEARCH_PATHS[0])
 
 # ---------------------------------------------------------------------------
 # Branding for engine SPA proxy (/pv/* route)
@@ -528,7 +540,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._send_file(index_path)
         else:
             self._send_error(404, "Dashboard Not Found",
-                             "Dashboard files not found. Run setup.sh to install.")
+                             f"index.html not found in <code>{WEB_DIR}</code>. "
+                             f"Run <code>deploy.sh</code> or pass <code>--web-dir /path/to/web</code>.")
 
     def _send_file(self, filepath):
         """Send a static file with appropriate content type."""
@@ -541,7 +554,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", mime)
             self.send_header("Content-Length", str(len(content)))
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(content)
         except Exception:
@@ -1272,8 +1287,6 @@ class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-import gzip  # noqa: E402 (needed for SPA proxy)
-
 START_TIME = time.time()
 
 
@@ -1285,6 +1298,12 @@ def main():
     print(f"  Dashboard:       http://0.0.0.0:{PROXY_PORT}")
     print(f"  Engine (hidden): http://{ENGINE_HOST}:{ENGINE_PORT}")
     print(f"  Web directory:   {WEB_DIR}")
+    index_ok = os.path.isfile(os.path.join(WEB_DIR, "index.html"))
+    if index_ok:
+        print(f"  Dashboard files: OK (index.html found)")
+    else:
+        print(f"  WARNING: index.html NOT FOUND in {WEB_DIR}")
+        print(f"  Run: sudo ./deploy.sh  or pass --web-dir /path/to/web")
     print()
     print("  Routes:")
     print(f"    /                -> Custom dashboard")
@@ -1313,8 +1332,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AprilVision 3.2 Dashboard Server")
     parser.add_argument("--port", type=int, default=PROXY_PORT)
     parser.add_argument("--engine-port", type=int, default=ENGINE_PORT)
+    parser.add_argument("--web-dir", type=str, default=None,
+                        help="Path to the web/ directory containing index.html")
     parser.add_argument("--pv-port", type=int, default=None, help="(deprecated)")
     args = parser.parse_args()
     PROXY_PORT = args.port
     ENGINE_PORT = args.engine_port if args.pv_port is None else args.pv_port
+    if args.web_dir:
+        WEB_DIR = os.path.abspath(args.web_dir)
     main()

@@ -1388,6 +1388,8 @@
             this.startPolling();
             this.startUptimeTimer();
             window.addEventListener('hashchange', () => this.navigateFromHash());
+            // Draw empty field map immediately so canvas isn't blank
+            this.drawFieldMap(0, 0, 0);
         }
 
         /* ======================== ROUTING ======================== */
@@ -2605,6 +2607,8 @@
 
     /* ======================== INITIALIZE ======================== */
     const AVApp = new AprilVisionApp();
+    // Make globally accessible for inline event handlers (onload, onerror, onclick)
+    window.AVApp = AVApp;
     </script>
 </body>
 </html>
