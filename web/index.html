@@ -1591,6 +1591,8 @@
             // Stream base port for direct connection (bypass proxy)
             this.STREAM_BASE_PORT = 1181;
             this.MAX_DISTANCE_HISTORY = 60;
+            this._pvWs = null;          // direct WebSocket to PV engine
+            this._pvWsRetries = 0;
             this.init();
         }
 
@@ -1599,6 +1601,7 @@
             this.navigateFromHash();
             this.startPolling();
             this.startUptimeTimer();
+            this.connectPVWebSocket();
             window.addEventListener('hashchange', () => this.navigateFromHash());
             // Draw empty field map immediately so canvas isn't blank
             this.drawFieldMap(0, 0, 0);
@@ -1873,6 +1876,54 @@
             localStorage.setItem('av_alliance', color);
             this.renderDashboard();
             this.renderDriverView();
+        }
+
+        /* ======================== PV WEBSOCKET (live data) ======================== */
+
+        connectPVWebSocket() {
+            // Connect directly to PV's WebSocket through the bridge tunnel
+            // Bridge tunnels all WebSocket upgrades to PV at ws://engine:5800
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = proto + '//' + window.location.host + '/websocket_data';
+
+            try {
+                this._pvWs = new WebSocket(wsUrl);
+                this._pvWs.binaryType = 'arraybuffer';
+
+                this._pvWs.onopen = () => {
+                    console.log('[AV] PV WebSocket connected');
+                    this._pvWsRetries = 0;
+                };
+
+                this._pvWs.onmessage = (event) => {
+                    // PV sends MessagePack binary frames
+                    // We can't decode without a msgpack library in the browser,
+                    // but we CAN detect that data is flowing (connection is live)
+                    if (event.data) {
+                        this.state.ws_connected = true;
+                    }
+                };
+
+                this._pvWs.onclose = () => {
+                    console.log('[AV] PV WebSocket closed, reconnecting...');
+                    this.state.ws_connected = false;
+                    this._pvWs = null;
+                    // Exponential backoff reconnect
+                    const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
+                    this._pvWsRetries++;
+                    setTimeout(() => this.connectPVWebSocket(), delay);
+                };
+
+                this._pvWs.onerror = () => {
+                    // onclose will fire after this
+                    this.state.ws_connected = false;
+                };
+            } catch (e) {
+                console.log('[AV] WebSocket error:', e);
+                const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
+                this._pvWsRetries++;
+                setTimeout(() => this.connectPVWebSocket(), delay);
+            }
         }
 
         /* ======================== STREAM URL HELPERS ======================== */
@@ -2793,12 +2844,12 @@
                 block.className = 'camera-feed-block';
                 block.setAttribute('data-cam-index', cam.index);
 
-                // PRIMARY: direct cscore URL (browser -> stream port directly)
-                // FALLBACK: proxy URL (browser -> bridge -> stream port)
-                const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
-                const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
+                // PRIMARY: proxy URL (same-origin, always reachable through bridge)
+                // FALLBACK: direct cscore URL (browser -> stream port directly)
                 const proxyInputUrl = this.getProxyStreamUrl(cam.index, 'input');
                 const proxyOutputUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
+                const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
                 const calibIcon = cam.calibrated ? '&#10003; Calibrated' : '&#9888; Not Calibrated';
                 const calibColor = cam.calibrated ? 'var(--accent-green)' : 'var(--accent-yellow)';
 
@@ -2822,18 +2873,18 @@
                     '<div class="feed-panel">' +
                     '<span class="feed-label">Input (Raw)</span>' +
                     '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-input"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
-                    '<img src="' + this.escapeAttr(directInputUrl) + '" alt="Input Stream" ' +
-                        'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
+                    '<img src="' + this.escapeAttr(proxyInputUrl) + '" alt="Input Stream" ' +
                         'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
+                        'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
                     '</div>' +
                     '<div class="feed-panel">' +
                     '<span class="feed-label">Output (Detection)</span>' +
                     '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-output"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
-                    '<img src="' + this.escapeAttr(directOutputUrl) + '" alt="Output Stream" ' +
-                        'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
+                    '<img src="' + this.escapeAttr(proxyOutputUrl) + '" alt="Output Stream" ' +
                         'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
+                        'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
                     '</div>' +
@@ -3334,7 +3385,7 @@
         }
 
         handleStreamError(img, camIdx, streamType) {
-            // Smart fallback: direct URL failed -> try proxy URL -> retry with backoff
+            // Smart fallback: proxy failed -> try direct -> retry with backoff
             const directUrl = img.getAttribute('data-direct-url');
             const proxyUrl = img.getAttribute('data-proxy-url');
             const currentSrc = (img.getAttribute('src') || '').split('?')[0];
@@ -3344,7 +3395,18 @@
             const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
             const key = camIdx + '-' + streamType;
 
-            // If direct URL failed, try proxy URL first
+            // If proxy URL failed, try direct cscore URL
+            if (proxyUrl && currentSrc === proxyUrl && directUrl) {
+                if (badge) {
+                    badge.className = 'feed-status connecting';
+                    badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Trying direct...';
+                }
+                const modeEl = document.getElementById('streamMode-' + camIdx);
+                if (modeEl) modeEl.textContent = 'direct';
+                img.src = directUrl;
+                return;
+            }
+            // If direct failed, try proxy
             if (directUrl && currentSrc === directUrl && proxyUrl) {
                 if (badge) {
                     badge.className = 'feed-status connecting';
@@ -3388,9 +3450,9 @@
 
             this._cameraRefreshTimers[key] = setTimeout(() => {
                 delete this._cameraRefreshTimers[key];
-                // Alternate between direct and proxy on retries
-                const tryDirect = attempt % 2 === 0;
-                const url = (tryDirect && directUrl) ? directUrl : (proxyUrl || directUrl);
+                // Alternate between proxy and direct on retries (proxy preferred)
+                const tryProxy = attempt % 2 === 0;
+                const url = (tryProxy && proxyUrl) ? proxyUrl : (directUrl || proxyUrl);
                 img.style.display = '';
                 img.style.opacity = '1';
                 img.src = url + '?_t=' + Date.now();

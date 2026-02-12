@@ -338,35 +338,59 @@ def _start_target_poller():
 
 
 def _target_poll_loop():
-    """Continuously poll for target data from engine, WebSocket, or NT."""
+    """Continuously try all data sources in priority order, retrying forever.
+
+    Never gives up on WebSocket - if PV restarts, we reconnect.
+    Runs NT and API pollers in parallel as fallback while WebSocket retries.
+    """
     global _ws_connected
 
-    # Try WebSocket first (best: gives us live data directly from PV engine)
-    if _HAS_WEBSOCKET and _HAS_MSGPACK:
-        print(f"[targets] Attempting PV WebSocket connection to ws://{ENGINE_HOST}:{ENGINE_PORT}/websocket_data")
-        try:
-            _poll_pv_websocket()
-            # If we get here, WebSocket disconnected - fall through to next method
-        except Exception as e:
-            print(f"[targets] WebSocket failed: {e}")
-        _ws_connected = False
-    else:
-        missing = []
-        if not _HAS_WEBSOCKET:
-            missing.append("websocket-client")
-        if not _HAS_MSGPACK:
-            missing.append("msgpack")
-        print(f"[targets] WebSocket unavailable (install: pip3 install {' '.join(missing)})")
+    # Start fallback pollers in separate threads (they provide data while WS connects)
+    fallback_started = False
 
-    # Try ntcore second
-    print("[targets] Falling back to NetworkTables...")
-    nt_client = _try_ntcore()
-    if nt_client:
-        _poll_ntcore(nt_client)
-    else:
-        # Last resort: static API polling (no live data, just config)
-        print("[targets] Falling back to HTTP API polling (no live target data)")
-        _poll_api_targets()
+    def _start_fallback():
+        nonlocal fallback_started
+        if fallback_started:
+            return
+        fallback_started = True
+        # NT poller thread
+        nt_thread = threading.Thread(target=_try_nt_fallback, daemon=True)
+        nt_thread.start()
+
+    def _try_nt_fallback():
+        nt_client = _try_ntcore()
+        if nt_client:
+            print("[targets] NT fallback active")
+            _poll_ntcore(nt_client)
+        else:
+            print("[targets] NT unavailable, using HTTP API fallback")
+            _poll_api_targets()
+
+    # Main loop: always try WebSocket, restart on disconnect
+    while True:
+        if _HAS_WEBSOCKET and _HAS_MSGPACK:
+            try:
+                print(f"[targets] Connecting to PV WebSocket ws://{ENGINE_HOST}:{ENGINE_PORT}/websocket_data ...")
+                _poll_pv_websocket()
+            except Exception as e:
+                print(f"[targets] WebSocket error: {e}")
+            _ws_connected = False
+            with _targets_lock:
+                if _latest_targets["source"] == "websocket":
+                    _latest_targets["source"] = "websocket (reconnecting...)"
+
+            # Start fallback on first disconnect
+            _start_fallback()
+            time.sleep(3)
+        else:
+            missing = []
+            if not _HAS_WEBSOCKET:
+                missing.append("websocket-client")
+            if not _HAS_MSGPACK:
+                missing.append("msgpack")
+            print(f"[targets] WebSocket libs missing (pip3 install {' '.join(missing)})")
+            _start_fallback()
+            break  # No point looping without the libs
 
 
 def _poll_pv_websocket():
@@ -940,9 +964,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
     def _proxy_camera_stream(self, path):
         """Proxy MJPEG stream from engine camera ports using raw sockets.
 
-        Uses raw socket relay instead of http.client because MJPEG streams
-        are multipart/x-mixed-replace and http.client.read(n) blocks until
-        it fills the buffer, killing real-time frame delivery.
+        PhotonVision/cscore serves MJPEG as multipart/x-mixed-replace on
+        dedicated ports.  We relay the raw TCP bytes so the browser gets
+        a live, continuous stream.
 
         /stream/<camera_index>          -> input stream (port 1181 + index*2)
         /stream/<camera_index>/input    -> input stream
@@ -963,20 +987,23 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             port += 1
 
         sock = None
-        # Try multiple paths that cscore MJPEG servers commonly respond to
+        # cscore MJPEG server paths in order of likelihood
         stream_paths = ["/stream.mjpg", "/?action=stream", "/"]
         try:
-            sock = socket.create_connection((ENGINE_HOST, port), timeout=5)
-            sock.settimeout(5)
-
-            # Try each path until we get an MJPEG response
+            # Try each path until we get a 200
             connected = False
+            headers_raw = b""
+            body_start = b""
+
             for try_path in stream_paths:
                 try:
+                    sock = socket.create_connection((ENGINE_HOST, port), timeout=5)
+                    sock.settimeout(5)
+
+                    # Use HTTP/1.1 to keep the connection alive for streaming
                     request = (
-                        f"GET {try_path} HTTP/1.0\r\n"
+                        f"GET {try_path} HTTP/1.1\r\n"
                         f"Host: {ENGINE_HOST}:{port}\r\n"
-                        f"Connection: close\r\n"
                         f"\r\n"
                     )
                     sock.sendall(request.encode())
@@ -1004,40 +1031,39 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                         connected = True
                         break
 
-                    # Non-200: reconnect and try next path
+                    # Non-200: close and try next path
                     sock.close()
-                    sock = socket.create_connection((ENGINE_HOST, port), timeout=5)
-                    sock.settimeout(5)
-                except (socket.timeout, ConnectionError):
-                    if try_path != stream_paths[-1]:
+                    sock = None
+                except (socket.timeout, ConnectionError, OSError):
+                    if sock:
                         try:
                             sock.close()
                         except Exception:
                             pass
-                        sock = socket.create_connection((ENGINE_HOST, port), timeout=5)
-                        sock.settimeout(5)
-                        continue
-                    raise
+                        sock = None
+                    continue
 
-            if not connected:
-                raise ConnectionError("No valid MJPEG path found")
+            if not connected or not sock:
+                raise ConnectionError(f"No MJPEG stream on port {port}")
 
-            # Send response headers to client
-            self.send_response(status_code)
+            # Forward response headers to the browser
+            # Parse the Content-Type from cscore (contains the boundary marker)
+            content_type = "multipart/x-mixed-replace; boundary=myboundary"
             for header_line in headers_raw.split(b"\r\n")[1:]:
                 if not header_line:
                     continue
                 if b":" in header_line:
                     key, value = header_line.split(b":", 1)
-                    key_str = key.strip().decode("ascii", errors="replace")
-                    val_str = value.strip().decode("ascii", errors="replace")
-                    if key_str.lower() in ("transfer-encoding", "connection"):
-                        continue
-                    self.send_header(key_str, val_str)
+                    if key.strip().lower() == b"content-type":
+                        content_type = value.strip().decode("ascii", errors="replace")
+
+            # Send our own clean response headers
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
-            self.send_header("Connection", "close")
             self.send_header("Access-Control-Allow-Origin", "*")
+            # Do NOT send Connection: close - this is a continuous stream
             self.end_headers()
 
             # Send any body data that arrived with the headers
@@ -1045,24 +1071,27 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(body_start)
                 self.wfile.flush()
 
-            # Relay MJPEG stream data using select() for non-blocking reads
-            sock.settimeout(0)
+            # Relay MJPEG stream data continuously
             while True:
                 readable, _, _ = select.select([sock], [], [], 30)
                 if not readable:
-                    break  # 30s timeout with no data
-                data = sock.recv(65536)
+                    break  # 30s with no data = stream dead
+                try:
+                    data = sock.recv(65536)
+                except (socket.timeout, OSError):
+                    break
                 if not data:
                     break
                 self.wfile.write(data)
                 self.wfile.flush()
 
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass  # Browser closed the tab / navigated away
         except Exception as e:
             try:
                 self._send_error(503, "Stream Unavailable",
-                                 f"Camera {cam_idx} {stream_type} stream not available on port {port}")
+                                 f"Camera {cam_idx} {stream_type} stream not available on port {port}. "
+                                 f"Ensure PhotonVision is running with a camera connected. Error: {e}")
             except Exception:
                 pass
         finally:
