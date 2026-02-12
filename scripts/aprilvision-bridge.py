@@ -172,6 +172,101 @@ def get_system_cameras():
 
 
 # ---------------------------------------------------------------------------
+# Engine API Discovery
+# ---------------------------------------------------------------------------
+# PhotonVision's API has changed across versions.  We try multiple endpoints
+# and response shapes so the dashboard works regardless of engine version.
+
+# API paths to try in order of preference
+_ENGINE_API_PATHS = [
+    "/api/settings",                # PhotonVision v2024-v2025 (classic)
+    "/api/v1/settings",             # Some v2026 builds
+    "/api/settings/general",        # Alternate settings path
+    "/",                            # Root may return JSON or HTML
+]
+
+# Keys under which camera settings may appear in the JSON response
+_CAMERA_KEYS = [
+    "cameraSettings",              # Classic PhotonVision
+    "cameras",                     # Newer builds
+    "cameraConfigurations",        # Some v2026 builds
+    "configuredCameras",           # Alternate naming
+]
+
+def _engine_fetch(path, timeout=3):
+    """Fetch a path from the engine and return (status, body_bytes)."""
+    conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=timeout)
+    conn.request("GET", path, headers={"Accept": "application/json"})
+    resp = conn.getresponse()
+    body = resp.read()
+    status = resp.status
+    conn.close()
+    return status, body
+
+
+def _engine_probe():
+    """Try to contact the engine and return (online, settings_dict, api_path, error).
+
+    Tries multiple API paths and parses JSON responses.  Returns the first
+    successful result so the rest of the dashboard can use it.
+    """
+    last_error = None
+    for api_path in _ENGINE_API_PATHS:
+        try:
+            status, body = _engine_fetch(api_path, timeout=3)
+            if status == 200 and body:
+                try:
+                    data = json.loads(body)
+                    if isinstance(data, dict):
+                        return True, data, api_path, None
+                except json.JSONDecodeError:
+                    # 200 but not JSON (probably the HTML SPA) – engine is
+                    # up, but this isn't the settings endpoint.
+                    last_error = f"{api_path} returned non-JSON (HTML?)"
+                    continue
+            else:
+                last_error = f"{api_path} returned HTTP {status}"
+        except socket.timeout:
+            last_error = f"{api_path} timed out"
+        except ConnectionRefusedError:
+            last_error = f"Connection refused on {ENGINE_HOST}:{ENGINE_PORT}"
+            break  # No point trying other paths if port is closed
+        except Exception as e:
+            last_error = f"{api_path}: {e}"
+
+    # One more check: even if settings API failed, see if engine port is open
+    try:
+        s = socket.create_connection((ENGINE_HOST, ENGINE_PORT), timeout=2)
+        s.close()
+        return True, {}, None, last_error or "Engine reachable but settings API unavailable"
+    except Exception:
+        pass
+
+    return False, {}, None, last_error or f"Cannot reach engine at {ENGINE_HOST}:{ENGINE_PORT}"
+
+
+def _extract_cameras(data):
+    """Extract camera list from engine settings dict regardless of key naming."""
+    for key in _CAMERA_KEYS:
+        val = data.get(key)
+        if val:
+            if isinstance(val, list):
+                return val
+            if isinstance(val, dict):
+                # dict keyed by camera name/id
+                return list(val.values())
+
+    # Deep search: look for any list of dicts that have camera-like keys
+    camera_indicators = {"uniqueName", "nickname", "path", "cameraPath", "name"}
+    for key, val in data.items():
+        if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
+            item_keys = set(val[0].keys())
+            if item_keys & camera_indicators:
+                return val
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Request Handler
 # ---------------------------------------------------------------------------
 
@@ -560,89 +655,138 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return self._api_camera_info()
         elif endpoint == 'engine-settings':
             return self._api_engine_settings()
+        elif endpoint == 'engine-debug':
+            return self._api_engine_debug()
         else:
             self._send_json({"error": "Unknown endpoint"}, 404)
 
     def _api_cameras(self):
-        cameras = get_system_cameras()
-        try:
-            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=3)
-            conn.request("GET", "/api/settings")
-            resp = conn.getresponse()
-            if resp.status == 200:
-                data = json.loads(resp.read())
-                if 'cameraSettings' in data:
-                    for i, cam in enumerate(data['cameraSettings']):
-                        cameras.append({
-                            'name': cam.get('nickname', cam.get('uniqueName', f'Camera {i}')),
-                            'device': cam.get('path', 'N/A'),
-                            'source': 'engine',
-                            'index': i,
-                            'connected': True,
-                            'inputStreamPort': STREAM_BASE_PORT + (i * 2),
-                            'outputStreamPort': STREAM_BASE_PORT + (i * 2) + 1,
-                        })
-            conn.close()
-        except Exception:
-            pass
-        self._send_json({'cameras': cameras, 'count': len(cameras)})
+        system_cameras = get_system_cameras()
+        engine_cameras = []
+        online, data, api_path, err = _engine_probe()
+        if online and data:
+            for i, cam in enumerate(_extract_cameras(data)):
+                engine_cameras.append({
+                    'name': cam.get('nickname', cam.get('uniqueName', cam.get('name', f'Camera {i}'))),
+                    'device': cam.get('path', cam.get('cameraPath', 'N/A')),
+                    'source': 'engine',
+                    'index': i,
+                    'connected': True,
+                    'inputStreamPort': STREAM_BASE_PORT + (i * 2),
+                    'outputStreamPort': STREAM_BASE_PORT + (i * 2) + 1,
+                })
+        all_cameras = system_cameras + engine_cameras
+        self._send_json({
+            'cameras': all_cameras,
+            'count': len(all_cameras),
+            'engine_online': online,
+            'engine_error': err,
+        })
 
     def _api_status(self):
-        status = {
+        online, data, api_path, err = _engine_probe()
+        cam_list = _extract_cameras(data) if data else []
+        cameras_out = []
+        for i, cam in enumerate(cam_list):
+            calibrations = cam.get('calibrations', cam.get('cameraCalibrations', []))
+            calibrated = bool(calibrations) if isinstance(calibrations, list) else bool(calibrations)
+            pipelines = cam.get('pipelineSettings', cam.get('pipelines', []))
+            if isinstance(pipelines, list):
+                pipe_count = len(pipelines)
+            elif isinstance(pipelines, dict):
+                pipe_count = len(pipelines)
+            else:
+                pipe_count = 0
+            current_pipe = cam.get('currentPipelineIndex', cam.get('pipelineIndex', 0))
+            cameras_out.append({
+                'name': cam.get('nickname', cam.get('uniqueName', cam.get('name', f'Camera {i}'))),
+                'index': i,
+                'calibrated': calibrated,
+                'pipelineCount': pipe_count,
+                'currentPipeline': current_pipe,
+                'inputStreamUrl': f'/stream/{i}/input',
+                'outputStreamUrl': f'/stream/{i}/output',
+            })
+        self._send_json({
             'version': 'AprilVision 3.2',
-            'engine_online': False,
+            'engine_online': online,
+            'engine_error': err,
+            'engine_api_path': api_path,
             'proxy_online': True,
             'uptime': int(time.time() - START_TIME),
-            'cameras': [],
-        }
-        try:
-            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=3)
-            conn.request("GET", "/api/settings")
-            resp = conn.getresponse()
-            if resp.status == 200:
-                status['engine_online'] = True
-                data = json.loads(resp.read())
-                if 'cameraSettings' in data:
-                    for i, cam in enumerate(data['cameraSettings']):
-                        calibrated = bool(cam.get('calibrations', []))
-                        pipelines = cam.get('pipelineSettings', [])
-                        current_pipe = cam.get('currentPipelineIndex', 0)
-                        status['cameras'].append({
-                            'name': cam.get('nickname', cam.get('uniqueName', f'Camera {i}')),
-                            'index': i,
-                            'calibrated': calibrated,
-                            'pipelineCount': len(pipelines),
-                            'currentPipeline': current_pipe,
-                            'inputStreamUrl': f'/stream/{i}/input',
-                            'outputStreamUrl': f'/stream/{i}/output',
-                        })
-            conn.close()
-        except Exception:
-            pass
-        self._send_json(status)
+            'cameras': cameras_out,
+            'camera_count': len(cameras_out),
+        })
 
     def _api_streams(self):
         """Return available camera stream URLs."""
+        online, data, _, err = _engine_probe()
+        cam_list = _extract_cameras(data) if data else []
         streams = []
+        for i, cam in enumerate(cam_list):
+            streams.append({
+                'camera': cam.get('nickname', cam.get('name', f'Camera {i}')),
+                'index': i,
+                'inputUrl': f'/stream/{i}/input',
+                'outputUrl': f'/stream/{i}/output',
+                'inputPort': STREAM_BASE_PORT + (i * 2),
+                'outputPort': STREAM_BASE_PORT + (i * 2) + 1,
+            })
+        self._send_json({'streams': streams, 'engine_online': online, 'engine_error': err})
+
+    def _api_engine_debug(self):
+        """Raw diagnostic: shows exactly what the engine returns for debugging."""
+        results = {
+            'engine_host': ENGINE_HOST,
+            'engine_port': ENGINE_PORT,
+            'stream_base_port': STREAM_BASE_PORT,
+            'probes': [],
+        }
+        # Probe the engine port
         try:
-            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=3)
-            conn.request("GET", "/api/settings")
-            resp = conn.getresponse()
-            if resp.status == 200:
-                data = json.loads(resp.read())
-                for i, cam in enumerate(data.get('cameraSettings', [])):
-                    streams.append({
-                        'camera': cam.get('nickname', f'Camera {i}'),
-                        'index': i,
-                        'inputUrl': f'/stream/{i}/input',
-                        'outputUrl': f'/stream/{i}/output',
-                        'inputPort': STREAM_BASE_PORT + (i * 2),
-                        'outputPort': STREAM_BASE_PORT + (i * 2) + 1,
-                    })
-            conn.close()
-        except Exception:
-            pass
-        self._send_json({'streams': streams})
+            s = socket.create_connection((ENGINE_HOST, ENGINE_PORT), timeout=2)
+            s.close()
+            results['port_open'] = True
+        except Exception as e:
+            results['port_open'] = False
+            results['port_error'] = str(e)
+
+        # Try each API path and record what comes back
+        for api_path in _ENGINE_API_PATHS:
+            probe = {'path': api_path}
+            try:
+                status, body = _engine_fetch(api_path, timeout=3)
+                probe['status'] = status
+                probe['body_length'] = len(body)
+                probe['content_preview'] = body[:2000].decode('utf-8', errors='replace')
+                try:
+                    parsed = json.loads(body)
+                    probe['is_json'] = True
+                    probe['top_keys'] = list(parsed.keys()) if isinstance(parsed, dict) else f'[array of {len(parsed)}]'
+                    # Find camera data
+                    cams = _extract_cameras(parsed) if isinstance(parsed, dict) else []
+                    probe['cameras_found'] = len(cams)
+                    if cams:
+                        probe['first_camera_keys'] = list(cams[0].keys()) if isinstance(cams[0], dict) else str(type(cams[0]))
+                except json.JSONDecodeError:
+                    probe['is_json'] = False
+            except Exception as e:
+                probe['error'] = str(e)
+            results['probes'].append(probe)
+
+        # Check stream ports for first 4 possible cameras
+        results['stream_probes'] = []
+        for i in range(4):
+            port = STREAM_BASE_PORT + (i * 2)
+            results['stream_probes'].append({
+                'camera_index': i,
+                'input_port': port,
+                'output_port': port + 1,
+                'input_status': self._check_stream_port(port),
+                'output_status': self._check_stream_port(port + 1),
+            })
+
+        self._send_json(results)
 
     def _check_stream_port(self, port):
         """Check if a stream port is reachable and serving MJPEG."""
@@ -665,84 +809,103 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
     def _api_stream_health(self):
         """Check availability of all camera stream ports."""
         results = []
-        try:
-            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=3)
-            conn.request("GET", "/api/settings")
-            resp = conn.getresponse()
-            if resp.status == 200:
-                data = json.loads(resp.read())
-                for i, cam in enumerate(data.get('cameraSettings', [])):
-                    input_port = STREAM_BASE_PORT + (i * 2)
-                    output_port = input_port + 1
+        online, data, _, err = _engine_probe()
+        cam_list = _extract_cameras(data) if data else []
+
+        if cam_list:
+            for i, cam in enumerate(cam_list):
+                input_port = STREAM_BASE_PORT + (i * 2)
+                output_port = input_port + 1
+                results.append({
+                    'camera': cam.get('nickname', cam.get('uniqueName', cam.get('name', f'Camera {i}'))),
+                    'index': i,
+                    'inputPort': input_port,
+                    'outputPort': output_port,
+                    'inputStatus': self._check_stream_port(input_port),
+                    'outputStatus': self._check_stream_port(output_port),
+                    'inputUrl': f'/stream/{i}/input',
+                    'outputUrl': f'/stream/{i}/output',
+                })
+        else:
+            # No cameras found in engine config - still probe the first few ports
+            # in case streams are running even though settings API differs
+            for i in range(4):
+                input_port = STREAM_BASE_PORT + (i * 2)
+                output_port = input_port + 1
+                input_status = self._check_stream_port(input_port)
+                output_status = self._check_stream_port(output_port)
+                if input_status != 'unreachable' or output_status != 'unreachable':
                     results.append({
-                        'camera': cam.get('nickname', cam.get('uniqueName', f'Camera {i}')),
+                        'camera': f'Camera {i} (discovered)',
                         'index': i,
                         'inputPort': input_port,
                         'outputPort': output_port,
-                        'inputStatus': self._check_stream_port(input_port),
-                        'outputStatus': self._check_stream_port(output_port),
+                        'inputStatus': input_status,
+                        'outputStatus': output_status,
                         'inputUrl': f'/stream/{i}/input',
                         'outputUrl': f'/stream/{i}/output',
                     })
-            conn.close()
-        except Exception:
-            pass
-        self._send_json({'streams': results, 'engine': ENGINE_HOST})
+
+        self._send_json({
+            'streams': results,
+            'engine': ENGINE_HOST,
+            'engine_online': online,
+            'engine_error': err,
+        })
 
     def _api_camera_info(self):
         """Rich camera information combining system devices and engine data."""
         system_cameras = get_system_cameras()
         engine_cameras = []
-        try:
-            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=3)
-            conn.request("GET", "/api/settings")
-            resp = conn.getresponse()
-            if resp.status == 200:
-                data = json.loads(resp.read())
-                for i, cam in enumerate(data.get('cameraSettings', [])):
-                    input_port = STREAM_BASE_PORT + (i * 2)
-                    output_port = input_port + 1
-                    calibrations = cam.get('calibrations', [])
-                    resolutions = []
-                    for cal in calibrations:
-                        r = cal.get('resolution', {})
-                        if r:
-                            resolutions.append(f"{r.get('width', '?')}x{r.get('height', '?')}")
+        online, data, api_path, err = _engine_probe()
+        cam_list = _extract_cameras(data) if data else []
 
-                    # Current pipeline info
-                    pipelines = cam.get('pipelineSettings', [])
-                    current_idx = cam.get('currentPipelineIndex', 0)
-                    current_pipeline = None
-                    if pipelines and current_idx < len(pipelines):
-                        cp = pipelines[current_idx]
-                        current_pipeline = {
-                            'index': current_idx,
-                            'name': cp.get('pipelineNickname', f'Pipeline {current_idx}'),
-                            'type': cp.get('pipelineType', 'unknown'),
-                        }
+        for i, cam in enumerate(cam_list):
+            input_port = STREAM_BASE_PORT + (i * 2)
+            output_port = input_port + 1
+            calibrations = cam.get('calibrations', cam.get('cameraCalibrations', []))
+            if not isinstance(calibrations, list):
+                calibrations = []
+            resolutions = []
+            for cal in calibrations:
+                r = cal.get('resolution', {})
+                if r:
+                    resolutions.append(f"{r.get('width', '?')}x{r.get('height', '?')}")
 
-                    engine_cameras.append({
-                        'name': cam.get('nickname', cam.get('uniqueName', f'Camera {i}')),
-                        'uniqueName': cam.get('uniqueName', ''),
-                        'devicePath': cam.get('path', 'N/A'),
-                        'index': i,
-                        'calibrated': bool(calibrations),
-                        'calibrationCount': len(calibrations),
-                        'calibratedResolutions': resolutions,
-                        'pipelineCount': len(pipelines),
-                        'currentPipeline': current_pipeline,
-                        'inputStreamPort': input_port,
-                        'outputStreamPort': output_port,
-                        'inputStreamUrl': f'/stream/{i}/input',
-                        'outputStreamUrl': f'/stream/{i}/output',
-                        'directInputUrl': f'http://{ENGINE_HOST}:{input_port}/stream.mjpg',
-                        'directOutputUrl': f'http://{ENGINE_HOST}:{output_port}/stream.mjpg',
-                        'inputStreamStatus': self._check_stream_port(input_port),
-                        'outputStreamStatus': self._check_stream_port(output_port),
-                    })
-            conn.close()
-        except Exception:
-            pass
+            # Current pipeline info
+            pipelines = cam.get('pipelineSettings', cam.get('pipelines', []))
+            if not isinstance(pipelines, list):
+                pipelines = list(pipelines.values()) if isinstance(pipelines, dict) else []
+            current_idx = cam.get('currentPipelineIndex', cam.get('pipelineIndex', 0))
+            current_pipeline = None
+            if pipelines and isinstance(current_idx, int) and current_idx < len(pipelines):
+                cp = pipelines[current_idx]
+                if isinstance(cp, dict):
+                    current_pipeline = {
+                        'index': current_idx,
+                        'name': cp.get('pipelineNickname', cp.get('name', f'Pipeline {current_idx}')),
+                        'type': cp.get('pipelineType', cp.get('type', 'unknown')),
+                    }
+
+            engine_cameras.append({
+                'name': cam.get('nickname', cam.get('uniqueName', cam.get('name', f'Camera {i}'))),
+                'uniqueName': cam.get('uniqueName', cam.get('name', '')),
+                'devicePath': cam.get('path', cam.get('cameraPath', 'N/A')),
+                'index': i,
+                'calibrated': bool(calibrations),
+                'calibrationCount': len(calibrations),
+                'calibratedResolutions': resolutions,
+                'pipelineCount': len(pipelines),
+                'currentPipeline': current_pipeline,
+                'inputStreamPort': input_port,
+                'outputStreamPort': output_port,
+                'inputStreamUrl': f'/stream/{i}/input',
+                'outputStreamUrl': f'/stream/{i}/output',
+                'directInputUrl': f'http://{ENGINE_HOST}:{input_port}/stream.mjpg',
+                'directOutputUrl': f'http://{ENGINE_HOST}:{output_port}/stream.mjpg',
+                'inputStreamStatus': self._check_stream_port(input_port),
+                'outputStreamStatus': self._check_stream_port(output_port),
+            })
 
         self._send_json({
             'systemCameras': system_cameras,
@@ -750,6 +913,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             'engineHost': ENGINE_HOST,
             'enginePort': ENGINE_PORT,
             'streamBasePort': STREAM_BASE_PORT,
+            'engineOnline': online,
+            'engineApiPath': api_path,
+            'engineError': err,
         })
 
     def _api_engine_settings(self):

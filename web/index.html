@@ -938,6 +938,20 @@
                     </div>
                 </div>
 
+                <!-- Engine Connection Debug (shown when engine has issues) -->
+                <div id="engineDebugPanel" style="display:none; margin-bottom: 20px;">
+                    <div class="alert alert-warn" id="engineDebugAlert">
+                        Engine connection issue detected. Click "Debug Engine Connection" below to see exactly what the engine is returning.
+                    </div>
+                    <div class="panel">
+                        <div class="panel-header">Engine Connection Debug</div>
+                        <div class="panel-body">
+                            <button class="btn btn-blue" onclick="AVApp.runEngineDebug()">Debug Engine Connection</button>
+                            <div class="tool-output" id="engineDebugOutput" style="margin-top: 10px; display: none; max-height: 400px; overflow-y: auto; font-size: 0.75rem;"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Quick Actions -->
                 <div class="section-title"><span class="section-icon">&#9889;</span> Quick Actions</div>
                 <div class="quick-actions">
@@ -1373,6 +1387,8 @@
                 if (resp.ok) {
                     const data = await resp.json();
                     this.state.engineOnline = data.engine_online || false;
+                    this.state.engineError = data.engine_error || null;
+                    this.state.engineApiPath = data.engine_api_path || null;
                     this.state.proxyOnline = data.proxy_online !== undefined ? data.proxy_online : true;
                     this.state.version = data.version || 'v3.2.0';
                     this.state.uptime = data.uptime || null;
@@ -1632,6 +1648,58 @@
             return '<div>' + dot + '<span style="color:var(--text-secondary);display:inline-block;width:200px;">' + name + '</span> ' + status + '</div>';
         }
 
+        async runEngineDebug() {
+            const output = document.getElementById('engineDebugOutput');
+            output.style.display = 'block';
+            output.textContent = 'Probing engine...';
+            output.className = 'tool-output warn';
+
+            try {
+                const resp = await fetch('/api/av/engine-debug', { signal: AbortSignal.timeout(15000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const lines = [];
+                    lines.push('Engine Debug Report');
+                    lines.push('=' .repeat(50));
+                    lines.push('Engine Host: ' + data.engine_host + ':' + data.engine_port);
+                    lines.push('Port Open:   ' + (data.port_open ? 'YES' : 'NO - ' + (data.port_error || 'refused')));
+                    lines.push('Stream Base: ' + data.stream_base_port);
+                    lines.push('');
+                    lines.push('API Probes:');
+                    lines.push('-'.repeat(50));
+                    (data.probes || []).forEach(p => {
+                        lines.push('  Path: ' + p.path);
+                        if (p.error) {
+                            lines.push('    Error: ' + p.error);
+                        } else {
+                            lines.push('    Status: HTTP ' + p.status + ' (' + p.body_length + ' bytes)');
+                            lines.push('    JSON: ' + (p.is_json ? 'Yes' : 'No'));
+                            if (p.top_keys) lines.push('    Top Keys: ' + JSON.stringify(p.top_keys));
+                            if (p.cameras_found !== undefined) lines.push('    Cameras Found: ' + p.cameras_found);
+                            if (p.first_camera_keys) lines.push('    Camera Keys: ' + JSON.stringify(p.first_camera_keys));
+                            if (!p.is_json && p.content_preview) {
+                                lines.push('    Content: ' + p.content_preview.substring(0, 200) + '...');
+                            }
+                        }
+                        lines.push('');
+                    });
+                    lines.push('Stream Port Probes:');
+                    lines.push('-'.repeat(50));
+                    (data.stream_probes || []).forEach(s => {
+                        lines.push('  Camera ' + s.camera_index + ': input=' + s.input_port + ' [' + s.input_status + ']  output=' + s.output_port + ' [' + s.output_status + ']');
+                    });
+                    output.textContent = lines.join('\n');
+                    output.className = 'tool-output ' + (data.port_open ? 'success' : 'error');
+                } else {
+                    output.textContent = 'Debug endpoint returned HTTP ' + resp.status;
+                    output.className = 'tool-output error';
+                }
+            } catch (e) {
+                output.textContent = 'Failed: ' + e.message;
+                output.className = 'tool-output error';
+            }
+        }
+
         async toolSnapshot() {
             const output = document.getElementById('toolSnapshotOutput');
             output.textContent = 'Taking snapshot...';
@@ -1739,8 +1807,22 @@
             // Version badge
             document.getElementById('headerVersionBadge').textContent = s.version;
 
-            // System status dots
-            this.setDot('dotEngine', 'txtEngine', s.engineOnline, s.consecutiveFailures <= 3 && !s.engineOnline);
+            // System status dots - show engine error detail
+            const dotEngine = document.getElementById('dotEngine');
+            const txtEngine = document.getElementById('txtEngine');
+            if (s.engineOnline) {
+                dotEngine.className = 'dot green';
+                txtEngine.textContent = 'Online' + (s.engineApiPath ? ' (' + s.engineApiPath + ')' : '');
+            } else if (s.engineError) {
+                dotEngine.className = 'dot red';
+                txtEngine.textContent = s.engineError;
+            } else if (s.consecutiveFailures <= 3) {
+                dotEngine.className = 'dot yellow pulse';
+                txtEngine.textContent = 'Starting...';
+            } else {
+                dotEngine.className = 'dot red';
+                txtEngine.textContent = 'Offline';
+            }
             this.setDot('dotProxy', 'txtProxy', s.proxyOnline, false);
             this.setDot('dotWebsocket', 'txtWebsocket', s.proxyOnline, false);
 
@@ -1757,6 +1839,20 @@
             } else {
                 dot3d.className = 'dot red';
                 txt3d.textContent = 'No Cameras';
+            }
+
+            // Show/hide engine debug panel
+            const debugPanel = document.getElementById('engineDebugPanel');
+            if (debugPanel) {
+                if (!s.engineOnline && (s.engineError || s.consecutiveFailures > 2)) {
+                    debugPanel.style.display = 'block';
+                    const alert = document.getElementById('engineDebugAlert');
+                    if (alert && s.engineError) {
+                        alert.textContent = 'Engine issue: ' + s.engineError + ' - Click "Debug Engine Connection" to investigate.';
+                    }
+                } else if (s.engineOnline) {
+                    debugPanel.style.display = 'none';
+                }
             }
 
             // Camera previews on dashboard
