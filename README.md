@@ -7,15 +7,15 @@
 
 # AprilVision 3.2
 
-**The FRC vision system that sets up in 60 seconds and just works.**
+**Custom FRC vision system**
 
-One command. Full AprilTag detection. Custom dashboard. Ready for competition.
+One command. Full AprilTag detection. Comp ready.
 
 ```bash
 ./setup.sh --team 1226
 ```
 
-That's it. Your coprocessor is now a competition-ready vision system.
+competition-ready vision system.
 
 ---
 
