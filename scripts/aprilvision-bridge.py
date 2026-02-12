@@ -39,6 +39,7 @@ import os
 import subprocess
 import mimetypes
 import urllib.parse
+import threading
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -264,6 +265,186 @@ def _extract_cameras(data):
             if item_keys & camera_indicators:
                 return val
     return []
+
+
+# ---------------------------------------------------------------------------
+# Background Target/Pose Data Poller
+# ---------------------------------------------------------------------------
+# Reads live detection results from NetworkTables (if ntcore available) or
+# by polling the engine's API.  Caches the latest state for API consumers.
+
+_latest_targets = {
+    "cameras": {},        # {cam_index: {targets: [...], latency: ..., fps: ...}}
+    "robot_pose": None,   # {x, y, z, rx, ry, rz} in field-space
+    "last_update": 0,
+    "nt_connected": False,
+    "source": "none",     # "ntcore", "api", or "none"
+}
+_targets_lock = threading.Lock()
+
+
+def _start_target_poller():
+    """Start background thread to collect target/pose data."""
+    t = threading.Thread(target=_target_poll_loop, daemon=True)
+    t.start()
+
+
+def _target_poll_loop():
+    """Continuously poll for target data from engine or NT."""
+    # Try ntcore first
+    nt_client = _try_ntcore()
+    if nt_client:
+        _poll_ntcore(nt_client)
+    else:
+        _poll_api_targets()
+
+
+def _try_ntcore():
+    """Try to import and initialize ntcore for NetworkTables data."""
+    try:
+        import ntcore
+        inst = ntcore.NetworkTableInstance.getDefault()
+        inst.startClient4("AprilVision Dashboard")
+        inst.setServer("127.0.0.1", 1735)
+        with _targets_lock:
+            _latest_targets["source"] = "ntcore"
+        return inst
+    except ImportError:
+        pass
+    try:
+        from networktables import NetworkTables
+        NetworkTables.initialize(server="127.0.0.1")
+        with _targets_lock:
+            _latest_targets["source"] = "ntcore"
+        return NetworkTables
+    except ImportError:
+        pass
+    return None
+
+
+def _poll_ntcore(nt):
+    """Poll NetworkTables for PhotonVision target data."""
+    while True:
+        try:
+            connected = False
+            try:
+                connected = nt.isConnected()
+            except AttributeError:
+                try:
+                    connected = nt.isConnected()
+                except Exception:
+                    pass
+
+            pv_table = None
+            try:
+                pv_table = nt.getTable("photonvision")
+            except AttributeError:
+                try:
+                    pv_table = nt.getTable("/photonvision")
+                except Exception:
+                    pass
+
+            with _targets_lock:
+                _latest_targets["nt_connected"] = connected
+                _latest_targets["last_update"] = time.time()
+
+                if pv_table:
+                    subtables = []
+                    try:
+                        subtables = pv_table.getSubTables()
+                    except Exception:
+                        pass
+
+                    for cam_name in subtables:
+                        try:
+                            cam_table = pv_table.getSubTable(cam_name)
+                            has_target = cam_table.getEntry("hasTarget").getBoolean(False)
+                            latency = cam_table.getEntry("latencyMillis").getDouble(0)
+                            target_yaw = cam_table.getEntry("targetYaw").getDouble(0)
+                            target_pitch = cam_table.getEntry("targetPitch").getDouble(0)
+                            target_area = cam_table.getEntry("targetArea").getDouble(0)
+                            target_skew = cam_table.getEntry("targetSkew").getDouble(0)
+                            best_id = cam_table.getEntry("targetFiducialId").getDouble(-1)
+
+                            # 3D pose if available
+                            pose_data = None
+                            try:
+                                bp = cam_table.getEntry("targetPose")
+                                pose_arr = bp.getDoubleArray([])
+                                if len(pose_arr) >= 3:
+                                    pose_data = {
+                                        "x": round(pose_arr[0], 4),
+                                        "y": round(pose_arr[1], 4),
+                                        "z": round(pose_arr[2], 4),
+                                        "rx": round(pose_arr[3], 2) if len(pose_arr) > 3 else 0,
+                                        "ry": round(pose_arr[4], 2) if len(pose_arr) > 4 else 0,
+                                        "rz": round(pose_arr[5], 2) if len(pose_arr) > 5 else 0,
+                                    }
+                            except Exception:
+                                pass
+
+                            _latest_targets["cameras"][cam_name] = {
+                                "hasTarget": has_target,
+                                "latencyMs": round(latency, 1),
+                                "targetYaw": round(target_yaw, 2),
+                                "targetPitch": round(target_pitch, 2),
+                                "targetArea": round(target_area, 2),
+                                "targetSkew": round(target_skew, 2),
+                                "bestFiducialId": int(best_id),
+                                "pose": pose_data,
+                            }
+                        except Exception:
+                            pass
+
+                    # Robot pose from multi-tag (if published by robot code)
+                    try:
+                        rp = nt.getTable("SmartDashboard").getSubTable("AprilVision")
+                        pose_x = rp.getEntry("poseX").getDouble(0)
+                        pose_y = rp.getEntry("poseY").getDouble(0)
+                        pose_rot = rp.getEntry("poseRotation").getDouble(0)
+                        if pose_x != 0 or pose_y != 0:
+                            _latest_targets["robot_pose"] = {
+                                "x": round(pose_x, 4),
+                                "y": round(pose_y, 4),
+                                "z": 0,
+                                "rotation": round(pose_rot, 2),
+                            }
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        time.sleep(0.1)
+
+
+def _poll_api_targets():
+    """Fallback: poll engine HTTP API for any available target data."""
+    with _targets_lock:
+        _latest_targets["source"] = "api"
+    while True:
+        try:
+            online, data, _, _ = _engine_probe()
+            if online and data:
+                cam_list = _extract_cameras(data)
+                with _targets_lock:
+                    _latest_targets["last_update"] = time.time()
+                    for i, cam in enumerate(cam_list):
+                        cam_name = cam.get('nickname', cam.get('uniqueName', f'Camera_{i}'))
+                        # Extract any result data available in the settings response
+                        current_pipe_idx = cam.get('currentPipelineIndex', 0)
+                        pipelines = cam.get('pipelineSettings', cam.get('pipelines', []))
+                        if isinstance(pipelines, list) and pipelines:
+                            pipe = pipelines[min(current_pipe_idx, len(pipelines) - 1)] if isinstance(current_pipe_idx, int) else pipelines[0]
+                            if isinstance(pipe, dict):
+                                _latest_targets["cameras"][cam_name] = {
+                                    "hasTarget": False,
+                                    "latencyMs": 0,
+                                    "pipelineType": pipe.get("pipelineType", "unknown"),
+                                    "pipelineName": pipe.get("pipelineNickname", pipe.get("name", f"Pipeline {current_pipe_idx}")),
+                                    "cameraIndex": i,
+                                }
+        except Exception:
+            pass
+        time.sleep(1)
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +838,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return self._api_engine_settings()
         elif endpoint == 'engine-debug':
             return self._api_engine_debug()
+        elif endpoint == 'targets':
+            return self._api_targets()
+        elif endpoint == 'match-readiness':
+            return self._api_match_readiness()
         else:
             self._send_json({"error": "Unknown endpoint"}, 404)
 
@@ -918,6 +1103,101 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             'engineError': err,
         })
 
+    def _api_targets(self):
+        """Return latest target/pose data from NT or engine API."""
+        with _targets_lock:
+            data = {
+                "cameras": dict(_latest_targets["cameras"]),
+                "robotPose": _latest_targets["robot_pose"],
+                "lastUpdate": _latest_targets["last_update"],
+                "ntConnected": _latest_targets["nt_connected"],
+                "dataSource": _latest_targets["source"],
+                "age": round(time.time() - _latest_targets["last_update"], 1)
+                       if _latest_targets["last_update"] else None,
+            }
+        self._send_json(data)
+
+    def _api_match_readiness(self):
+        """Comprehensive pre-match system check."""
+        checks = []
+        online, data, api_path, err = _engine_probe()
+
+        # 1. Engine reachable
+        checks.append({
+            'name': 'Detection Engine',
+            'pass': online,
+            'detail': f'Online via {api_path}' if online else (err or 'Unreachable'),
+            'critical': True,
+        })
+
+        # 2. Cameras detected
+        cam_list = _extract_cameras(data) if data else []
+        checks.append({
+            'name': 'Cameras Connected',
+            'pass': len(cam_list) > 0,
+            'detail': f'{len(cam_list)} camera(s) found' if cam_list else 'No cameras in engine config',
+            'critical': True,
+        })
+
+        # 3. Calibration
+        calibrated_count = 0
+        for cam in cam_list:
+            cals = cam.get('calibrations', cam.get('cameraCalibrations', []))
+            if cals:
+                calibrated_count += 1
+        checks.append({
+            'name': 'Camera Calibration',
+            'pass': calibrated_count == len(cam_list) and len(cam_list) > 0,
+            'detail': f'{calibrated_count}/{len(cam_list)} calibrated',
+            'critical': False,
+        })
+
+        # 4. Streams alive
+        streams_live = 0
+        for i in range(len(cam_list)):
+            port = STREAM_BASE_PORT + (i * 2) + 1  # output stream
+            if self._check_stream_port(port) == 'live':
+                streams_live += 1
+        checks.append({
+            'name': 'Camera Streams',
+            'pass': streams_live == len(cam_list) and len(cam_list) > 0,
+            'detail': f'{streams_live}/{len(cam_list)} streams live',
+            'critical': True,
+        })
+
+        # 5. NetworkTables
+        with _targets_lock:
+            nt_ok = _latest_targets["nt_connected"]
+            nt_source = _latest_targets["source"]
+        checks.append({
+            'name': 'NetworkTables',
+            'pass': nt_ok,
+            'detail': f'Connected (via {nt_source})' if nt_ok else f'Not connected (source: {nt_source})',
+            'critical': False,
+        })
+
+        # 6. Target data flowing
+        with _targets_lock:
+            has_targets = any(
+                c.get("hasTarget", False) for c in _latest_targets["cameras"].values()
+            )
+            data_age = time.time() - _latest_targets["last_update"] if _latest_targets["last_update"] else 999
+        checks.append({
+            'name': 'Target Data',
+            'pass': data_age < 5,
+            'detail': f'Data is {round(data_age, 1)}s old' + (' (targets visible)' if has_targets else ' (no targets in view)'),
+            'critical': False,
+        })
+
+        all_critical = all(c['pass'] for c in checks if c['critical'])
+        all_pass = all(c['pass'] for c in checks)
+        self._send_json({
+            'checks': checks,
+            'ready': all_critical,
+            'allPass': all_pass,
+            'summary': 'MATCH READY' if all_critical else 'NOT READY - critical checks failed',
+        })
+
     def _api_engine_settings(self):
         """Get detection engine settings (proxied)."""
         try:
@@ -1014,6 +1294,9 @@ def main():
     print(f"    /pv/*            -> Engine SPA (rebranded)")
     print(f"    WebSocket        -> Tunneled to engine")
     print("=" * 60)
+
+    _start_target_poller()
+    print("[AprilVision] Target data poller started")
 
     server = ThreadedServer(("0.0.0.0", PROXY_PORT), DashboardHandler)
     print(f"[AprilVision] Dashboard running on port {PROXY_PORT}")

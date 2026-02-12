@@ -782,6 +782,12 @@
             color: var(--accent-green);
         }
 
+        .alert-success {
+            background: rgba(0,255,136,0.08);
+            border: 1px solid rgba(0,255,136,0.25);
+            color: var(--accent-green);
+        }
+
         /* ===== Empty State ===== */
         .empty-state {
             text-align: center;
@@ -980,6 +986,78 @@
                 <!-- Quick Action Output -->
                 <div id="dashActionOutput" style="display:none;" class="panel">
                     <div class="panel-body" id="dashActionOutputBody"></div>
+                </div>
+
+                <!-- Pose & Target Data (real-time) -->
+                <div class="section-title"><span class="section-icon">&#127919;</span> Live Target Data</div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                    <!-- Robot Pose -->
+                    <div class="panel">
+                        <div class="panel-header">Robot Pose (Field-Space)</div>
+                        <div class="panel-body" id="poseDataPanel">
+                            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; text-align:center;">
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">X (m)</div>
+                                    <div style="font-size:1.6rem;font-weight:800;font-family:monospace;color:var(--accent-green);" id="poseX">--</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Y (m)</div>
+                                    <div style="font-size:1.6rem;font-weight:800;font-family:monospace;color:var(--accent-blue);" id="poseY">--</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Z (m)</div>
+                                    <div style="font-size:1.6rem;font-weight:800;font-family:monospace;color:var(--accent-purple);" id="poseZ">--</div>
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; text-align:center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Roll</div>
+                                    <div style="font-size:1.1rem;font-weight:700;font-family:monospace;" id="poseRoll">--</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Pitch</div>
+                                    <div style="font-size:1.1rem;font-weight:700;font-family:monospace;" id="posePitch">--</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Yaw (Theta)</div>
+                                    <div style="font-size:1.1rem;font-weight:700;font-family:monospace;color:var(--accent-yellow);" id="poseYaw">--</div>
+                                </div>
+                            </div>
+                            <div style="margin-top:8px;font-size:0.68rem;color:var(--text-muted);text-align:center;" id="poseSource">Waiting for data...</div>
+                        </div>
+                    </div>
+
+                    <!-- Per-Camera Target Info -->
+                    <div class="panel">
+                        <div class="panel-header">Target Detection</div>
+                        <div class="panel-body" id="targetInfoPanel">
+                            <div style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:20px 0;">
+                                Waiting for target data...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Field Mini-Map -->
+                <div class="section-title"><span class="section-icon">&#127759;</span> Field Position</div>
+                <div class="panel" style="margin-bottom: 20px;">
+                    <div class="panel-body" style="padding:12px;">
+                        <canvas id="fieldCanvas" width="640" height="320" style="width:100%;height:auto;background:#1a1a2e;border-radius:6px;border:1px solid var(--border-subtle);"></canvas>
+                        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:0.68rem;color:var(--text-muted);">
+                            <span>FRC 2026 Field (16.54m x 8.21m)</span>
+                            <span id="fieldPoseLabel">No pose data</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Match Readiness -->
+                <div class="section-title"><span class="section-icon">&#9989;</span> Match Readiness</div>
+                <div class="panel" style="margin-bottom: 20px;">
+                    <div class="panel-body" id="matchReadinessPanel">
+                        <div style="text-align:center;padding:12px;">
+                            <button class="btn btn-green" onclick="AVApp.fetchMatchReadiness()">Run Match Readiness Check</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Detected Cameras -->
@@ -1283,20 +1361,24 @@
                 cameras: [],
                 cameraStreams: [],
                 detectedCameras: [],
-                cameraInfo: null,         // rich camera info from /api/av/camera-info
-                streamHealth: null,        // stream port health from /api/av/stream-health
+                cameraInfo: null,
+                streamHealth: null,
                 engineSettings: null,
                 teamNumber: null,
                 latencyHistory: [],
                 lastLatency: null,
-                consecutiveFailures: 0
+                consecutiveFailures: 0,
+                targets: null,            // live target/pose data from /api/av/targets
+                matchReadiness: null,     // match readiness check results
             };
             this.pollTimer = null;
             this.cameraPollTimer = null;
             this.uptimeTimer = null;
             this.dashboardStartTime = Date.now();
             this._cameraRefreshTimers = {};
-            this._streamRetryBackoff = {};  // per-stream exponential backoff
+            this._streamRetryBackoff = {};
+            // Stream base port for direct connection (bypass proxy)
+            this.STREAM_BASE_PORT = 1181;
             this.init();
         }
 
@@ -1365,10 +1447,12 @@
             this.fetchStatus();
             this.fetchCameras();
             this.fetchCameraInfo();
+            this.fetchTargets();
             this.pollTimer = setInterval(() => this.fetchStatus(), 3000);
             this.cameraPollTimer = setInterval(() => this.fetchCameras(), 10000);
-            // Fetch rich camera info less frequently (includes stream port probing)
             setInterval(() => this.fetchCameraInfo(), 15000);
+            // Target/pose data - poll fast for real-time feel
+            setInterval(() => this.fetchTargets(), 500);
         }
 
         startUptimeTimer() {
@@ -1491,6 +1575,39 @@
             } catch (e) {
                 // Camera info API may not be available
             }
+        }
+
+        async fetchTargets() {
+            try {
+                const resp = await fetch('/api/av/targets', { signal: AbortSignal.timeout(2000) });
+                if (resp.ok) {
+                    this.state.targets = await resp.json();
+                    this.renderTargetData();
+                }
+            } catch (e) {}
+        }
+
+        async fetchMatchReadiness() {
+            try {
+                const resp = await fetch('/api/av/match-readiness', { signal: AbortSignal.timeout(10000) });
+                if (resp.ok) {
+                    this.state.matchReadiness = await resp.json();
+                    this.renderMatchReadiness();
+                }
+            } catch (e) {}
+        }
+
+        /* ======================== STREAM URL HELPERS ======================== */
+
+        getDirectStreamUrl(camIdx, type) {
+            // Direct to cscore MJPEG - bypasses proxy entirely
+            const host = window.location.hostname;
+            const port = this.STREAM_BASE_PORT + (camIdx * 2) + (type === 'output' ? 1 : 0);
+            return 'http://' + host + ':' + port + '/stream.mjpg';
+        }
+
+        getProxyStreamUrl(camIdx, type) {
+            return '/stream/' + camIdx + '/' + type;
         }
 
         async checkStreamHealth() {
@@ -1774,6 +1891,214 @@
 
         /* ======================== RENDERING ======================== */
 
+        renderTargetData() {
+            const t = this.state.targets;
+            if (!t) return;
+
+            // Robot pose display
+            const pose = t.robotPose;
+            if (pose) {
+                document.getElementById('poseX').textContent = pose.x !== undefined ? pose.x.toFixed(3) : '--';
+                document.getElementById('poseY').textContent = pose.y !== undefined ? pose.y.toFixed(3) : '--';
+                document.getElementById('poseZ').textContent = pose.z !== undefined ? pose.z.toFixed(3) : '--';
+                document.getElementById('poseYaw').textContent = (pose.rotation !== undefined ? pose.rotation.toFixed(1) + '\u00B0' : '--');
+                document.getElementById('poseRoll').textContent = '--';
+                document.getElementById('posePitch').textContent = '--';
+                document.getElementById('poseSource').textContent = 'Source: ' + t.dataSource + (t.ntConnected ? ' (NT connected)' : '');
+                this.drawFieldMap(pose.x, pose.y, pose.rotation);
+            } else {
+                // Try to get pose from per-camera data
+                let foundPose = false;
+                const cams = t.cameras || {};
+                for (const camName of Object.keys(cams)) {
+                    const cam = cams[camName];
+                    if (cam.pose) {
+                        document.getElementById('poseX').textContent = cam.pose.x.toFixed(3);
+                        document.getElementById('poseY').textContent = cam.pose.y.toFixed(3);
+                        document.getElementById('poseZ').textContent = cam.pose.z.toFixed(3);
+                        document.getElementById('poseRoll').textContent = cam.pose.rx !== undefined ? cam.pose.rx.toFixed(1) + '\u00B0' : '--';
+                        document.getElementById('posePitch').textContent = cam.pose.ry !== undefined ? cam.pose.ry.toFixed(1) + '\u00B0' : '--';
+                        document.getElementById('poseYaw').textContent = cam.pose.rz !== undefined ? cam.pose.rz.toFixed(1) + '\u00B0' : '--';
+                        document.getElementById('poseSource').textContent = 'From: ' + camName + ' | Source: ' + t.dataSource;
+                        this.drawFieldMap(cam.pose.x, cam.pose.y, cam.pose.rz || 0);
+                        foundPose = true;
+                        break;
+                    }
+                }
+                if (!foundPose) {
+                    document.getElementById('poseSource').textContent = 'Source: ' + t.dataSource +
+                        (t.ntConnected ? ' (NT connected, no pose)' : ' (waiting for pose data)');
+                }
+            }
+
+            // Per-camera target info
+            const panel = document.getElementById('targetInfoPanel');
+            const cams = t.cameras || {};
+            const camNames = Object.keys(cams);
+            if (camNames.length === 0) {
+                panel.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:12px 0;">No camera data yet (source: ' + t.dataSource + ')</div>';
+                return;
+            }
+
+            let html = '';
+            camNames.forEach(camName => {
+                const cam = cams[camName];
+                const hasTarget = cam.hasTarget;
+                const dotColor = hasTarget ? 'green' : 'red';
+                const targetText = hasTarget ? 'TARGET LOCKED' : 'No Target';
+
+                html += '<div style="padding:8px 0;border-bottom:1px solid var(--border-subtle);">';
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                html += '<span style="font-weight:700;font-size:0.85rem;">' + this.escapeHtml(camName) + '</span>';
+                html += '<span style="display:flex;align-items:center;gap:4px;font-size:0.75rem;font-weight:600;color:var(--accent-' + dotColor + ');">';
+                html += '<span class="dot ' + dotColor + '" style="width:6px;height:6px;"></span> ' + targetText + '</span>';
+                html += '</div>';
+
+                if (hasTarget || cam.targetYaw !== undefined) {
+                    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px;font-size:0.72rem;">';
+                    if (cam.targetYaw !== undefined) html += '<div><span style="color:var(--text-muted);">Yaw:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetYaw + '\u00B0</span></div>';
+                    if (cam.targetPitch !== undefined) html += '<div><span style="color:var(--text-muted);">Pitch:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetPitch + '\u00B0</span></div>';
+                    if (cam.targetArea !== undefined) html += '<div><span style="color:var(--text-muted);">Area:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetArea + '%</span></div>';
+                    if (cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) html += '<div><span style="color:var(--text-muted);">Tag:</span> <span style="font-family:monospace;font-weight:600;color:var(--accent-green);">#' + cam.bestFiducialId + '</span></div>';
+                    if (cam.latencyMs) html += '<div><span style="color:var(--text-muted);">Latency:</span> <span style="font-family:monospace;font-weight:600;">' + cam.latencyMs + 'ms</span></div>';
+                    html += '</div>';
+                }
+                html += '</div>';
+            });
+            panel.innerHTML = html;
+        }
+
+        drawFieldMap(x, y, rotation) {
+            const canvas = document.getElementById('fieldCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            // FRC field dimensions (meters)
+            const fieldW = 16.54;
+            const fieldH = 8.21;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Field background
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, w, h);
+
+            // Field border
+            ctx.strokeStyle = '#30363d';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(4, 4, w - 8, h - 8);
+
+            // Center line
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([8, 4]);
+            ctx.beginPath();
+            ctx.moveTo(w / 2, 4);
+            ctx.lineTo(w / 2, h - 4);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Alliance zones
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.08)';
+            ctx.fillRect(4, 4, w / 2 - 4, h - 8);
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+            ctx.fillRect(w / 2, 4, w / 2 - 4, h - 8);
+
+            // Grid lines
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 0.5;
+            for (let gx = 1; gx < fieldW; gx++) {
+                const px = 4 + (gx / fieldW) * (w - 8);
+                ctx.beginPath();
+                ctx.moveTo(px, 4);
+                ctx.lineTo(px, h - 4);
+                ctx.stroke();
+            }
+            for (let gy = 1; gy < fieldH; gy++) {
+                const py = 4 + (gy / fieldH) * (h - 8);
+                ctx.beginPath();
+                ctx.moveTo(4, py);
+                ctx.lineTo(w - 4, py);
+                ctx.stroke();
+            }
+
+            // AprilTag positions (approximate FRC 2026 - adjust as needed)
+            ctx.fillStyle = 'rgba(0, 255, 136, 0.3)';
+            const tagPositions = [
+                [0.5, 4.1], [0.5, 2.5], [0.5, 5.7],
+                [16.0, 4.1], [16.0, 2.5], [16.0, 5.7],
+                [4.0, 0.5], [4.0, 7.7],
+                [12.5, 0.5], [12.5, 7.7],
+            ];
+            tagPositions.forEach(function(pos) {
+                const px = 4 + (pos[0] / fieldW) * (w - 8);
+                const py = 4 + (pos[1] / fieldH) * (h - 8);
+                ctx.beginPath();
+                ctx.arc(px, py, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Robot position
+            if (x !== undefined && y !== undefined && (x !== 0 || y !== 0)) {
+                const px = 4 + (x / fieldW) * (w - 8);
+                const py = 4 + (y / fieldH) * (h - 8);
+                const rot = (rotation || 0) * Math.PI / 180;
+
+                // Robot body (triangle showing direction)
+                ctx.save();
+                ctx.translate(px, py);
+                ctx.rotate(-rot);
+                ctx.fillStyle = '#00ff88';
+                ctx.beginPath();
+                ctx.moveTo(10, 0);
+                ctx.lineTo(-6, -7);
+                ctx.lineTo(-6, 7);
+                ctx.closePath();
+                ctx.fill();
+
+                // Outline
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.restore();
+
+                // Position label
+                const label = document.getElementById('fieldPoseLabel');
+                if (label) label.textContent = 'X: ' + x.toFixed(2) + 'm  Y: ' + y.toFixed(2) + 'm  \u03B8: ' + (rotation || 0).toFixed(1) + '\u00B0';
+            }
+        }
+
+        renderMatchReadiness() {
+            const panel = document.getElementById('matchReadinessPanel');
+            const data = this.state.matchReadiness;
+            if (!data) return;
+
+            let html = '<div style="padding:8px 0;">';
+
+            // Summary banner
+            const bannerColor = data.allPass ? 'var(--accent-green)' : (data.ready ? 'var(--accent-yellow)' : 'var(--accent-red)');
+            const bannerBg = data.allPass ? 'rgba(0,255,136,0.1)' : (data.ready ? 'rgba(255,200,0,0.1)' : 'rgba(248,81,73,0.1)');
+            html += '<div style="background:' + bannerBg + ';border:1px solid ' + bannerColor + ';border-radius:8px;padding:12px;text-align:center;margin-bottom:12px;">';
+            html += '<div style="font-size:1.3rem;font-weight:900;color:' + bannerColor + ';">' + data.summary + '</div>';
+            html += '</div>';
+
+            // Individual checks
+            (data.checks || []).forEach(function(check) {
+                const icon = check.pass ? '<span style="color:var(--accent-green);">&#10003;</span>' : '<span style="color:var(--accent-red);">&#10007;</span>';
+                const critBadge = check.critical ? '<span style="font-size:0.6rem;background:rgba(248,81,73,0.2);color:var(--accent-red);padding:1px 4px;border-radius:3px;margin-left:6px;">CRITICAL</span>' : '';
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-subtle);">';
+                html += '<span style="font-weight:600;font-size:0.85rem;">' + icon + ' ' + check.name + critBadge + '</span>';
+                html += '<span style="font-size:0.75rem;color:var(--text-secondary);">' + check.detail + '</span>';
+                html += '</div>';
+            });
+
+            html += '<div style="text-align:center;margin-top:12px;"><button class="btn btn-green" onclick="AVApp.fetchMatchReadiness()">Re-check</button></div>';
+            html += '</div>';
+            panel.innerHTML = html;
+        }
+
         renderDashboard() {
             const s = this.state;
 
@@ -1934,11 +2259,14 @@
                 card.className = 'camera-preview-card';
                 card.setAttribute('data-cam-index', cam.index);
 
-                const streamUrl = cam.outputStreamUrl || ('/stream/' + cam.index + '/output');
+                const directUrl = this.getDirectStreamUrl(cam.index, 'output');
+                const proxyUrl = this.getProxyStreamUrl(cam.index, 'output');
                 card.innerHTML =
-                    '<img class="cam-thumb" src="' + this.escapeAttr(streamUrl) + '" alt="' + this.escapeAttr(cam.name) + '" ' +
+                    '<img class="cam-thumb" src="' + this.escapeAttr(directUrl) + '" alt="' + this.escapeAttr(cam.name) + '" ' +
+                        'data-direct-url="' + this.escapeAttr(directUrl) + '" ' +
+                        'data-proxy-url="' + this.escapeAttr(proxyUrl) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
-                        'onerror="AVApp.handleImgError(this,' + cam.index + ',\'output\')" loading="lazy">' +
+                        'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')" loading="lazy">' +
                     '<div class="cam-info">' +
                     '<span class="cam-name">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
                     '<span class="cam-index">#' + cam.index + (cam.calibrated ? ' &#10003;' : '') + '</span>' +
@@ -1988,7 +2316,6 @@
                 return;
             }
 
-            // Only re-render if count changed
             const existing = container.querySelectorAll('.camera-feed-block');
             if (existing.length === cameras.length) {
                 this.refreshBrokenImages(container);
@@ -1996,7 +2323,6 @@
                 return;
             }
 
-            // Find matching rich camera info if available
             const infoMap = {};
             if (this.state.cameraInfo && this.state.cameraInfo.engineCameras) {
                 this.state.cameraInfo.engineCameras.forEach(c => { infoMap[c.index] = c; });
@@ -2008,16 +2334,19 @@
                 block.className = 'camera-feed-block';
                 block.setAttribute('data-cam-index', cam.index);
 
-                const inputUrl = cam.inputStreamUrl || ('/stream/' + cam.index + '/input');
-                const outputUrl = cam.outputStreamUrl || ('/stream/' + cam.index + '/output');
+                // PRIMARY: direct cscore URL (browser -> stream port directly)
+                // FALLBACK: proxy URL (browser -> bridge -> stream port)
+                const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
+                const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
+                const proxyInputUrl = this.getProxyStreamUrl(cam.index, 'input');
+                const proxyOutputUrl = this.getProxyStreamUrl(cam.index, 'output');
                 const calibIcon = cam.calibrated ? '&#10003; Calibrated' : '&#9888; Not Calibrated';
                 const calibColor = cam.calibrated ? 'var(--accent-green)' : 'var(--accent-yellow)';
 
-                // Rich info if available
                 const info = infoMap[cam.index];
                 const devicePath = info ? info.devicePath : '';
-                const inputPort = info ? info.inputStreamPort : (1181 + cam.index * 2);
-                const outputPort = info ? info.outputStreamPort : (1182 + cam.index * 2);
+                const inputPort = this.STREAM_BASE_PORT + (cam.index * 2);
+                const outputPort = inputPort + 1;
                 const pipelineName = (info && info.currentPipeline) ? info.currentPipeline.name : '';
 
                 block.innerHTML =
@@ -2034,23 +2363,27 @@
                     '<div class="feed-panel">' +
                     '<span class="feed-label">Input (Raw)</span>' +
                     '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-input"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
-                    '<img src="' + this.escapeAttr(inputUrl) + '" alt="Input Stream" ' +
+                    '<img src="' + this.escapeAttr(directInputUrl) + '" alt="Input Stream" ' +
+                        'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
+                        'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
-                        'onerror="AVApp.handleImgError(this,' + cam.index + ',\'input\')">' +
+                        'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
                     '</div>' +
                     '<div class="feed-panel">' +
                     '<span class="feed-label">Output (Detection)</span>' +
                     '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-output"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
-                    '<img src="' + this.escapeAttr(outputUrl) + '" alt="Output Stream" ' +
+                    '<img src="' + this.escapeAttr(directOutputUrl) + '" alt="Output Stream" ' +
+                        'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
+                        'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
-                        'onerror="AVApp.handleImgError(this,' + cam.index + ',\'output\')">' +
+                        'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
                     '</div>' +
                     '</div>' +
                     '<div class="camera-info-bar">' +
                     (devicePath ? '<div class="info-item"><span class="info-label">Device:</span><span class="info-value">' + this.escapeHtml(devicePath) + '</span></div>' : '') +
-                    '<div class="info-item"><span class="info-label">Input Port:</span><span class="info-value">' + inputPort + '</span></div>' +
-                    '<div class="info-item"><span class="info-label">Output Port:</span><span class="info-value">' + outputPort + '</span></div>' +
-                    '<div class="info-item"><span class="info-label">Proxy:</span><span class="info-value">' + this.escapeHtml(inputUrl) + '</span></div>' +
+                    '<div class="info-item"><span class="info-label">Input:</span><span class="info-value">:' + inputPort + '</span></div>' +
+                    '<div class="info-item"><span class="info-label">Output:</span><span class="info-value">:' + outputPort + '</span></div>' +
+                    '<div class="info-item"><span class="info-label">Mode:</span><span class="info-value" id="streamMode-' + cam.index + '">direct</span></div>' +
                     '</div>';
 
                 container.appendChild(block);
@@ -2173,38 +2506,52 @@
         /* ======================== IMAGE ERROR HANDLING ======================== */
 
         handleImgLoad(img, camIdx, streamType) {
-            // Stream is working - update status badge
             img.style.opacity = '1';
             const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
             if (badge) {
                 badge.className = 'feed-status live';
                 badge.innerHTML = '<span class="dot green" style="width:6px;height:6px;"></span> Live';
             }
-            // Reset backoff on success
             const key = camIdx + '-' + streamType;
             this._streamRetryBackoff[key] = 0;
+            // Track which mode is working
+            const modeEl = document.getElementById('streamMode-' + camIdx);
+            if (modeEl) {
+                const src = img.getAttribute('src') || '';
+                modeEl.textContent = src.startsWith('http') ? 'direct' : 'proxy';
+            }
         }
 
-        handleImgError(img, camIdx, streamType) {
-            // Get the base URL (strip cache busters)
-            const src = img.getAttribute('src');
-            if (!src || src === 'about:blank') return;
-            const baseSrc = src.split('?')[0];
+        handleStreamError(img, camIdx, streamType) {
+            // Smart fallback: direct URL failed -> try proxy URL -> retry with backoff
+            const directUrl = img.getAttribute('data-direct-url');
+            const proxyUrl = img.getAttribute('data-proxy-url');
+            const currentSrc = (img.getAttribute('src') || '').split('?')[0];
 
             img.style.opacity = '0.3';
 
-            // Update status badge if we have the info
-            if (camIdx !== undefined && streamType) {
-                const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
+            const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
+            const key = camIdx + '-' + streamType;
+
+            // If direct URL failed, try proxy URL first
+            if (directUrl && currentSrc === directUrl && proxyUrl) {
                 if (badge) {
-                    badge.className = 'feed-status error';
-                    badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Retrying...';
+                    badge.className = 'feed-status connecting';
+                    badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Trying proxy...';
                 }
+                const modeEl = document.getElementById('streamMode-' + camIdx);
+                if (modeEl) modeEl.textContent = 'proxy';
+                img.src = proxyUrl;
+                return;
             }
 
-            // Exponential backoff retry: 2s, 4s, 8s, 16s, max 16s
-            const key = (camIdx !== undefined ? camIdx + '-' + streamType : baseSrc);
-            if (this._cameraRefreshTimers[key]) return; // already scheduled
+            // Both failed - retry with exponential backoff
+            if (badge) {
+                badge.className = 'feed-status error';
+                badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Retrying...';
+            }
+
+            if (this._cameraRefreshTimers[key]) return;
 
             const attempt = this._streamRetryBackoff[key] || 0;
             const delay = Math.min(2000 * Math.pow(2, attempt), 16000);
@@ -2212,16 +2559,22 @@
 
             this._cameraRefreshTimers[key] = setTimeout(() => {
                 delete this._cameraRefreshTimers[key];
-                img.src = baseSrc + '?_t=' + Date.now();
+                // Alternate between direct and proxy on retries
+                const tryDirect = attempt % 2 === 0;
+                const url = (tryDirect && directUrl) ? directUrl : (proxyUrl || directUrl);
+                img.src = url + '?_t=' + Date.now();
                 img.style.opacity = '1';
             }, delay);
+        }
+
+        handleImgError(img, camIdx, streamType) {
+            this.handleStreamError(img, camIdx, streamType);
         }
 
         refreshBrokenImages(container) {
             const images = container.querySelectorAll('img');
             images.forEach(img => {
                 if (img.naturalWidth === 0 && img.complete) {
-                    // Extract cam index and type from the parent structure
                     const block = img.closest('.camera-feed-block') || img.closest('.camera-preview-card');
                     const camIdx = block ? parseInt(block.getAttribute('data-cam-index')) : undefined;
                     const panel = img.closest('.feed-panel');
