@@ -365,7 +365,7 @@ configure_team() {
     "connectionType": 0,
     "staticIp": "",
     "hostname": "photonvision",
-    "runNTServer": false,
+    "runNTServer": true,
     "shouldManage": false,
     "shouldPublishProto": true,
     "networkManagerIface": "",

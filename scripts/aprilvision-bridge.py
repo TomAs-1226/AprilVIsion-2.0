@@ -316,20 +316,16 @@ def _target_poll_loop():
 def _try_ntcore():
     """Try to import and initialize ntcore for NetworkTables data.
 
-    Connects to the NT server based on the configured team number:
-      - If TEAM_NUMBER is set, connects to 10.TE.AM.2 (roboRIO)
-      - Falls back to 127.0.0.1 (local PV NT server for testing)
+    PhotonVision runs its own NT server (runNTServer: true), so we always
+    connect to localhost first.  When a roboRIO is also present the PV
+    engine bridges the data automatically.
     """
-    nt_host = NT_SERVER
     try:
         import ntcore
         inst = ntcore.NetworkTableInstance.getDefault()
         inst.startClient4("AprilVision Dashboard")
-        if TEAM_NUMBER > 0:
-            # Connect to roboRIO by team number (ntcore resolves mDNS)
-            inst.setServerTeam(TEAM_NUMBER)
-        else:
-            inst.setServer(nt_host, 1735)
+        # Always connect to local PV NT server first (port 5810 for NT4)
+        inst.setServer("127.0.0.1", ntcore.NetworkTableInstance.kDefaultPort4)
         with _targets_lock:
             _latest_targets["source"] = "ntcore"
         return inst
@@ -337,7 +333,7 @@ def _try_ntcore():
         pass
     try:
         from networktables import NetworkTables
-        NetworkTables.initialize(server=nt_host)
+        NetworkTables.initialize(server="127.0.0.1")
         with _targets_lock:
             _latest_targets["source"] = "ntcore"
         return NetworkTables

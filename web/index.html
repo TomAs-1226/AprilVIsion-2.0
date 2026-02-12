@@ -988,6 +988,50 @@
                     <div class="panel-body" id="dashActionOutputBody"></div>
                 </div>
 
+                <!-- AprilTag Detection Summary Banner -->
+                <div id="tagDetectionBanner" style="
+                    background: linear-gradient(135deg, rgba(30,30,50,0.95), rgba(20,20,40,0.95));
+                    border: 1px solid var(--border-subtle);
+                    border-radius: 10px;
+                    padding: 16px 20px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    align-items: center;
+                    gap: 16px;
+                ">
+                    <div id="tagBannerIcon" style="
+                        width: 56px; height: 56px;
+                        border-radius: 50%;
+                        background: rgba(255,59,48,0.15);
+                        border: 2px solid var(--accent-red);
+                        display: flex; align-items: center; justify-content: center;
+                        font-size: 1.4rem;
+                        flex-shrink: 0;
+                        transition: all 0.3s ease;
+                    ">&#128204;</div>
+                    <div style="flex:1;min-width:0;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                            <span style="font-weight:800;font-size:1.1rem;" id="tagBannerTitle">No Tags Detected</span>
+                            <span id="tagBannerBadge" style="
+                                display:none;
+                                background:var(--accent-green);
+                                color:#000;
+                                font-size:0.65rem;
+                                font-weight:800;
+                                padding:2px 8px;
+                                border-radius:10px;
+                                text-transform:uppercase;
+                            ">LOCKED</span>
+                        </div>
+                        <div style="font-size:0.78rem;color:var(--text-muted);" id="tagBannerDetail">Waiting for detection engine data...</div>
+                        <div id="tagBannerTags" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"></div>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0;">
+                        <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Distance</div>
+                        <div id="tagBannerDistance" style="font-size:1.3rem;font-weight:800;font-family:monospace;color:var(--text-muted);">--</div>
+                    </div>
+                </div>
+
                 <!-- Pose & Target Data (real-time) -->
                 <div class="section-title"><span class="section-icon">&#127919;</span> Live Target Data</div>
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
@@ -1902,6 +1946,16 @@
             const t = this.state.targets;
             if (!t) return;
 
+            // --- Tag Detection Summary Banner ---
+            this._renderTagBanner(t);
+
+            // Update stream placeholders with tag data (if streams are down)
+            document.querySelectorAll('.stream-placeholder').forEach(ph => {
+                const idx = parseInt(ph.getAttribute('data-cam-index'));
+                const type = ph.getAttribute('data-stream-type');
+                if (!isNaN(idx)) this._updateStreamPlaceholder(idx, type);
+            });
+
             // Robot pose display
             const pose = t.robotPose;
             if (pose) {
@@ -1963,16 +2017,119 @@
 
                 if (hasTarget || cam.targetYaw !== undefined) {
                     html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px;font-size:0.72rem;">';
+                    if (cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) html += '<div><span style="color:var(--text-muted);">Tag:</span> <span style="font-family:monospace;font-weight:600;color:var(--accent-green);">#' + cam.bestFiducialId + '</span></div>';
                     if (cam.targetYaw !== undefined) html += '<div><span style="color:var(--text-muted);">Yaw:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetYaw + '\u00B0</span></div>';
                     if (cam.targetPitch !== undefined) html += '<div><span style="color:var(--text-muted);">Pitch:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetPitch + '\u00B0</span></div>';
                     if (cam.targetArea !== undefined) html += '<div><span style="color:var(--text-muted);">Area:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetArea + '%</span></div>';
-                    if (cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) html += '<div><span style="color:var(--text-muted);">Tag:</span> <span style="font-family:monospace;font-weight:600;color:var(--accent-green);">#' + cam.bestFiducialId + '</span></div>';
+                    // Distance from 3D pose (solvePnP)
+                    if (cam.pose) {
+                        var dist = Math.sqrt(cam.pose.x * cam.pose.x + cam.pose.y * cam.pose.y + cam.pose.z * cam.pose.z);
+                        var distColor = dist < 1.5 ? 'var(--accent-green)' : dist < 3 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                        html += '<div><span style="color:var(--text-muted);">Dist:</span> <span style="font-family:monospace;font-weight:600;color:' + distColor + ';">' + dist.toFixed(2) + 'm</span></div>';
+                    }
                     if (cam.latencyMs) html += '<div><span style="color:var(--text-muted);">Latency:</span> <span style="font-family:monospace;font-weight:600;">' + cam.latencyMs + 'ms</span></div>';
                     html += '</div>';
+                    // 3D Pose detail (if calibrated)
+                    if (cam.pose) {
+                        html += '<div style="margin-top:4px;font-size:0.68rem;color:var(--text-muted);font-family:monospace;">';
+                        html += 'Pose: X=' + cam.pose.x.toFixed(3) + ' Y=' + cam.pose.y.toFixed(3) + ' Z=' + cam.pose.z.toFixed(3);
+                        if (cam.pose.rx !== undefined) html += ' | Rx=' + cam.pose.rx.toFixed(1) + ' Ry=' + cam.pose.ry.toFixed(1) + ' Rz=' + cam.pose.rz.toFixed(1);
+                        html += '</div>';
+                    }
                 }
                 html += '</div>';
             });
             panel.innerHTML = html;
+        }
+
+        _renderTagBanner(t) {
+            const icon = document.getElementById('tagBannerIcon');
+            const title = document.getElementById('tagBannerTitle');
+            const badge = document.getElementById('tagBannerBadge');
+            const detail = document.getElementById('tagBannerDetail');
+            const tagsContainer = document.getElementById('tagBannerTags');
+            const distEl = document.getElementById('tagBannerDistance');
+            if (!icon) return;
+
+            const cams = t.cameras || {};
+            const camNames = Object.keys(cams);
+
+            // Collect all detected tags and find closest distance
+            let totalTargets = 0;
+            let detectedTagIds = [];
+            let closestDist = null;
+            let activeCams = 0;
+
+            camNames.forEach(name => {
+                const cam = cams[name];
+                if (cam.hasTarget) {
+                    totalTargets++;
+                    activeCams++;
+                    if (cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) {
+                        detectedTagIds.push({ id: cam.bestFiducialId, cam: name });
+                    }
+                    // Distance from pose (x,y,z relative to camera)
+                    if (cam.pose) {
+                        const d = Math.sqrt(cam.pose.x * cam.pose.x + cam.pose.y * cam.pose.y + cam.pose.z * cam.pose.z);
+                        if (d > 0 && (closestDist === null || d < closestDist)) closestDist = d;
+                    }
+                }
+            });
+
+            if (totalTargets > 0) {
+                // Tags detected
+                icon.style.background = 'rgba(0,255,136,0.15)';
+                icon.style.borderColor = 'var(--accent-green)';
+                icon.innerHTML = '&#127919;';
+                title.textContent = totalTargets + ' Tag' + (totalTargets > 1 ? 's' : '') + ' Detected';
+                title.style.color = 'var(--accent-green)';
+                badge.style.display = 'inline-block';
+                detail.textContent = activeCams + ' of ' + camNames.length + ' camera' + (camNames.length > 1 ? 's' : '') + ' tracking | Source: ' + (t.dataSource || 'unknown');
+
+                // Tag ID chips
+                tagsContainer.innerHTML = '';
+                detectedTagIds.forEach(tag => {
+                    const chip = document.createElement('span');
+                    chip.style.cssText = 'display:inline-block;background:rgba(0,255,136,0.15);border:1px solid var(--accent-green);color:var(--accent-green);font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:12px;font-family:monospace;';
+                    chip.textContent = 'Tag #' + tag.id + ' (' + tag.cam + ')';
+                    tagsContainer.appendChild(chip);
+                });
+
+                // Distance display
+                if (closestDist !== null) {
+                    distEl.textContent = closestDist.toFixed(2) + 'm';
+                    distEl.style.color = closestDist < 1.5 ? 'var(--accent-green)' : closestDist < 3 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                } else {
+                    distEl.textContent = '--';
+                    distEl.style.color = 'var(--text-muted)';
+                }
+            } else if (camNames.length > 0) {
+                // Cameras exist but no targets
+                icon.style.background = 'rgba(255,165,0,0.12)';
+                icon.style.borderColor = 'var(--accent-yellow)';
+                icon.innerHTML = '&#128269;';
+                title.textContent = 'Searching for Tags...';
+                title.style.color = 'var(--accent-yellow)';
+                badge.style.display = 'none';
+                detail.textContent = camNames.length + ' camera' + (camNames.length > 1 ? 's' : '') + ' active, no AprilTags in view | Source: ' + (t.dataSource || 'unknown');
+                tagsContainer.innerHTML = '';
+                distEl.textContent = '--';
+                distEl.style.color = 'var(--text-muted)';
+            } else {
+                // No camera data at all
+                icon.style.background = 'rgba(255,59,48,0.12)';
+                icon.style.borderColor = 'var(--accent-red)';
+                icon.innerHTML = '&#128204;';
+                title.textContent = 'No Tags Detected';
+                title.style.color = 'var(--text-secondary)';
+                badge.style.display = 'none';
+                const src = t.dataSource || 'none';
+                const ntStatus = t.ntConnected ? 'NT connected' : 'NT not connected';
+                detail.textContent = 'Source: ' + src + ' | ' + ntStatus + ' | Ensure engine is running';
+                tagsContainer.innerHTML = '';
+                distEl.textContent = '--';
+                distEl.style.color = 'var(--text-muted)';
+            }
         }
 
         drawFieldMap(x, y, rotation) {
@@ -2522,7 +2679,14 @@
         /* ======================== IMAGE ERROR HANDLING ======================== */
 
         handleImgLoad(img, camIdx, streamType) {
+            img.style.display = '';
             img.style.opacity = '1';
+            // Remove placeholder if stream came back
+            const panel = img.closest('.feed-panel');
+            if (panel) {
+                const ph = panel.querySelector('.stream-placeholder');
+                if (ph) ph.remove();
+            }
             const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
             if (badge) {
                 badge.className = 'feed-status live';
@@ -2561,10 +2725,28 @@
                 return;
             }
 
-            // Both failed - retry with exponential backoff
+            // Both failed - show placeholder with target data, retry in background
             if (badge) {
                 badge.className = 'feed-status error';
-                badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Retrying...';
+                badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Stream unavailable';
+            }
+
+            // Show a meaningful placeholder instead of broken image
+            const panel = img.closest('.feed-panel');
+            if (panel && !panel.querySelector('.stream-placeholder')) {
+                img.style.display = 'none';
+                const ph = document.createElement('div');
+                ph.className = 'stream-placeholder';
+                ph.style.cssText = 'width:100%;aspect-ratio:4/3;background:linear-gradient(135deg,#0d1117,#161b22);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:0.78rem;color:var(--text-muted);border:1px dashed var(--border-subtle);';
+                ph.setAttribute('data-cam-index', camIdx);
+                ph.setAttribute('data-stream-type', streamType);
+                ph.innerHTML = '<div style="font-size:1.6rem;opacity:0.5;">&#128247;</div>' +
+                    '<div>Stream not available</div>' +
+                    '<div style="font-size:0.68rem;" id="phTargetInfo-' + camIdx + '-' + streamType + '">Checking for tag data...</div>' +
+                    '<div style="font-size:0.65rem;margin-top:4px;opacity:0.5;">Retrying connection...</div>';
+                panel.insertBefore(ph, img.nextSibling);
+                // Update placeholder with tag data if available
+                this._updateStreamPlaceholder(camIdx, streamType);
             }
 
             if (this._cameraRefreshTimers[key]) return;
@@ -2578,9 +2760,36 @@
                 // Alternate between direct and proxy on retries
                 const tryDirect = attempt % 2 === 0;
                 const url = (tryDirect && directUrl) ? directUrl : (proxyUrl || directUrl);
-                img.src = url + '?_t=' + Date.now();
+                img.style.display = '';
                 img.style.opacity = '1';
+                img.src = url + '?_t=' + Date.now();
             }, delay);
+        }
+
+        _updateStreamPlaceholder(camIdx, streamType) {
+            const el = document.getElementById('phTargetInfo-' + camIdx + '-' + streamType);
+            if (!el) return;
+            const t = this.state.targets;
+            if (!t || !t.cameras) { el.textContent = 'No target data'; return; }
+            // Find camera by index
+            const cams = t.cameras;
+            for (const name of Object.keys(cams)) {
+                const cam = cams[name];
+                if (cam.cameraIndex === camIdx || Object.keys(cams).indexOf(name) === camIdx) {
+                    if (cam.hasTarget) {
+                        let info = 'Tag #' + (cam.bestFiducialId >= 0 ? cam.bestFiducialId : '?') + ' detected';
+                        if (cam.pose) {
+                            const d = Math.sqrt(cam.pose.x * cam.pose.x + cam.pose.y * cam.pose.y + cam.pose.z * cam.pose.z);
+                            info += ' | ' + d.toFixed(2) + 'm away';
+                        }
+                        el.innerHTML = '<span style="color:var(--accent-green);">' + info + '</span>';
+                    } else {
+                        el.textContent = 'No tags in view';
+                    }
+                    return;
+                }
+            }
+            el.textContent = 'No target data for this camera';
         }
 
         handleImgError(img, camIdx, streamType) {
