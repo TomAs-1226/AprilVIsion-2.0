@@ -28,6 +28,10 @@ _deps/
 # Logs
 *.log
 
+# Python
+__pycache__/
+*.pyc
+
 # Temporary files
 *.tmp
 *.temp
