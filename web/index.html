@@ -940,8 +940,12 @@
                         <span class="status-value"><span class="dot" id="dotProxy"></span><span id="txtProxy">Checking...</span></span>
                     </div>
                     <div class="status-row">
-                        <span class="status-label">WebSocket Tunnel</span>
+                        <span class="status-label">PV Data Link</span>
                         <span class="status-value"><span class="dot" id="dotWebsocket"></span><span id="txtWebsocket">Checking...</span></span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Data Source</span>
+                        <span class="status-value"><span class="dot" id="dotDataSource"></span><span id="txtDataSource">--</span></span>
                     </div>
                     <div class="status-row">
                         <span class="status-label">3D Pose Estimation</span>
@@ -1695,6 +1699,8 @@
                     this.state.proxyOnline = data.proxy_online !== undefined ? data.proxy_online : true;
                     this.state.version = data.version || 'v3.2.0';
                     this.state.uptime = data.uptime || null;
+                    this.state.ws_connected = data.ws_connected || false;
+                    this.state.data_source = data.data_source || 'none';
                     this.state.consecutiveFailures = 0;
 
                     // Team number from bridge --team flag
@@ -2575,7 +2581,28 @@
                 txtEngine.textContent = 'Offline';
             }
             this.setDot('dotProxy', 'txtProxy', s.proxyOnline, false);
-            this.setDot('dotWebsocket', 'txtWebsocket', s.proxyOnline, false);
+            // PV data link (WebSocket to engine)
+            const wsConnected = s.ws_connected || (s.targets && s.targets.wsConnected);
+            const dataSource = s.data_source || (s.targets && s.targets.dataSource) || 'none';
+            if (wsConnected) {
+                this.setDot('dotWebsocket', 'txtWebsocket', true, false);
+                document.getElementById('txtWebsocket').textContent = 'WebSocket connected';
+            } else if (dataSource === 'ntcore') {
+                this.setDot('dotWebsocket', 'txtWebsocket', true, false);
+                document.getElementById('txtWebsocket').textContent = 'NT connected';
+            } else if (dataSource.includes('connecting')) {
+                document.getElementById('dotWebsocket').className = 'dot yellow pulse';
+                document.getElementById('txtWebsocket').textContent = 'Connecting...';
+            } else {
+                this.setDot('dotWebsocket', 'txtWebsocket', false, false);
+                document.getElementById('txtWebsocket').textContent = 'Not connected';
+            }
+            // Data source indicator
+            const dsMap = { 'websocket': ['green', 'PV WebSocket (live)'], 'ntcore': ['green', 'NetworkTables (live)'], 'api': ['yellow', 'HTTP API (config only)'], 'none': ['red', 'No data source'] };
+            const dsKey = dataSource.split(' ')[0];
+            const ds = dsMap[dsKey] || ['yellow', dataSource];
+            document.getElementById('dotDataSource').className = 'dot ' + ds[0];
+            document.getElementById('txtDataSource').textContent = ds[1];
 
             // 3D Pose
             const hasCalibrated = s.cameras.some(c => c.calibrated);

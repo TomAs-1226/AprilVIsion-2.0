@@ -5,6 +5,10 @@
 opencv-contrib-python>=4.8.0
 numpy>=1.24.0
 
+# Live data from PhotonVision WebSocket (MessagePack protocol)
+websocket-client>=1.6.0
+msgpack>=1.0.0
+
 # NetworkTables (optional - for direct NT data without roboRIO proxy)
 # Uncomment one of the following based on your setup:
 # pyntcore>=2025.0.0      # ntcore v4 (preferred)

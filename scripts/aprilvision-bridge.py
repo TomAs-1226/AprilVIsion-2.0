@@ -40,6 +40,22 @@ import subprocess
 import mimetypes
 import urllib.parse
 import threading
+import struct
+import hashlib
+import base64
+
+# Optional: WebSocket client + MessagePack for live PV data
+try:
+    import websocket as _ws_lib
+    _HAS_WEBSOCKET = True
+except ImportError:
+    _HAS_WEBSOCKET = False
+
+try:
+    import msgpack
+    _HAS_MSGPACK = True
+except ImportError:
+    _HAS_MSGPACK = False
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -297,20 +313,329 @@ _latest_targets = {
 _targets_lock = threading.Lock()
 
 
+# WebSocket command queue for sending to PV engine
+_ws_command_queue = []
+_ws_command_lock = threading.Lock()
+_ws_connected = False
+
+
+def _ws_send_command(command_dict):
+    """Queue a MessagePack-encoded command to send to PV via WebSocket."""
+    with _ws_command_lock:
+        _ws_command_queue.append(command_dict)
+
+
 def _start_target_poller():
-    """Start background thread to collect target/pose data."""
+    """Start background thread to collect target/pose data.
+
+    Data source priority:
+    1. PV WebSocket (ws://engine:5800/websocket_data) - live MessagePack data
+    2. ntcore (NetworkTables) - live target data via NT protocol
+    3. HTTP API fallback - static config only (no live targets)
+    """
     t = threading.Thread(target=_target_poll_loop, daemon=True)
     t.start()
 
 
 def _target_poll_loop():
-    """Continuously poll for target data from engine or NT."""
-    # Try ntcore first
+    """Continuously poll for target data from engine, WebSocket, or NT."""
+    global _ws_connected
+
+    # Try WebSocket first (best: gives us live data directly from PV engine)
+    if _HAS_WEBSOCKET and _HAS_MSGPACK:
+        print(f"[targets] Attempting PV WebSocket connection to ws://{ENGINE_HOST}:{ENGINE_PORT}/websocket_data")
+        try:
+            _poll_pv_websocket()
+            # If we get here, WebSocket disconnected - fall through to next method
+        except Exception as e:
+            print(f"[targets] WebSocket failed: {e}")
+        _ws_connected = False
+    else:
+        missing = []
+        if not _HAS_WEBSOCKET:
+            missing.append("websocket-client")
+        if not _HAS_MSGPACK:
+            missing.append("msgpack")
+        print(f"[targets] WebSocket unavailable (install: pip3 install {' '.join(missing)})")
+
+    # Try ntcore second
+    print("[targets] Falling back to NetworkTables...")
     nt_client = _try_ntcore()
     if nt_client:
         _poll_ntcore(nt_client)
     else:
+        # Last resort: static API polling (no live data, just config)
+        print("[targets] Falling back to HTTP API polling (no live target data)")
         _poll_api_targets()
+
+
+def _poll_pv_websocket():
+    """Connect to PV's WebSocket and receive live data via MessagePack.
+
+    PhotonVision's WebSocket at /websocket_data sends MessagePack-encoded
+    maps containing camera configurations, pipeline results, and system state.
+
+    Inbound (from PV): camera data, FPS, latency, settings updates
+    Outbound (to PV): pipeline changes, driver mode, etc.
+    """
+    global _ws_connected
+
+    ws_url = f"ws://{ENGINE_HOST}:{ENGINE_PORT}/websocket_data"
+
+    # Retry loop - PV might not be ready yet at bridge startup
+    while True:
+        try:
+            ws = _ws_lib.create_connection(ws_url, timeout=10)
+            _ws_connected = True
+            with _targets_lock:
+                _latest_targets["source"] = "websocket"
+            print(f"[targets] Connected to PV WebSocket at {ws_url}")
+
+            while True:
+                # Send any queued commands
+                with _ws_command_lock:
+                    while _ws_command_queue:
+                        cmd = _ws_command_queue.pop(0)
+                        try:
+                            packed = msgpack.packb(cmd, use_bin_type=True)
+                            ws.send_binary(packed)
+                        except Exception as e:
+                            print(f"[targets] WS send error: {e}")
+
+                # Receive data
+                try:
+                    ws.settimeout(0.5)
+                    raw = ws.recv()
+                except _ws_lib.WebSocketTimeoutException:
+                    continue
+                except _ws_lib.WebSocketConnectionClosedException:
+                    print("[targets] PV WebSocket closed, reconnecting...")
+                    break
+
+                if raw is None:
+                    continue
+
+                try:
+                    if isinstance(raw, bytes):
+                        data = msgpack.unpackb(raw, raw=False)
+                    else:
+                        # Sometimes PV sends text frames
+                        try:
+                            data = json.loads(raw)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+
+                    _process_pv_ws_data(data)
+                except Exception as e:
+                    # Silently skip malformed frames
+                    pass
+
+        except (ConnectionRefusedError, OSError, _ws_lib.WebSocketException) as e:
+            _ws_connected = False
+            with _targets_lock:
+                _latest_targets["source"] = "websocket (connecting...)"
+            time.sleep(3)  # Wait for PV to start
+        except Exception as e:
+            _ws_connected = False
+            print(f"[targets] WebSocket error: {e}")
+            time.sleep(5)
+
+
+def _process_pv_ws_data(data):
+    """Process a decoded MessagePack frame from PV's WebSocket.
+
+    PV sends Map<String, Object> with various keys depending on the event.
+    Known keys from PV source (DataSocketHandler / UIDataPublisher):
+      - Camera configuration data (cameraSettings, cameras, etc.)
+      - Pipeline results
+      - FPS, latency metrics
+      - General settings
+    """
+    if not isinstance(data, dict):
+        return
+
+    with _targets_lock:
+        _latest_targets["last_update"] = time.time()
+        _latest_targets["nt_connected"] = True  # WS is our "connection"
+
+        # Extract camera/pipeline data from various possible formats
+        # PV sends different shaped data depending on version and event type
+
+        # Camera configurations (full state dump on connect)
+        cam_data = (data.get("cameras") or data.get("cameraSettings")
+                    or data.get("cameraConfigurations") or data.get("configuredCameras"))
+
+        if cam_data:
+            if isinstance(cam_data, dict):
+                # {cameraName: configObject, ...}
+                for cam_name, cam_conf in cam_data.items():
+                    _update_camera_from_ws(cam_name, cam_conf)
+            elif isinstance(cam_data, list):
+                for i, cam_conf in enumerate(cam_data):
+                    cam_name = (cam_conf.get("nickname") or cam_conf.get("uniqueName")
+                                or cam_conf.get("name") or f"Camera_{i}")
+                    _update_camera_from_ws(cam_name, cam_conf)
+
+        # Per-camera result updates (incremental)
+        for key in ("cameraResult", "result", "pipelineResult"):
+            result = data.get(key)
+            if result and isinstance(result, dict):
+                cam_name = (result.get("cameraName") or result.get("nickname")
+                            or result.get("camera") or "Camera_0")
+                _update_result_from_ws(cam_name, result)
+
+        # FPS and latency metrics
+        fps = data.get("fps")
+        latency = data.get("latency") or data.get("latencyMillis")
+        if fps is not None or latency is not None:
+            # Apply to all known cameras or a specific one
+            cam_name = data.get("cameraName") or data.get("camera")
+            if cam_name and cam_name in _latest_targets["cameras"]:
+                if fps is not None:
+                    _latest_targets["cameras"][cam_name]["fps"] = round(float(fps), 1)
+                if latency is not None:
+                    _latest_targets["cameras"][cam_name]["latencyMs"] = round(float(latency), 1)
+            else:
+                # Broadcast to all cameras
+                for cam in _latest_targets["cameras"].values():
+                    if fps is not None:
+                        cam["fps"] = round(float(fps), 1)
+                    if latency is not None:
+                        cam["latencyMs"] = round(float(latency), 1)
+
+        # General settings that may contain useful info
+        general = data.get("generalSettings") or data.get("general")
+        if general and isinstance(general, dict):
+            _latest_targets.setdefault("_pv_settings", {}).update(general)
+
+        # Current camera/pipeline index changes
+        if "currentCamera" in data:
+            _latest_targets["_currentCamera"] = data["currentCamera"]
+        if "currentPipeline" in data:
+            _latest_targets["_currentPipeline"] = data["currentPipeline"]
+
+
+def _update_camera_from_ws(cam_name, cam_conf):
+    """Update camera state from a WS configuration message."""
+    if not isinstance(cam_conf, dict):
+        return
+    existing = _latest_targets["cameras"].get(cam_name, {})
+
+    # Pipeline info
+    pipelines = cam_conf.get("pipelineSettings") or cam_conf.get("pipelines") or []
+    current_idx = cam_conf.get("currentPipelineIndex") or cam_conf.get("pipelineIndex") or 0
+    pipe_name = ""
+    pipe_type = ""
+    if isinstance(pipelines, list) and pipelines:
+        idx = min(current_idx, len(pipelines) - 1)
+        pipe = pipelines[idx] if isinstance(pipelines[idx], dict) else {}
+        pipe_name = pipe.get("pipelineNickname") or pipe.get("name") or f"Pipeline {idx}"
+        pipe_type = pipe.get("pipelineType") or pipe.get("type") or "unknown"
+
+    # Calibration
+    cals = cam_conf.get("calibrations") or cam_conf.get("cameraCalibrations") or []
+    calibrated = bool(cals)
+
+    existing.update({
+        "pipelineName": pipe_name,
+        "pipelineType": pipe_type,
+        "pipelineIndex": current_idx,
+        "pipelineCount": len(pipelines) if isinstance(pipelines, list) else 0,
+        "calibrated": calibrated,
+        "cameraPath": cam_conf.get("path") or cam_conf.get("cameraPath") or "",
+        "driverMode": cam_conf.get("driverMode", False),
+    })
+    # Preserve any existing target data (don't overwrite live results with config)
+    existing.setdefault("hasTarget", False)
+    existing.setdefault("latencyMs", 0)
+    existing.setdefault("fps", 0)
+    existing.setdefault("allTagIds", [])
+    existing.setdefault("tagCount", 0)
+    _latest_targets["cameras"][cam_name] = existing
+
+
+def _update_result_from_ws(cam_name, result):
+    """Update camera with live pipeline result from WS."""
+    existing = _latest_targets["cameras"].get(cam_name, {})
+
+    targets = result.get("targets") or result.get("trackedTargets") or []
+    has_target = len(targets) > 0 if isinstance(targets, list) else bool(result.get("hasTarget"))
+
+    best_target = targets[0] if targets and isinstance(targets, list) else result
+    best_id = int(best_target.get("fiducialId") or best_target.get("fid") or
+                  best_target.get("bestFiducialId") or -1)
+
+    # All detected tag IDs
+    all_ids = []
+    if isinstance(targets, list):
+        for t in targets:
+            fid = t.get("fiducialId") or t.get("fid") or -1
+            if int(fid) >= 0:
+                all_ids.append(int(fid))
+
+    # Best target data
+    yaw = float(best_target.get("yaw") or best_target.get("targetYaw") or 0)
+    pitch = float(best_target.get("pitch") or best_target.get("targetPitch") or 0)
+    area = float(best_target.get("area") or best_target.get("targetArea") or 0)
+    skew = float(best_target.get("skew") or best_target.get("targetSkew") or 0)
+
+    # 3D pose (solvePnP result)
+    pose_data = None
+    best_cam_to_target = best_target.get("bestCameraToTarget") or best_target.get("cameraToTarget")
+    if best_cam_to_target and isinstance(best_cam_to_target, dict):
+        translation = best_cam_to_target.get("translation") or {}
+        rotation = best_cam_to_target.get("rotation") or {}
+        pose_data = {
+            "x": round(float(translation.get("x", 0)), 4),
+            "y": round(float(translation.get("y", 0)), 4),
+            "z": round(float(translation.get("z", 0)), 4),
+            "rx": round(float(rotation.get("x", 0)), 2),
+            "ry": round(float(rotation.get("y", 0)), 2),
+            "rz": round(float(rotation.get("z", 0)), 2),
+        }
+
+    # Multi-tag pose estimate
+    multitag = result.get("multiTagResult") or result.get("multitagResult")
+    multitag_pose = None
+    if multitag and isinstance(multitag, dict):
+        est = multitag.get("estimatedPose") or multitag.get("best") or multitag
+        if isinstance(est, dict):
+            mt_trans = est.get("translation") or {}
+            mt_rot = est.get("rotation") or {}
+            if mt_trans:
+                multitag_pose = {
+                    "x": round(float(mt_trans.get("x", 0)), 4),
+                    "y": round(float(mt_trans.get("y", 0)), 4),
+                    "z": round(float(mt_trans.get("z", 0)), 4),
+                    "rx": round(float(mt_rot.get("x", 0)), 2),
+                    "ry": round(float(mt_rot.get("y", 0)), 2),
+                    "rz": round(float(mt_rot.get("z", 0)), 2),
+                }
+            # Update robot pose from multi-tag
+            if multitag_pose and (multitag_pose["x"] != 0 or multitag_pose["y"] != 0):
+                _latest_targets["robot_pose"] = {
+                    "x": multitag_pose["x"],
+                    "y": multitag_pose["y"],
+                    "z": multitag_pose["z"],
+                    "rotation": multitag_pose["rz"],
+                }
+
+    existing.update({
+        "hasTarget": has_target,
+        "targetYaw": round(yaw, 2),
+        "targetPitch": round(pitch, 2),
+        "targetArea": round(area, 2),
+        "targetSkew": round(skew, 2),
+        "bestFiducialId": best_id,
+        "allTagIds": all_ids if all_ids else ([best_id] if best_id >= 0 else []),
+        "tagCount": len(all_ids) if all_ids else (1 if best_id >= 0 else 0),
+        "pose": pose_data,
+        "multitagPose": multitag_pose,
+        "latencyMs": round(float(result.get("latencyMillis") or result.get("latency") or
+                                  existing.get("latencyMs", 0)), 1),
+        "fps": round(float(result.get("fps") or existing.get("fps", 0)), 1),
+    })
+    _latest_targets["cameras"][cam_name] = existing
 
 
 def _try_ntcore():
@@ -961,12 +1286,16 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 'inputStreamUrl': f'/stream/{i}/input',
                 'outputStreamUrl': f'/stream/{i}/output',
             })
+        with _targets_lock:
+            data_source = _latest_targets["source"]
         self._send_json({
             'version': 'AprilVision 3.2',
             'engine_online': online,
             'engine_error': err,
             'engine_api_path': api_path,
             'proxy_online': True,
+            'ws_connected': _ws_connected,
+            'data_source': data_source,
             'uptime': int(time.time() - START_TIME),
             'cameras': cameras_out,
             'camera_count': len(cameras_out),
@@ -1175,13 +1504,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         })
 
     def _api_targets(self):
-        """Return latest target/pose data from NT or engine API."""
+        """Return latest target/pose data from WebSocket, NT, or engine API."""
         with _targets_lock:
             data = {
                 "cameras": dict(_latest_targets["cameras"]),
                 "robotPose": _latest_targets["robot_pose"],
                 "lastUpdate": _latest_targets["last_update"],
                 "ntConnected": _latest_targets["nt_connected"],
+                "wsConnected": _ws_connected,
                 "dataSource": _latest_targets["source"],
                 "age": round(time.time() - _latest_targets["last_update"], 1)
                        if _latest_targets["last_update"] else None,
@@ -1270,57 +1600,77 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         })
 
     def _api_set_pipeline(self):
-        """Switch the active pipeline for a camera via engine API."""
+        """Switch the active pipeline for a camera.
+
+        Uses PV's WebSocket protocol (preferred) or HTTP fallback.
+        PV WebSocket command: {"currentPipeline": index, "currentCamera": camIndex}
+        """
         try:
             content_length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
             cam_index = body.get("cameraIndex", 0)
             pipe_index = body.get("pipelineIndex", 0)
-            # PV API: POST /api/v1/settings with JSON body
-            payload = json.dumps({
-                "cameraIndex": cam_index,
-                "pipelineIndex": pipe_index,
-            }).encode()
-            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=5)
-            conn.request("POST", "/api/v1/setPipeline",
-                         body=payload,
-                         headers={"Content-Type": "application/json"})
-            resp = conn.getresponse()
-            resp.read()
-            conn.close()
-            if resp.status < 300:
-                self._send_json({"ok": True, "cameraIndex": cam_index, "pipelineIndex": pipe_index})
-            else:
-                # Try alternate API path
-                conn2 = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=5)
-                conn2.request("POST", f"/api/settings/camera/{cam_index}/pipeline/{pipe_index}",
-                              headers={"Content-Type": "application/json"})
-                resp2 = conn2.getresponse()
-                resp2.read()
-                conn2.close()
-                self._send_json({"ok": resp2.status < 300, "cameraIndex": cam_index, "pipelineIndex": pipe_index})
+
+            # Prefer WebSocket command (same protocol PV's own UI uses)
+            if _ws_connected and _HAS_MSGPACK:
+                _ws_send_command({"currentCamera": cam_index})
+                _ws_send_command({"currentPipeline": pipe_index})
+                self._send_json({"ok": True, "cameraIndex": cam_index,
+                                 "pipelineIndex": pipe_index, "method": "websocket"})
+                return
+
+            # HTTP fallback: try the engine's REST API
+            for api_path in ["/api/settings/general", "/api/v1/setPipeline"]:
+                try:
+                    payload = json.dumps({"cameraIndex": cam_index, "pipelineIndex": pipe_index}).encode()
+                    conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=5)
+                    conn.request("POST", api_path, body=payload,
+                                 headers={"Content-Type": "application/json"})
+                    resp = conn.getresponse()
+                    resp.read()
+                    conn.close()
+                    if resp.status < 300:
+                        self._send_json({"ok": True, "cameraIndex": cam_index,
+                                         "pipelineIndex": pipe_index, "method": "http"})
+                        return
+                except Exception:
+                    continue
+            self._send_json({"ok": False, "error": "No API path succeeded"}, 502)
         except Exception as e:
             self._send_json({"ok": False, "error": str(e)}, 500)
 
     def _api_set_driver_mode(self):
-        """Toggle driver mode for a camera (streams only, no processing)."""
+        """Toggle driver mode for a camera (streams only, no processing).
+
+        PV WebSocket command: {"driverMode": true/false}
+        """
         try:
             content_length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
             cam_index = body.get("cameraIndex", 0)
             enabled = body.get("enabled", True)
-            payload = json.dumps({
-                "cameraIndex": cam_index,
-                "driverMode": enabled,
-            }).encode()
-            conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=5)
-            conn.request("POST", "/api/v1/setDriverMode",
-                         body=payload,
-                         headers={"Content-Type": "application/json"})
-            resp = conn.getresponse()
-            resp.read()
-            conn.close()
-            self._send_json({"ok": resp.status < 300, "cameraIndex": cam_index, "driverMode": enabled})
+
+            # Prefer WebSocket command
+            if _ws_connected and _HAS_MSGPACK:
+                _ws_send_command({"currentCamera": cam_index})
+                _ws_send_command({"driverMode": enabled})
+                self._send_json({"ok": True, "cameraIndex": cam_index,
+                                 "driverMode": enabled, "method": "websocket"})
+                return
+
+            # HTTP fallback
+            try:
+                payload = json.dumps({"cameraIndex": cam_index, "driverMode": enabled}).encode()
+                conn = http.client.HTTPConnection(ENGINE_HOST, ENGINE_PORT, timeout=5)
+                conn.request("POST", "/api/settings/general", body=payload,
+                             headers={"Content-Type": "application/json"})
+                resp = conn.getresponse()
+                resp.read()
+                conn.close()
+                self._send_json({"ok": resp.status < 300, "cameraIndex": cam_index,
+                                 "driverMode": enabled, "method": "http"})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, 502)
         except Exception as e:
             self._send_json({"ok": False, "error": str(e)}, 500)
 

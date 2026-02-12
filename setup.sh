@@ -236,10 +236,10 @@ install_dependencies() {
             libglib2.0-0
         log_success "System dependencies installed"
 
-        # Install Python packages (OpenCV, numpy)
-        log_info "Installing Python packages (OpenCV, numpy)..."
-        pip3 install --break-system-packages opencv-contrib-python numpy 2>/dev/null \
-            || pip3 install opencv-contrib-python numpy 2>/dev/null \
+        # Install Python packages (OpenCV, numpy, websocket-client, msgpack)
+        log_info "Installing Python packages..."
+        pip3 install --break-system-packages opencv-contrib-python numpy websocket-client msgpack 2>/dev/null \
+            || pip3 install opencv-contrib-python numpy websocket-client msgpack 2>/dev/null \
             || log_warn "pip install failed - try: pip3 install -r ${SCRIPT_DIR}/requirements.txt"
     else
         log_success "System dependencies already installed"
