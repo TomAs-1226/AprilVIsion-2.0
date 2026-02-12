@@ -1,0 +1,39 @@
+/*
+ * AprilVision 3.2 - FRC Competition Vision System
+ * Shared CSS custom properties (design tokens).
+ *
+ * The main styles are embedded in index.html for the SPA.
+ * This file provides the shared variables for any additional
+ * pages or components that need consistent theming.
+ *
+ * Built by Team 1226
+ */
+
+:root {
+    /* Backgrounds */
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-panel: #1f2937;
+    --bg-header: #1c2333;
+
+    /* Accent colors */
+    --accent-green: #00ff88;
+    --accent-blue: #58a6ff;
+    --accent-red: #f85149;
+    --accent-yellow: #d29922;
+    --accent-purple: #8957e5;
+
+    /* Text */
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+
+    /* Borders */
+    --border-color: #30363d;
+    --border-subtle: #21262d;
+
+    /* Layout */
+    --sidebar-width: 220px;
+    --radius: 10px;
+    --transition: 0.2s ease;
+}

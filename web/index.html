@@ -1,0 +1,3590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AprilVision 3.2 - FRC Vision System</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230d1117'/><text x='50' y='68' font-size='55' text-anchor='middle' fill='%2300ff88' font-family='sans-serif' font-weight='bold'>AV</text></svg>">
+    <style>
+        /* ===== CSS Reset & Variables ===== */
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-panel: #1f2937;
+            --bg-header: #1c2333;
+            --accent-green: #00ff88;
+            --accent-blue: #58a6ff;
+            --accent-red: #f85149;
+            --accent-yellow: #d29922;
+            --accent-purple: #8957e5;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #484f58;
+            --border-color: #30363d;
+            --border-subtle: #21262d;
+            --sidebar-width: 220px;
+            --radius: 10px;
+            --transition: 0.2s ease;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+            overflow-x: hidden;
+        }
+
+        /* ===== Scrollbar ===== */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-primary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--accent-green); }
+
+        /* ===== Layout ===== */
+        .app-layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* ===== Sidebar ===== */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar-header {
+            padding: 20px 16px 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sidebar-logo {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: var(--accent-green);
+            letter-spacing: -0.5px;
+            line-height: 1.2;
+        }
+
+        .sidebar-version {
+            display: inline-block;
+            background: var(--accent-purple);
+            color: #fff;
+            font-size: 0.6rem;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-weight: 700;
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+
+        .sidebar-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.72rem;
+            margin-top: 4px;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 12px 0;
+            overflow-y: auto;
+        }
+
+        .nav-section-label {
+            padding: 8px 16px 4px;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            font-weight: 600;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 16px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all var(--transition);
+            border-left: 3px solid transparent;
+            cursor: pointer;
+        }
+
+        .nav-link:hover {
+            color: var(--text-primary);
+            background: rgba(88, 166, 255, 0.06);
+        }
+
+        .nav-link.active {
+            color: var(--accent-green);
+            background: rgba(0, 255, 136, 0.06);
+            border-left-color: var(--accent-green);
+        }
+
+        .nav-link .nav-icon {
+            width: 18px;
+            text-align: center;
+            font-size: 0.95rem;
+            flex-shrink: 0;
+        }
+
+        .sidebar-footer {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border-color);
+            font-size: 0.68rem;
+            color: var(--text-muted);
+        }
+
+        .sidebar-footer a {
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        .sidebar-footer a:hover { color: var(--text-secondary); }
+
+        /* Mobile hamburger */
+        .mobile-toggle {
+            display: none;
+            position: fixed;
+            top: 12px;
+            left: 12px;
+            z-index: 200;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            padding: 8px 12px;
+            font-size: 1.2rem;
+            cursor: pointer;
+        }
+
+        .mobile-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 90;
+        }
+
+        /* ===== Main Content ===== */
+        .main-content {
+            margin-left: var(--sidebar-width);
+            flex: 1;
+            padding: 28px 32px 40px;
+            min-height: 100vh;
+        }
+
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* ===== Page Header ===== */
+        .page-header {
+            margin-bottom: 24px;
+        }
+
+        .page-header h1 {
+            font-size: 1.65rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.3px;
+        }
+
+        .page-header .page-desc {
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            margin-top: 4px;
+        }
+
+        /* ===== Status Cards Grid ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 16px 18px;
+            transition: border-color var(--transition);
+        }
+
+        .stat-card:hover { border-color: var(--accent-blue); }
+
+        .stat-card .stat-label {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        .stat-card .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .stat-value.green { color: var(--accent-green); }
+        .stat-value.red { color: var(--accent-red); }
+        .stat-value.blue { color: var(--accent-blue); }
+        .stat-value.yellow { color: var(--accent-yellow); }
+        .stat-value.purple { color: var(--accent-purple); }
+
+        /* ===== Section Headers ===== */
+        .section-title {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-title .section-icon { color: var(--accent-blue); }
+
+        /* ===== Cards / Panels ===== */
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .panel-header {
+            padding: 12px 18px;
+            background: var(--bg-header);
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .panel-body { padding: 16px 18px; }
+
+        /* ===== Status Table Rows ===== */
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 18px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .status-row:last-child { border-bottom: none; }
+
+        .status-label { color: var(--text-secondary); font-size: 0.88rem; }
+
+        .status-value {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 0.88rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        .dot.green { background: var(--accent-green); box-shadow: 0 0 6px rgba(0,255,136,0.35); }
+        .dot.red { background: var(--accent-red); box-shadow: 0 0 6px rgba(248,81,73,0.35); }
+        .dot.yellow { background: var(--accent-yellow); box-shadow: 0 0 6px rgba(210,153,34,0.35); }
+        .dot.blue { background: var(--accent-blue); box-shadow: 0 0 6px rgba(88,166,255,0.35); }
+        .dot.pulse { animation: pulse 2s infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* ===== Camera Previews (Dashboard) ===== */
+        .camera-previews {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .camera-preview-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .camera-preview-card .cam-thumb {
+            width: 100%;
+            height: 200px;
+            object-fit: contain;
+            background: #000;
+            display: block;
+        }
+
+        .camera-preview-card .cam-info {
+            padding: 10px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .camera-preview-card .cam-name {
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .camera-preview-card .cam-index {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+
+        /* ===== Buttons ===== */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition);
+            text-decoration: none;
+            font-family: inherit;
+        }
+
+        .btn:hover {
+            background: var(--bg-panel);
+            border-color: var(--accent-blue);
+        }
+
+        .btn-green { border-color: var(--accent-green); color: var(--accent-green); }
+        .btn-green:hover { background: rgba(0,255,136,0.1); }
+
+        .btn-blue { border-color: var(--accent-blue); color: var(--accent-blue); }
+        .btn-blue:hover { background: rgba(88,166,255,0.1); }
+
+        .btn-red { border-color: var(--accent-red); color: var(--accent-red); }
+        .btn-red:hover { background: rgba(248,81,73,0.1); }
+
+        .btn-purple { border-color: var(--accent-purple); color: var(--accent-purple); }
+        .btn-purple:hover { background: rgba(137,87,229,0.1); }
+
+        .btn-group { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+
+        /* ===== Quick Actions ===== */
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .action-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 16px;
+            cursor: pointer;
+            transition: all var(--transition);
+            text-align: center;
+        }
+
+        .action-card:hover {
+            border-color: var(--accent-blue);
+            background: var(--bg-panel);
+            transform: translateY(-2px);
+        }
+
+        .action-card .action-icon {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+        }
+
+        .action-card .action-title {
+            font-weight: 600;
+            font-size: 0.85rem;
+            margin-bottom: 4px;
+        }
+
+        .action-card .action-desc {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+        }
+
+        /* ===== Camera List Items ===== */
+        .camera-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 18px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .camera-item:last-child { border-bottom: none; }
+
+        .camera-item .cam-name { font-weight: 600; font-size: 0.88rem; }
+        .camera-item .cam-device { color: var(--text-secondary); font-size: 0.78rem; }
+        .camera-item .cam-source {
+            color: var(--accent-green);
+            font-size: 0.7rem;
+            margin-left: 6px;
+        }
+
+        /* ===== Camera Feeds (Cameras Tab) ===== */
+        .camera-feeds {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .camera-feed-block {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .camera-feed-header {
+            padding: 12px 18px;
+            background: var(--bg-header);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .camera-feed-header .feed-title {
+            font-weight: 700;
+            font-size: 0.95rem;
+        }
+
+        .camera-feed-header .feed-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .feed-pair {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+        }
+
+        .feed-panel {
+            position: relative;
+        }
+
+        .feed-panel .feed-label {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: rgba(0,0,0,0.7);
+            color: var(--text-primary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            z-index: 2;
+        }
+
+        .feed-panel .feed-status {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.7);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .feed-panel .feed-status.live { color: var(--accent-green); }
+        .feed-panel .feed-status.connecting { color: var(--accent-yellow); }
+        .feed-panel .feed-status.error { color: var(--accent-red); }
+
+        .feed-panel img {
+            width: 100%;
+            height: 340px;
+            object-fit: contain;
+            background: #000;
+            display: block;
+        }
+
+        .feed-panel + .feed-panel {
+            border-left: 1px solid var(--border-color);
+        }
+
+        /* Camera info bar beneath feeds */
+        .camera-info-bar {
+            padding: 10px 18px;
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .camera-info-bar .info-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .camera-info-bar .info-label {
+            color: var(--text-muted);
+        }
+
+        .camera-info-bar .info-value {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-family: 'SFMono-Regular', Consolas, monospace;
+        }
+
+        /* ===== Calibration ===== */
+        .calib-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .calib-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 18px;
+        }
+
+        .calib-card .calib-cam-name {
+            font-weight: 700;
+            font-size: 0.95rem;
+            margin-bottom: 8px;
+        }
+
+        .calib-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .calib-status-badge.calibrated {
+            background: rgba(0,255,136,0.1);
+            color: var(--accent-green);
+            border: 1px solid rgba(0,255,136,0.3);
+        }
+
+        .calib-status-badge.not-calibrated {
+            background: rgba(210,153,34,0.1);
+            color: var(--accent-yellow);
+            border: 1px solid rgba(210,153,34,0.3);
+        }
+
+        /* ===== Info Box ===== */
+        .info-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .info-box h3 {
+            color: var(--accent-blue);
+            font-size: 0.95rem;
+            margin-bottom: 12px;
+        }
+
+        .info-box p, .info-box li {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            line-height: 1.7;
+        }
+
+        .info-box ol, .info-box ul { padding-left: 22px; }
+        .info-box li { margin-bottom: 4px; }
+
+        .info-box code {
+            background: var(--bg-primary);
+            padding: 2px 7px;
+            border-radius: 4px;
+            color: var(--accent-green);
+            font-size: 0.8rem;
+        }
+
+        .info-box strong { color: var(--text-primary); }
+
+        .info-box .warning-text {
+            color: var(--accent-yellow);
+            margin-top: 10px;
+            font-weight: 600;
+        }
+
+        /* ===== Pipeline Iframe ===== */
+        .pipeline-iframe-wrap {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .pipeline-iframe-wrap iframe {
+            width: 100%;
+            height: calc(100vh - 200px);
+            border: none;
+            display: block;
+        }
+
+        /* ===== Settings Grid ===== */
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 16px;
+        }
+
+        .settings-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 20px;
+        }
+
+        .settings-card h3 {
+            font-size: 0.9rem;
+            color: var(--accent-blue);
+            margin-bottom: 12px;
+        }
+
+        .settings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            font-size: 0.84rem;
+        }
+
+        .settings-row .label { color: var(--text-secondary); }
+        .settings-row .value { color: var(--text-primary); font-weight: 600; }
+
+        /* ===== Tools Grid ===== */
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 16px;
+        }
+
+        .tool-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 20px;
+        }
+
+        .tool-card h3 {
+            font-size: 0.92rem;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .tool-card .tool-desc {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+            line-height: 1.5;
+        }
+
+        .tool-card .tool-output {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            margin-top: 10px;
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+            min-height: 36px;
+        }
+
+        .tool-card .tool-output.success { color: var(--accent-green); }
+        .tool-card .tool-output.error { color: var(--accent-red); }
+        .tool-card .tool-output.warn { color: var(--accent-yellow); }
+
+        /* ===== Alert Banners ===== */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .alert-info {
+            background: rgba(88,166,255,0.08);
+            border: 1px solid rgba(88,166,255,0.25);
+            color: var(--accent-blue);
+        }
+
+        .alert-warn {
+            background: rgba(210,153,34,0.08);
+            border: 1px solid rgba(210,153,34,0.25);
+            color: var(--accent-yellow);
+        }
+
+        .alert-success {
+            background: rgba(0,255,136,0.08);
+            border: 1px solid rgba(0,255,136,0.25);
+            color: var(--accent-green);
+        }
+
+        .alert-success {
+            background: rgba(0,255,136,0.08);
+            border: 1px solid rgba(0,255,136,0.25);
+            color: var(--accent-green);
+        }
+
+        /* ===== Empty State ===== */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state .empty-icon { font-size: 2.5rem; margin-bottom: 12px; opacity: 0.5; }
+        .empty-state p { font-size: 0.88rem; }
+
+        /* ===== Latency Indicator ===== */
+        .latency-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 900px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .feed-pair { grid-template-columns: 1fr; }
+            .feed-panel + .feed-panel { border-left: none; border-top: 1px solid var(--border-color); }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .mobile-toggle { display: block; }
+            .mobile-overlay.visible { display: block; }
+            .main-content { margin-left: 0; padding: 60px 16px 32px; }
+        }
+
+        @media (max-width: 520px) {
+            .stats-grid { grid-template-columns: 1fr; }
+            .quick-actions { grid-template-columns: 1fr; }
+            .camera-previews { grid-template-columns: 1fr; }
+            .settings-grid { grid-template-columns: 1fr; }
+            .tools-grid { grid-template-columns: 1fr; }
+            .calib-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Mobile Toggle -->
+    <button class="mobile-toggle" id="mobileToggle" onclick="AVApp.toggleSidebar()">&#9776;</button>
+    <div class="mobile-overlay" id="mobileOverlay" onclick="AVApp.toggleSidebar()"></div>
+
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    AprilVision <span class="sidebar-version">v3.2</span>
+                </div>
+                <div class="sidebar-subtitle">FRC Competition Vision System</div>
+            </div>
+
+            <div class="sidebar-nav">
+                <div class="nav-section-label">Main</div>
+                <a class="nav-link active" href="#/dashboard" data-page="dashboard">
+                    <span class="nav-icon">&#9673;</span> Dashboard
+                </a>
+                <a class="nav-link" href="#/cameras" data-page="cameras">
+                    <span class="nav-icon">&#9724;</span> Cameras
+                </a>
+
+                <div class="nav-section-label">Configuration</div>
+                <a class="nav-link" href="#/calibration" data-page="calibration">
+                    <span class="nav-icon">&#9678;</span> Calibration
+                </a>
+                <a class="nav-link" href="#/pipelines" data-page="pipelines">
+                    <span class="nav-icon">&#9881;</span> Pipeline Config
+                </a>
+                <a class="nav-link" href="#/settings" data-page="settings">
+                    <span class="nav-icon">&#9881;</span> Settings
+                </a>
+
+                <div class="nav-section-label">Competition</div>
+                <a class="nav-link" href="#/driver" data-page="driver">
+                    <span class="nav-icon">&#127919;</span> Driver View
+                </a>
+
+                <div class="nav-section-label">Utilities</div>
+                <a class="nav-link" href="#/tools" data-page="tools">
+                    <span class="nav-icon">&#9874;</span> Tools
+                </a>
+            </div>
+
+            <div class="sidebar-footer">
+                <div>AprilVision 3.2 &mdash; FRC 2026</div>
+                <div style="margin-top: 2px;">Built by <a href="https://github.com/TomAs-1226" target="_blank">Team 1226</a></div>
+                <div class="latency-badge" style="margin-top: 6px;">
+                    <span class="dot green" id="sidebarDot" style="width:6px;height:6px;"></span>
+                    <span id="sidebarLatency">--ms</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+
+            <!-- ==================== DASHBOARD PAGE ==================== -->
+            <div class="page active" id="page-dashboard">
+                <div class="page-header">
+                    <h1>AprilVision 3.2 <span class="sidebar-version" id="headerVersionBadge">v3.2.0</span></h1>
+                    <div class="page-desc">FRC competition vision system overview and status monitor</div>
+                </div>
+
+                <!-- Status Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Engine Status</div>
+                        <div class="stat-value" id="statEngine">...</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Uptime</div>
+                        <div class="stat-value blue" id="statUptime">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Cameras Connected</div>
+                        <div class="stat-value" id="statCameras">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Tags Detected</div>
+                        <div class="stat-value" id="statTags">--</div>
+                    </div>
+                </div>
+
+                <!-- Camera Previews -->
+                <div class="section-title"><span class="section-icon">&#9724;</span> Camera Previews</div>
+                <div class="camera-previews" id="dashCameraPreviews">
+                    <div class="empty-state">
+                        <div class="empty-icon">&#128247;</div>
+                        <p>Waiting for camera data...</p>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div class="section-title"><span class="section-icon">&#9673;</span> System Status</div>
+                <div class="panel" style="margin-bottom: 20px;">
+                    <div class="status-row">
+                        <span class="status-label">Detection Engine</span>
+                        <span class="status-value"><span class="dot pulse" id="dotEngine"></span><span id="txtEngine">Checking...</span></span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Dashboard Proxy</span>
+                        <span class="status-value"><span class="dot" id="dotProxy"></span><span id="txtProxy">Checking...</span></span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">PV Data Link</span>
+                        <span class="status-value"><span class="dot" id="dotWebsocket"></span><span id="txtWebsocket">Checking...</span></span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Data Source</span>
+                        <span class="status-value"><span class="dot" id="dotDataSource"></span><span id="txtDataSource">--</span></span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">3D Pose Estimation</span>
+                        <span class="status-value"><span class="dot" id="dotPose3d"></span><span id="txtPose3d">Checking...</span></span>
+                    </div>
+                </div>
+
+                <!-- Engine Connection Debug (shown when engine has issues) -->
+                <div id="engineDebugPanel" style="display:none; margin-bottom: 20px;">
+                    <div class="alert alert-warn" id="engineDebugAlert">
+                        Engine connection issue detected. Click "Debug Engine Connection" below to see exactly what the engine is returning.
+                    </div>
+                    <div class="panel">
+                        <div class="panel-header">Engine Connection Debug</div>
+                        <div class="panel-body">
+                            <button class="btn btn-blue" onclick="AVApp.runEngineDebug()">Debug Engine Connection</button>
+                            <div class="tool-output" id="engineDebugOutput" style="margin-top: 10px; display: none; max-height: 400px; overflow-y: auto; font-size: 0.75rem;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="section-title"><span class="section-icon">&#9889;</span> Quick Actions</div>
+                <div class="quick-actions">
+                    <div class="action-card" onclick="AVApp.takeSnapshot()">
+                        <div class="action-icon">&#128247;</div>
+                        <div class="action-title">Snapshot</div>
+                        <div class="action-desc">Save camera frames for analysis</div>
+                    </div>
+                    <div class="action-card" onclick="AVApp.runHealthCheck()">
+                        <div class="action-icon">&#9825;</div>
+                        <div class="action-title">Health Check</div>
+                        <div class="action-desc">Run pre-match system diagnostics</div>
+                    </div>
+                    <div class="action-card" onclick="location.hash='#/pipelines'">
+                        <div class="action-icon">&#9881;</div>
+                        <div class="action-title">Match Mode</div>
+                        <div class="action-desc">Configure pipeline for competition</div>
+                    </div>
+                    <div class="action-card" onclick="location.hash='#/calibration'">
+                        <div class="action-icon">&#9678;</div>
+                        <div class="action-title">Calibrate</div>
+                        <div class="action-desc">Camera calibration for 3D pose</div>
+                    </div>
+                </div>
+
+                <!-- Quick Action Output -->
+                <div id="dashActionOutput" style="display:none;" class="panel">
+                    <div class="panel-body" id="dashActionOutputBody"></div>
+                </div>
+
+                <!-- AprilTag Detection Summary Banner -->
+                <div id="tagDetectionBanner" style="
+                    background: linear-gradient(135deg, rgba(30,30,50,0.95), rgba(20,20,40,0.95));
+                    border: 1px solid var(--border-subtle);
+                    border-radius: 10px;
+                    padding: 16px 20px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    align-items: center;
+                    gap: 16px;
+                ">
+                    <div id="tagBannerIcon" style="
+                        width: 56px; height: 56px;
+                        border-radius: 50%;
+                        background: rgba(255,59,48,0.15);
+                        border: 2px solid var(--accent-red);
+                        display: flex; align-items: center; justify-content: center;
+                        font-size: 1.4rem;
+                        flex-shrink: 0;
+                        transition: all 0.3s ease;
+                    ">&#128204;</div>
+                    <div style="flex:1;min-width:0;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                            <span style="font-weight:800;font-size:1.1rem;" id="tagBannerTitle">No Tags Detected</span>
+                            <span id="tagBannerBadge" style="
+                                display:none;
+                                background:var(--accent-green);
+                                color:#000;
+                                font-size:0.65rem;
+                                font-weight:800;
+                                padding:2px 8px;
+                                border-radius:10px;
+                                text-transform:uppercase;
+                            ">LOCKED</span>
+                        </div>
+                        <div style="font-size:0.78rem;color:var(--text-muted);" id="tagBannerDetail">Waiting for detection engine data...</div>
+                        <div id="tagBannerTags" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"></div>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0;">
+                        <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Distance</div>
+                        <div id="tagBannerDistance" style="font-size:1.3rem;font-weight:800;font-family:monospace;color:var(--text-muted);">--</div>
+                    </div>
+                </div>
+
+                <!-- Pose & Target Data (real-time) -->
+                <div class="section-title"><span class="section-icon">&#127919;</span> Live Target Data</div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                    <!-- Robot Pose -->
+                    <div class="panel">
+                        <div class="panel-header">Robot Pose (Field-Space)</div>
+                        <div class="panel-body" id="poseDataPanel">
+                            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; text-align:center;">
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">X (m)</div>
+                                    <div style="font-size:1.6rem;font-weight:800;font-family:monospace;color:var(--accent-green);" id="poseX">--</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Y (m)</div>
+                                    <div style="font-size:1.6rem;font-weight:800;font-family:monospace;color:var(--accent-blue);" id="poseY">--</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Z (m)</div>
+                                    <div style="font-size:1.6rem;font-weight:800;font-family:monospace;color:var(--accent-purple);" id="poseZ">--</div>
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; text-align:center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Roll</div>
+                                    <div style="font-size:1.1rem;font-weight:700;font-family:monospace;" id="poseRoll">--</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Pitch</div>
+                                    <div style="font-size:1.1rem;font-weight:700;font-family:monospace;" id="posePitch">--</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Yaw (Theta)</div>
+                                    <div style="font-size:1.1rem;font-weight:700;font-family:monospace;color:var(--accent-yellow);" id="poseYaw">--</div>
+                                </div>
+                            </div>
+                            <div style="margin-top:8px;font-size:0.68rem;color:var(--text-muted);text-align:center;" id="poseSource">Waiting for data...</div>
+                        </div>
+                    </div>
+
+                    <!-- Per-Camera Target Info -->
+                    <div class="panel">
+                        <div class="panel-header">Target Detection</div>
+                        <div class="panel-body" id="targetInfoPanel">
+                            <div style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:20px 0;">
+                                Waiting for target data...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alliance + Controls Bar -->
+                <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+                    <!-- Alliance Color Selector -->
+                    <div class="panel" style="flex:0 0 auto;margin:0;">
+                        <div class="panel-body" style="padding:8px 12px;display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Alliance:</span>
+                            <button id="allianceBlueBtn" onclick="AVApp.setAlliance('blue')" style="
+                                padding:4px 14px;border-radius:6px;font-size:0.75rem;font-weight:700;cursor:pointer;border:2px solid #3b82f6;
+                                background:rgba(59,130,246,0.2);color:#3b82f6;transition:all 0.2s;
+                            ">BLUE</button>
+                            <button id="allianceRedBtn" onclick="AVApp.setAlliance('red')" style="
+                                padding:4px 14px;border-radius:6px;font-size:0.75rem;font-weight:700;cursor:pointer;border:2px solid #ef4444;
+                                background:transparent;color:#ef4444;transition:all 0.2s;
+                            ">RED</button>
+                        </div>
+                    </div>
+
+                    <!-- Quick Pipeline Switcher -->
+                    <div class="panel" style="flex:1;min-width:200px;margin:0;">
+                        <div class="panel-body" style="padding:8px 12px;display:flex;align-items:center;gap:8px;" id="quickPipelineSwitcher">
+                            <span style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Pipeline:</span>
+                            <span style="font-size:0.78rem;color:var(--text-secondary);">Loading cameras...</span>
+                        </div>
+                    </div>
+
+                    <!-- Driver Mode Toggle -->
+                    <div class="panel" style="flex:0 0 auto;margin:0;">
+                        <div class="panel-body" style="padding:8px 12px;display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Driver Mode:</span>
+                            <button id="driverModeToggle" onclick="AVApp.toggleDriverMode()" style="
+                                padding:4px 14px;border-radius:6px;font-size:0.75rem;font-weight:700;cursor:pointer;
+                                border:2px solid var(--border-subtle);background:transparent;color:var(--text-secondary);transition:all 0.2s;
+                            ">OFF</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Field Mini-Map -->
+                <div class="section-title"><span class="section-icon">&#127759;</span> Field Position</div>
+                <div class="panel" style="margin-bottom: 20px;">
+                    <div class="panel-body" style="padding:12px;">
+                        <canvas id="fieldCanvas" width="640" height="320" style="width:100%;height:auto;background:#1a1a2e;border-radius:6px;border:1px solid var(--border-subtle);"></canvas>
+                        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:0.68rem;color:var(--text-muted);">
+                            <span>FRC 2026 Field (16.54m x 8.21m)</span>
+                            <span id="fieldPoseLabel">No pose data</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance & Distance -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+                    <!-- Performance Monitor -->
+                    <div class="panel">
+                        <div class="panel-header">Performance Monitor</div>
+                        <div class="panel-body" id="perfMonitorPanel">
+                            <div style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:12px 0;">
+                                Waiting for performance data...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Distance Chart -->
+                    <div class="panel">
+                        <div class="panel-header">Tag Distance (Last 30s)</div>
+                        <div class="panel-body" style="padding:8px;">
+                            <canvas id="distanceChart" width="400" height="150" style="width:100%;height:auto;background:#0d1117;border-radius:4px;"></canvas>
+                            <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:0.65rem;color:var(--text-muted);">
+                                <span>-30s</span>
+                                <span id="distChartLabel">No data</span>
+                                <span>now</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Match Readiness -->
+                <div class="section-title"><span class="section-icon">&#9989;</span> Match Readiness</div>
+                <div class="panel" style="margin-bottom: 20px;">
+                    <div class="panel-body" id="matchReadinessPanel">
+                        <div style="text-align:center;padding:12px;">
+                            <button class="btn btn-green" onclick="AVApp.fetchMatchReadiness()">Run Match Readiness Check</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detected Cameras -->
+                <div class="section-title"><span class="section-icon">&#128249;</span> Detected Cameras</div>
+                <div class="panel">
+                    <div id="dashCameraList">
+                        <div class="camera-item">
+                            <span class="cam-name">Scanning...</span>
+                            <span class="cam-device">Detecting cameras</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== CAMERAS PAGE ==================== -->
+            <div class="page" id="page-cameras">
+                <div class="page-header">
+                    <h1>Camera Feeds</h1>
+                    <div class="page-desc">Live input (raw) and output (detection overlay) MJPEG streams from the detection engine</div>
+                </div>
+
+                <!-- Stream source explanation -->
+                <div class="alert alert-info" id="cameraSourceBanner">
+                    Streams are sourced from the PhotonVision engine backend. The engine owns the camera devices and serves MJPEG streams which this dashboard proxies.
+                </div>
+
+                <!-- Stream health status -->
+                <div id="streamHealthBar" style="display:none;" class="alert alert-warn"></div>
+
+                <div class="camera-feeds" id="cameraFeedsContainer">
+                    <div class="empty-state">
+                        <div class="empty-icon">&#128247;</div>
+                        <p>Loading camera feeds...</p>
+                    </div>
+                </div>
+
+                <!-- Stream Debug Info (collapsible) -->
+                <div class="panel" style="margin-top: 20px;">
+                    <div class="panel-header" style="cursor:pointer;" onclick="document.getElementById('streamDebugBody').style.display = document.getElementById('streamDebugBody').style.display === 'none' ? 'block' : 'none';">
+                        Stream Debug Info (click to toggle)
+                    </div>
+                    <div class="panel-body" id="streamDebugBody" style="display:none;">
+                        <div class="tool-output" id="streamDebugOutput" style="font-size: 0.75rem; min-height: 60px;">
+                            Click "Check Streams" to probe stream ports.
+                        </div>
+                        <div class="btn-group" style="margin-top: 10px;">
+                            <button class="btn btn-blue" onclick="AVApp.checkStreamHealth()">Check Streams</button>
+                            <button class="btn btn-green" onclick="AVApp.fetchCameraInfo()">Refresh Camera Info</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== CALIBRATION PAGE ==================== -->
+            <div class="page" id="page-calibration">
+                <div class="page-header">
+                    <h1>Camera Calibration</h1>
+                    <div class="page-desc">Calibrate cameras for accurate 3D AprilTag pose estimation</div>
+                </div>
+
+                <!-- Calibration Status Per Camera -->
+                <div class="section-title"><span class="section-icon">&#9724;</span> Calibration Status</div>
+                <div class="calib-grid" id="calibStatusGrid">
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <div class="empty-icon">&#128247;</div>
+                        <p>Loading camera calibration data...</p>
+                    </div>
+                </div>
+
+                <!-- Why Calibration -->
+                <div class="info-box">
+                    <h3>Why Is Calibration Needed?</h3>
+                    <p>
+                        3D pose estimation requires knowing the camera's <strong>intrinsic parameters</strong> &mdash;
+                        the focal length, optical center, and lens distortion coefficients. Without these, the system
+                        cannot accurately compute the position and orientation of AprilTags in 3D space. Calibration
+                        solves for these parameters by analyzing images of a known pattern (ChArUco board) from
+                        multiple angles. Once calibrated, the "3D" toggle becomes available in the pipeline settings,
+                        enabling accurate field-relative pose estimation critical for FRC autonomous routines.
+                    </p>
+                </div>
+
+                <!-- Step-by-Step -->
+                <div class="info-box">
+                    <h3>Step-by-Step Calibration Guide</h3>
+                    <ol>
+                        <li><strong>Print a ChArUco board.</strong> Run: <code>./scripts/aruco_calibration.py --generate</code> to create a printable PDF. Tape it flat to a rigid surface.</li>
+                        <li><strong>Open the engine pipeline config.</strong> Click the button below or go to <code>/pv/</code> in your browser.</li>
+                        <li><strong>Select your camera</strong> from the camera dropdown in the sidebar.</li>
+                        <li><strong>Go to the Calibration tab</strong> in the pipeline settings.</li>
+                        <li><strong>Set the resolution</strong> to <strong>640x480</strong> (recommended for consistent calibration).</li>
+                        <li><strong>Take 15&ndash;25 snapshots</strong> of the ChArUco board from different angles, distances, and positions. Cover the full frame, tilt the board in various orientations.</li>
+                        <li><strong>Run calibration.</strong> Click "Calibrate" and wait for it to complete. The reprojection error should be below 1.0px for good results.</li>
+                        <li><strong>Enable 3D.</strong> Once complete, go to the AprilTag pipeline and toggle <strong>3D</strong> on. Your camera now reports accurate pose data.</li>
+                    </ol>
+                    <p class="warning-text">Repeat calibration for each camera. Accurate calibration is critical for pose accuracy in autonomous.</p>
+                </div>
+
+                <!-- Open Engine Config Button -->
+                <div class="btn-group">
+                    <a class="btn btn-green" href="/pv/" target="_blank">Open Engine Pipeline Config (New Tab)</a>
+                    <a class="btn btn-blue" href="#/pipelines">Open Pipeline Config (Embedded)</a>
+                </div>
+            </div>
+
+            <!-- ==================== PIPELINES PAGE ==================== -->
+            <div class="page" id="page-pipelines">
+                <div class="page-header">
+                    <h1>Pipeline Configuration</h1>
+                    <div class="page-desc">Advanced pipeline configuration. Adjust detection parameters, exposure, and tag family.</div>
+                </div>
+
+                <div class="alert alert-info">
+                    This embeds the AprilVision engine's built-in configuration interface. Use it to manage pipelines, adjust thresholds, change camera exposure, select tag families, and enable 3D mode.
+                </div>
+
+                <div class="pipeline-iframe-wrap">
+                    <iframe id="pipelineIframe" src="about:blank" title="AprilVision Engine Pipeline Config"></iframe>
+                </div>
+            </div>
+
+            <!-- ==================== SETTINGS PAGE ==================== -->
+            <div class="page" id="page-settings">
+                <div class="page-header">
+                    <h1>Settings</h1>
+                    <div class="page-desc">System configuration, team settings, and network info</div>
+                </div>
+
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3>Team Configuration</h3>
+                        <div class="settings-row">
+                            <span class="label">Team Number</span>
+                            <span class="value" id="settingsTeamNum">--</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="label">Dashboard Version</span>
+                            <span class="value">3.2.0</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="label">Engine Version</span>
+                            <span class="value" id="settingsEngineVer">--</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Network Configuration</h3>
+                        <div class="settings-row">
+                            <span class="label">Dashboard Port</span>
+                            <span class="value">5801</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="label">Engine Port</span>
+                            <span class="value">5800</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="label">NetworkTables</span>
+                            <span class="value" id="settingsNT">--</span>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Camera Name Reference</h3>
+                        <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.7;">
+                            <p>Camera naming in AprilVision follows the engine's convention. Names are assigned based on device path and can be configured in the engine UI.</p>
+                            <p style="margin-top: 6px;">Common names: <strong>Front Camera</strong>, <strong>Back Camera</strong>, <strong>Left Camera</strong>, <strong>Right Camera</strong></p>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Config Files</h3>
+                        <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.8;">
+                            <div><code>/opt/aprilvision/config/hardwareConfig.json</code></div>
+                            <div><code>/opt/aprilvision/config/networkConfig.json</code></div>
+                            <div><code>/opt/aprilvision/config/cameras/</code></div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>System Actions</h3>
+                        <div class="btn-group" style="margin-top: 8px;">
+                            <button class="btn btn-red" onclick="AVApp.confirmRestart('engine')">Restart Engine</button>
+                            <button class="btn btn-red" onclick="AVApp.confirmRestart('system')">Restart System</button>
+                        </div>
+                        <p style="font-size: 0.72rem; color: var(--text-muted); margin-top: 8px;">Restart actions require confirmation. System restart will reboot the coprocessor.</p>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Engine Settings (Raw)</h3>
+                        <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 10px;">Fetch the full engine settings JSON for debugging.</p>
+                        <button class="btn btn-blue" onclick="AVApp.fetchEngineSettings()">Fetch Engine Settings</button>
+                        <div class="tool-output" id="engineSettingsOutput" style="display:none; margin-top: 10px; max-height: 250px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== TOOLS PAGE ==================== -->
+            <div class="page" id="page-tools">
+                <div class="page-header">
+                    <h1>Tools</h1>
+                    <div class="page-desc">Diagnostic tools, snapshots, and system utilities</div>
+                </div>
+
+                <div class="tools-grid">
+                    <!-- Camera Snapshot -->
+                    <div class="tool-card">
+                        <h3>&#128247; Camera Snapshot</h3>
+                        <div class="tool-desc">Save a timestamped snapshot from all connected cameras for post-match analysis and debugging.</div>
+                        <button class="btn btn-green" onclick="AVApp.toolSnapshot()">Take Snapshot</button>
+                        <div class="tool-output" id="toolSnapshotOutput">Waiting...</div>
+                    </div>
+
+                    <!-- Network Diagnostics -->
+                    <div class="tool-card">
+                        <h3>&#127760; Network Diagnostics</h3>
+                        <div class="tool-desc">Check network connectivity, DNS resolution, and NetworkTables communication with the roboRIO.</div>
+                        <p style="font-size: 0.78rem; color: var(--text-secondary);">Run on the coprocessor:</p>
+                        <code style="display:block;background:var(--bg-primary);padding:8px 12px;border-radius:6px;color:var(--accent-green);font-size:0.78rem;margin-top:6px;">./scripts/network_diagnostics.sh</code>
+                    </div>
+
+                    <!-- Match Mode -->
+                    <div class="tool-card">
+                        <h3>&#127942; Match Mode</h3>
+                        <div class="tool-desc">Match mode optimizes detection latency. Configure pipeline settings for competition.</div>
+                        <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6;">
+                            <strong>To enable:</strong> Open Pipeline Config, select your pipeline, lower the resolution to 640x480, reduce exposure, and disable any unnecessary processing.<br>
+                            <strong>To disable:</strong> Revert to higher resolution settings for calibration or testing.
+                        </p>
+                        <button class="btn btn-blue" onclick="location.hash='#/pipelines'" style="margin-top: 10px;">Open Pipeline Config</button>
+                    </div>
+
+                    <!-- ArUco Calibration -->
+                    <div class="tool-card">
+                        <h3>&#9678; ArUco Calibration</h3>
+                        <div class="tool-desc">Generate a ChArUco calibration board and run the calibration script.</div>
+                        <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6;">
+                            <strong>Generate board:</strong>
+                        </p>
+                        <code style="display:block;background:var(--bg-primary);padding:8px 12px;border-radius:6px;color:var(--accent-green);font-size:0.78rem;margin:6px 0;">./scripts/aruco_calibration.py --generate</code>
+                        <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6;">
+                            <strong>Run calibration:</strong>
+                        </p>
+                        <code style="display:block;background:var(--bg-primary);padding:8px 12px;border-radius:6px;color:var(--accent-green);font-size:0.78rem;margin:6px 0;">./scripts/aruco_calibration.py --calibrate --camera 0</code>
+                        <button class="btn btn-purple" onclick="location.hash='#/calibration'" style="margin-top: 10px;">Go to Calibration Guide</button>
+                    </div>
+
+                    <!-- System Health Check -->
+                    <div class="tool-card">
+                        <h3>&#9825; System Health Check</h3>
+                        <div class="tool-desc">Verify all AprilVision components are running and communicating correctly.</div>
+                        <button class="btn btn-green" onclick="AVApp.toolHealthCheck()">Run Health Check</button>
+                        <div class="tool-output" id="toolHealthOutput">Waiting...</div>
+                    </div>
+
+                    <!-- Stream Port Checker -->
+                    <div class="tool-card">
+                        <h3>&#127909; Stream Health Checker</h3>
+                        <div class="tool-desc">Probe each camera's MJPEG stream ports to verify the engine is serving frames. Shows port status and stream URLs.</div>
+                        <button class="btn btn-blue" onclick="AVApp.toolStreamHealth()">Check Stream Ports</button>
+                        <div class="tool-output" id="toolStreamHealthOutput">Waiting...</div>
+                    </div>
+
+                    <!-- Latency Monitor -->
+                    <div class="tool-card">
+                        <h3>&#9201; Latency Monitor</h3>
+                        <div class="tool-desc">Displays the round-trip time to the AprilVision engine API.</div>
+                        <div style="margin-top: 10px;">
+                            <div class="settings-row">
+                                <span class="label">Last Response Time</span>
+                                <span class="value" id="toolLatencyValue">--</span>
+                            </div>
+                            <div class="settings-row">
+                                <span class="label">Average (last 10)</span>
+                                <span class="value" id="toolLatencyAvg">--</span>
+                            </div>
+                            <div class="settings-row">
+                                <span class="label">Status</span>
+                                <span class="value"><span class="dot" id="toolLatencyDot"></span> <span id="toolLatencyStatus">--</span></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== DRIVER VIEW PAGE ==================== -->
+            <div class="page" id="page-driver">
+                <div id="driverViewContainer" style="
+                    position:relative;
+                    background:#000;
+                    border-radius:12px;
+                    overflow:hidden;
+                    min-height:calc(100vh - 40px);
+                ">
+                    <!-- Main stream (full width) -->
+                    <div id="driverStreamBox" style="width:100%;background:#000;position:relative;">
+                        <img id="driverMainStream" style="width:100%;display:block;background:#111;" alt="Detection Stream">
+                        <div id="driverStreamFallback" style="
+                            display:none;width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,#0a0a1a,#111);
+                            display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:var(--text-muted);
+                        ">Waiting for camera stream...</div>
+                    </div>
+
+                    <!-- HUD Overlay -->
+                    <div id="driverHUD" style="
+                        position:absolute;top:0;left:0;right:0;bottom:0;
+                        pointer-events:none;
+                        display:flex;flex-direction:column;justify-content:space-between;
+                        padding:16px;
+                    ">
+                        <!-- Top bar -->
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                            <!-- Alliance badge -->
+                            <div id="driverAllianceBadge" style="
+                                background:rgba(59,130,246,0.8);
+                                color:#fff;font-weight:900;font-size:1.2rem;
+                                padding:6px 20px;border-radius:8px;
+                                text-transform:uppercase;letter-spacing:2px;
+                            ">BLUE ALLIANCE</div>
+
+                            <!-- Target lock indicator -->
+                            <div id="driverTargetLock" style="
+                                background:rgba(0,0,0,0.7);border:3px solid #ff3b30;
+                                border-radius:12px;padding:8px 20px;text-align:center;
+                                transition:all 0.3s ease;
+                            ">
+                                <div style="font-size:0.7rem;text-transform:uppercase;color:#ff3b30;font-weight:700;">Target</div>
+                                <div id="driverLockStatus" style="font-size:1.8rem;font-weight:900;color:#ff3b30;">NO LOCK</div>
+                            </div>
+
+                            <!-- FPS / Latency -->
+                            <div style="background:rgba(0,0,0,0.7);border-radius:8px;padding:6px 12px;text-align:right;">
+                                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Pipeline</div>
+                                <div id="driverFPS" style="font-size:1rem;font-weight:800;font-family:monospace;color:var(--accent-green);">-- FPS</div>
+                                <div id="driverLatency" style="font-size:0.7rem;font-family:monospace;color:var(--text-muted);">-- ms</div>
+                            </div>
+                        </div>
+
+                        <!-- Bottom bar -->
+                        <div style="display:flex;justify-content:space-between;align-items:flex-end;">
+                            <!-- Detected tags -->
+                            <div id="driverTagList" style="
+                                background:rgba(0,0,0,0.7);border-radius:8px;padding:8px 12px;
+                            ">
+                                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px;">Detected Tags</div>
+                                <div id="driverTagChips" style="display:flex;gap:6px;flex-wrap:wrap;">
+                                    <span style="color:var(--text-muted);font-size:0.78rem;">None</span>
+                                </div>
+                            </div>
+
+                            <!-- Distance -->
+                            <div style="background:rgba(0,0,0,0.7);border-radius:8px;padding:8px 16px;text-align:center;">
+                                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Distance</div>
+                                <div id="driverDistance" style="font-size:2.2rem;font-weight:900;font-family:monospace;color:var(--text-muted);">--</div>
+                            </div>
+
+                            <!-- Yaw crosshair -->
+                            <div style="background:rgba(0,0,0,0.7);border-radius:8px;padding:8px 16px;text-align:center;">
+                                <div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Yaw / Offset</div>
+                                <div id="driverYaw" style="font-size:1.4rem;font-weight:900;font-family:monospace;color:var(--text-muted);">--</div>
+                                <div id="driverYawBar" style="
+                                    width:120px;height:8px;background:#222;border-radius:4px;margin-top:4px;position:relative;overflow:hidden;
+                                ">
+                                    <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;background:#444;transform:translateX(-1px);"></div>
+                                    <div id="driverYawIndicator" style="
+                                        position:absolute;top:0;bottom:0;width:8px;border-radius:4px;
+                                        background:var(--accent-yellow);left:50%;transform:translateX(-4px);
+                                        transition:left 0.15s ease;
+                                    "></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+    /**
+     * AprilVision 3.2 - FRC Competition Vision System
+     * Single-Page Application Dashboard
+     * Built by Team 1226
+     */
+    class AprilVisionApp {
+        constructor() {
+            this.state = {
+                engineOnline: false,
+                proxyOnline: true,
+                version: 'v3.2.0',
+                uptime: null,
+                cameras: [],
+                cameraStreams: [],
+                detectedCameras: [],
+                cameraInfo: null,
+                streamHealth: null,
+                engineSettings: null,
+                teamNumber: null,
+                latencyHistory: [],
+                lastLatency: null,
+                consecutiveFailures: 0,
+                targets: null,            // live target/pose data from /api/av/targets
+                matchReadiness: null,     // match readiness check results
+                performance: null,        // system performance data
+                allianceColor: localStorage.getItem('av_alliance') || 'blue',
+                driverMode: false,
+                distanceHistory: [],      // last N distance readings for chart
+            };
+            this.pollTimer = null;
+            this.cameraPollTimer = null;
+            this.uptimeTimer = null;
+            this.dashboardStartTime = Date.now();
+            this._cameraRefreshTimers = {};
+            this._frameRefreshTimers = {};
+            this._streamRetryBackoff = {};
+            // Stream base port for direct connection (bypass proxy)
+            this.STREAM_BASE_PORT = 1181;
+            this.MAX_DISTANCE_HISTORY = 60;
+            this._pvWs = null;          // direct WebSocket to PV engine
+            this._pvWsRetries = 0;
+            this.init();
+        }
+
+        init() {
+            this.setupRouting();
+            this.navigateFromHash();
+            this.startPolling();
+            this.startUptimeTimer();
+            this.connectPVWebSocket();
+            window.addEventListener('hashchange', () => this.navigateFromHash());
+            // Draw empty field map immediately so canvas isn't blank
+            this.drawFieldMap(0, 0, 0);
+        }
+
+        /* ======================== ROUTING ======================== */
+
+        setupRouting() {
+            this.routes = {
+                '/dashboard': 'dashboard',
+                '/cameras': 'cameras',
+                '/calibration': 'calibration',
+                '/pipelines': 'pipelines',
+                '/settings': 'settings',
+                '/tools': 'tools',
+                '/driver': 'driver'
+            };
+        }
+
+        navigateFromHash() {
+            let hash = location.hash.replace('#', '') || '/dashboard';
+            if (hash === '/' || hash === '') hash = '/dashboard';
+
+            const pageName = this.routes[hash] || 'dashboard';
+            this.showPage(pageName);
+
+            // Load pipeline iframe lazily
+            if (pageName === 'pipelines') {
+                const iframe = document.getElementById('pipelineIframe');
+                if (iframe && iframe.src === 'about:blank') {
+                    iframe.src = '/pv/';
+                }
+            }
+
+            // Initialize driver view stream when entering
+            if (pageName === 'driver') {
+                this.renderDriverView();
+            }
+        }
+
+        showPage(name) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
+
+            const page = document.getElementById('page-' + name);
+            if (page) page.classList.add('active');
+
+            const link = document.querySelector('.nav-link[data-page="' + name + '"]');
+            if (link) link.classList.add('active');
+
+            // Close mobile sidebar
+            document.getElementById('sidebar').classList.remove('open');
+            document.getElementById('mobileOverlay').classList.remove('visible');
+        }
+
+        toggleSidebar() {
+            const sb = document.getElementById('sidebar');
+            const ov = document.getElementById('mobileOverlay');
+            sb.classList.toggle('open');
+            ov.classList.toggle('visible');
+        }
+
+        /* ======================== POLLING ======================== */
+
+        startPolling() {
+            this.fetchStatus();
+            this.fetchCameras();
+            this.fetchCameraInfo();
+            this.fetchTargets();
+            this.pollTimer = setInterval(() => this.fetchStatus(), 3000);
+            this.cameraPollTimer = setInterval(() => this.fetchCameras(), 10000);
+            setInterval(() => this.fetchCameraInfo(), 15000);
+            // Target/pose data - poll fast for real-time feel
+            setInterval(() => this.fetchTargets(), 500);
+            // Performance data
+            this.fetchPerformance();
+            setInterval(() => this.fetchPerformance(), 2000);
+        }
+
+        startUptimeTimer() {
+            this.uptimeTimer = setInterval(() => this.updateUptimeDisplay(), 1000);
+        }
+
+        /* ======================== API CALLS ======================== */
+
+        async fetchStatus() {
+            const startTime = performance.now();
+            try {
+                const resp = await fetch('/api/av/status', { signal: AbortSignal.timeout(4000) });
+                const latency = Math.round(performance.now() - startTime);
+                this.recordLatency(latency);
+
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.state.engineOnline = data.engine_online || false;
+                    this.state.engineError = data.engine_error || null;
+                    this.state.engineApiPath = data.engine_api_path || null;
+                    this.state.proxyOnline = data.proxy_online !== undefined ? data.proxy_online : true;
+                    this.state.version = data.version || 'v3.2.0';
+                    this.state.uptime = data.uptime || null;
+                    this.state.ws_connected = data.ws_connected || false;
+                    this.state.data_source = data.data_source || 'none';
+                    this.state.consecutiveFailures = 0;
+
+                    // Team number from bridge --team flag
+                    if (data.team_number) {
+                        this.state.teamNumber = data.team_number;
+                    }
+
+                    if (data.cameras && Array.isArray(data.cameras)) {
+                        this.state.cameras = data.cameras;
+                    }
+                } else {
+                    this.handleStatusFailure();
+                }
+            } catch (e) {
+                const latency = Math.round(performance.now() - startTime);
+                this.recordLatency(latency);
+                this.handleStatusFailure();
+            }
+
+            this.renderDashboard();
+            this.renderCameraFeeds();
+            this.renderCalibrationStatus();
+            this.renderSettings();
+            this.renderLatencyTool();
+        }
+
+        handleStatusFailure() {
+            this.state.consecutiveFailures++;
+            if (this.state.consecutiveFailures > 3) {
+                this.state.engineOnline = false;
+            }
+        }
+
+        async fetchCameras() {
+            try {
+                const resp = await fetch('/api/av/cameras', { signal: AbortSignal.timeout(5000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.cameras) {
+                        this.state.detectedCameras = data.cameras;
+                    }
+                }
+            } catch (e) {
+                // Camera API may not be available
+            }
+
+            // Also fetch streams
+            try {
+                const resp = await fetch('/api/av/streams', { signal: AbortSignal.timeout(5000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.streams) {
+                        this.state.cameraStreams = data.streams;
+                    }
+                }
+            } catch (e) {
+                // Streams API may not be available
+            }
+
+            this.renderDetectedCameras();
+        }
+
+        async fetchEngineSettings() {
+            const output = document.getElementById('engineSettingsOutput');
+            output.style.display = 'block';
+            output.textContent = 'Fetching...';
+            output.className = 'tool-output warn';
+
+            try {
+                const resp = await fetch('/api/av/engine-settings', { signal: AbortSignal.timeout(5000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.state.engineSettings = data;
+                    output.textContent = JSON.stringify(data, null, 2);
+                    output.className = 'tool-output success';
+
+                    // Extract team number if available
+                    if (data.networkConfig && data.networkConfig.teamNumber !== undefined) {
+                        this.state.teamNumber = data.networkConfig.teamNumber;
+                    } else if (data.teamNumber !== undefined) {
+                        this.state.teamNumber = data.teamNumber;
+                    }
+                    this.renderSettings();
+                } else {
+                    output.textContent = 'Error: HTTP ' + resp.status;
+                    output.className = 'tool-output error';
+                }
+            } catch (e) {
+                output.textContent = 'Failed to connect to engine API';
+                output.className = 'tool-output error';
+            }
+        }
+
+        /* ======================== CAMERA INFO & STREAM HEALTH ======================== */
+
+        async fetchCameraInfo() {
+            try {
+                const resp = await fetch('/api/av/camera-info', { signal: AbortSignal.timeout(8000) });
+                if (resp.ok) {
+                    this.state.cameraInfo = await resp.json();
+                }
+            } catch (e) {
+                // Camera info API may not be available
+            }
+        }
+
+        async fetchTargets() {
+            try {
+                const resp = await fetch('/api/av/targets', { signal: AbortSignal.timeout(2000) });
+                if (resp.ok) {
+                    this.state.targets = await resp.json();
+                    this.renderTargetData();
+                    this.renderDistanceChart();
+                    this.renderDriverView();
+                }
+            } catch (e) {}
+        }
+
+        async fetchMatchReadiness() {
+            try {
+                const resp = await fetch('/api/av/match-readiness', { signal: AbortSignal.timeout(10000) });
+                if (resp.ok) {
+                    this.state.matchReadiness = await resp.json();
+                    this.renderMatchReadiness();
+                }
+            } catch (e) {}
+        }
+
+        async fetchPerformance() {
+            try {
+                const resp = await fetch('/api/av/performance', { signal: AbortSignal.timeout(2000) });
+                if (resp.ok) {
+                    this.state.performance = await resp.json();
+                    this.renderPerformance();
+                }
+            } catch (e) {}
+        }
+
+        async setPipeline(camIndex, pipeIndex) {
+            try {
+                const resp = await fetch('/api/av/set-pipeline', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cameraIndex: camIndex, pipelineIndex: pipeIndex }),
+                    signal: AbortSignal.timeout(3000),
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.ok) this.fetchStatus();
+                }
+            } catch (e) {}
+        }
+
+        async setDriverMode(camIndex, enabled) {
+            try {
+                const resp = await fetch('/api/av/set-driver-mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cameraIndex: camIndex, enabled: enabled }),
+                    signal: AbortSignal.timeout(3000),
+                });
+                if (resp.ok) {
+                    this.state.driverMode = enabled;
+                }
+            } catch (e) {}
+        }
+
+        setAlliance(color) {
+            this.state.allianceColor = color;
+            localStorage.setItem('av_alliance', color);
+            this.renderDashboard();
+            this.renderDriverView();
+        }
+
+        /* ======================== PV WEBSOCKET (live data) ======================== */
+
+        connectPVWebSocket() {
+            // Connect directly to PV's WebSocket through the bridge tunnel
+            // Bridge tunnels all WebSocket upgrades to PV at ws://engine:5800
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = proto + '//' + window.location.host + '/websocket_data';
+
+            try {
+                this._pvWs = new WebSocket(wsUrl);
+                this._pvWs.binaryType = 'arraybuffer';
+
+                this._pvWs.onopen = () => {
+                    console.log('[AV] PV WebSocket connected');
+                    this._pvWsRetries = 0;
+                };
+
+                this._pvWs.onmessage = (event) => {
+                    // PV sends MessagePack binary frames
+                    // We can't decode without a msgpack library in the browser,
+                    // but we CAN detect that data is flowing (connection is live)
+                    if (event.data) {
+                        this.state.ws_connected = true;
+                    }
+                };
+
+                this._pvWs.onclose = () => {
+                    console.log('[AV] PV WebSocket closed, reconnecting...');
+                    this.state.ws_connected = false;
+                    this._pvWs = null;
+                    // Exponential backoff reconnect
+                    const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
+                    this._pvWsRetries++;
+                    setTimeout(() => this.connectPVWebSocket(), delay);
+                };
+
+                this._pvWs.onerror = () => {
+                    // onclose will fire after this
+                    this.state.ws_connected = false;
+                };
+            } catch (e) {
+                console.log('[AV] WebSocket error:', e);
+                const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
+                this._pvWsRetries++;
+                setTimeout(() => this.connectPVWebSocket(), delay);
+            }
+        }
+
+        /* ======================== STREAM URL HELPERS ======================== */
+
+        getDirectStreamUrl(camIdx, type) {
+            // Direct to cscore MJPEG - bypasses proxy entirely
+            const host = window.location.hostname;
+            const port = this.STREAM_BASE_PORT + (camIdx * 2) + (type === 'output' ? 1 : 0);
+            return 'http://' + host + ':' + port + '/stream.mjpg';
+        }
+
+        getProxyStreamUrl(camIdx, type) {
+            return '/stream/' + camIdx + '/' + type;
+        }
+
+        getFrameFallbackUrl(camIdx, type) {
+            return '/api/av/frame/' + camIdx + '/' + type;
+        }
+
+        async checkStreamHealth() {
+            const output = document.getElementById('streamDebugOutput');
+            if (output) {
+                output.textContent = 'Probing stream ports...';
+                output.className = 'tool-output warn';
+            }
+
+            try {
+                const resp = await fetch('/api/av/stream-health', { signal: AbortSignal.timeout(10000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.state.streamHealth = data;
+
+                    // Update the health bar
+                    const bar = document.getElementById('streamHealthBar');
+                    if (bar && data.streams && data.streams.length > 0) {
+                        const allLive = data.streams.every(s => s.inputStatus === 'live' || s.outputStatus === 'live');
+                        const anyLive = data.streams.some(s => s.inputStatus === 'live' || s.outputStatus === 'live');
+                        if (allLive) {
+                            bar.style.display = 'block';
+                            bar.className = 'alert alert-success';
+                            bar.textContent = 'All ' + data.streams.length + ' camera stream(s) are live and serving MJPEG frames.';
+                        } else if (anyLive) {
+                            bar.style.display = 'block';
+                            bar.className = 'alert alert-warn';
+                            const liveCount = data.streams.filter(s => s.inputStatus === 'live' || s.outputStatus === 'live').length;
+                            bar.textContent = liveCount + '/' + data.streams.length + ' stream(s) are live. Some streams may still be starting.';
+                        } else {
+                            bar.style.display = 'block';
+                            bar.className = 'alert alert-warn';
+                            bar.textContent = 'No streams are live yet. The engine may still be starting or no cameras are connected.';
+                        }
+                    }
+
+                    // Update debug output
+                    if (output) {
+                        const lines = ['Stream Health Report', '=' .repeat(40)];
+                        data.streams.forEach(s => {
+                            lines.push('');
+                            lines.push(s.camera + ' (index ' + s.index + ')');
+                            lines.push('  Input:  port ' + s.inputPort + ' -> ' + s.inputStatus + '  ' + s.inputUrl);
+                            lines.push('  Output: port ' + s.outputPort + ' -> ' + s.outputStatus + '  ' + s.outputUrl);
+                        });
+                        if (data.streams.length === 0) {
+                            lines.push('No cameras found in engine settings.');
+                            lines.push('Ensure the engine is running and cameras are connected.');
+                        }
+                        output.textContent = lines.join('\n');
+                        output.className = 'tool-output ' + (data.streams.some(s => s.inputStatus === 'live') ? 'success' : 'warn');
+                    }
+                }
+            } catch (e) {
+                if (output) {
+                    output.textContent = 'Failed to check stream health: ' + e.message;
+                    output.className = 'tool-output error';
+                }
+            }
+        }
+
+        async toolStreamHealth() {
+            const output = document.getElementById('toolStreamHealthOutput');
+            output.textContent = 'Probing stream ports...';
+            output.className = 'tool-output warn';
+
+            try {
+                const resp = await fetch('/api/av/stream-health', { signal: AbortSignal.timeout(10000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const lines = ['AprilVision Stream Health', '=' .repeat(40)];
+                    data.streams.forEach(s => {
+                        const inputIcon = s.inputStatus === 'live' ? '[LIVE]' : s.inputStatus === 'responding' ? '[OK]' : '[DOWN]';
+                        const outputIcon = s.outputStatus === 'live' ? '[LIVE]' : s.outputStatus === 'responding' ? '[OK]' : '[DOWN]';
+                        lines.push('');
+                        lines.push(s.camera + ' (#' + s.index + ')');
+                        lines.push('  Input  ' + inputIcon + '  :' + s.inputPort + '  ' + s.inputUrl);
+                        lines.push('  Output ' + outputIcon + '  :' + s.outputPort + '  ' + s.outputUrl);
+                    });
+                    if (data.streams.length === 0) {
+                        lines.push('');
+                        lines.push('No cameras found in engine. Check:');
+                        lines.push('  1. Engine is running (port 5800)');
+                        lines.push('  2. USB cameras are plugged in');
+                        lines.push('  3. Cameras are configured in engine UI (/pv/)');
+                    }
+                    output.textContent = lines.join('\n');
+                    output.className = 'tool-output ' + (data.streams.some(s => s.inputStatus === 'live') ? 'success' : 'error');
+                } else {
+                    output.textContent = 'Error: HTTP ' + resp.status;
+                    output.className = 'tool-output error';
+                }
+            } catch (e) {
+                output.textContent = 'Connection failed: ' + e.message;
+                output.className = 'tool-output error';
+            }
+        }
+
+        /* ======================== ACTIONS ======================== */
+
+        async takeSnapshot() {
+            const outputBox = document.getElementById('dashActionOutput');
+            const outputBody = document.getElementById('dashActionOutputBody');
+            outputBox.style.display = 'block';
+            outputBody.innerHTML = '<span style="color:var(--accent-yellow);">Taking snapshot...</span>';
+
+            try {
+                const resp = await fetch('/api/av/snapshot', { method: 'POST', signal: AbortSignal.timeout(10000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const fileCount = data.files ? data.files.length : 0;
+                    outputBody.innerHTML = '<span style="color:var(--accent-green);">Snapshot saved at ' +
+                        this.escapeHtml(data.timestamp || 'unknown') + ' (' + fileCount + ' camera' +
+                        (fileCount !== 1 ? 's' : '') + ')</span>';
+                } else {
+                    outputBody.innerHTML = '<span style="color:var(--accent-red);">Snapshot failed - HTTP ' + resp.status + '</span>';
+                }
+            } catch (e) {
+                outputBody.innerHTML = '<span style="color:var(--accent-red);">Snapshot failed - connection error</span>';
+            }
+        }
+
+        runHealthCheck() {
+            const outputBox = document.getElementById('dashActionOutput');
+            const outputBody = document.getElementById('dashActionOutputBody');
+            outputBox.style.display = 'block';
+
+            const s = this.state;
+            const lines = [];
+            lines.push('<div style="font-family:monospace;font-size:0.82rem;line-height:1.8;">');
+            lines.push(this.healthLine('Detection Engine', s.engineOnline));
+            lines.push(this.healthLine('Dashboard Proxy', s.proxyOnline));
+            lines.push(this.healthLine('WebSocket Tunnel', s.proxyOnline));
+            lines.push(this.healthLine('Cameras Detected', s.cameras.length > 0 || s.detectedCameras.length > 0));
+
+            const hasCalibrated = s.cameras.some(c => c.calibrated);
+            lines.push(this.healthLine('3D Pose (Calibrated)', hasCalibrated));
+
+            if (s.engineOnline && s.proxyOnline) {
+                lines.push('<div style="color:var(--accent-green);margin-top:8px;font-weight:700;">All systems operational</div>');
+            } else {
+                lines.push('<div style="color:var(--accent-red);margin-top:8px;font-weight:700;">Issues detected - check components above</div>');
+            }
+            lines.push('</div>');
+            outputBody.innerHTML = lines.join('');
+        }
+
+        healthLine(name, ok) {
+            const dot = ok
+                ? '<span class="dot green" style="width:8px;height:8px;display:inline-block;margin-right:8px;"></span>'
+                : '<span class="dot red" style="width:8px;height:8px;display:inline-block;margin-right:8px;"></span>';
+            const status = ok
+                ? '<span style="color:var(--accent-green);">OK</span>'
+                : '<span style="color:var(--accent-red);">FAIL</span>';
+            return '<div>' + dot + '<span style="color:var(--text-secondary);display:inline-block;width:200px;">' + name + '</span> ' + status + '</div>';
+        }
+
+        async runEngineDebug() {
+            const output = document.getElementById('engineDebugOutput');
+            output.style.display = 'block';
+            output.textContent = 'Probing engine...';
+            output.className = 'tool-output warn';
+
+            try {
+                const resp = await fetch('/api/av/engine-debug', { signal: AbortSignal.timeout(15000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const lines = [];
+                    lines.push('Engine Debug Report');
+                    lines.push('=' .repeat(50));
+                    lines.push('Engine Host: ' + data.engine_host + ':' + data.engine_port);
+                    lines.push('Port Open:   ' + (data.port_open ? 'YES' : 'NO - ' + (data.port_error || 'refused')));
+                    lines.push('Stream Base: ' + data.stream_base_port);
+                    lines.push('');
+                    lines.push('API Probes:');
+                    lines.push('-'.repeat(50));
+                    (data.probes || []).forEach(p => {
+                        lines.push('  Path: ' + p.path);
+                        if (p.error) {
+                            lines.push('    Error: ' + p.error);
+                        } else {
+                            lines.push('    Status: HTTP ' + p.status + ' (' + p.body_length + ' bytes)');
+                            lines.push('    JSON: ' + (p.is_json ? 'Yes' : 'No'));
+                            if (p.top_keys) lines.push('    Top Keys: ' + JSON.stringify(p.top_keys));
+                            if (p.cameras_found !== undefined) lines.push('    Cameras Found: ' + p.cameras_found);
+                            if (p.first_camera_keys) lines.push('    Camera Keys: ' + JSON.stringify(p.first_camera_keys));
+                            if (!p.is_json && p.content_preview) {
+                                lines.push('    Content: ' + p.content_preview.substring(0, 200) + '...');
+                            }
+                        }
+                        lines.push('');
+                    });
+                    lines.push('Stream Port Probes:');
+                    lines.push('-'.repeat(50));
+                    (data.stream_probes || []).forEach(s => {
+                        lines.push('  Camera ' + s.camera_index + ': input=' + s.input_port + ' [' + s.input_status + ']  output=' + s.output_port + ' [' + s.output_status + ']');
+                    });
+                    output.textContent = lines.join('\n');
+                    output.className = 'tool-output ' + (data.port_open ? 'success' : 'error');
+                } else {
+                    output.textContent = 'Debug endpoint returned HTTP ' + resp.status;
+                    output.className = 'tool-output error';
+                }
+            } catch (e) {
+                output.textContent = 'Failed: ' + e.message;
+                output.className = 'tool-output error';
+            }
+        }
+
+        async toolSnapshot() {
+            const output = document.getElementById('toolSnapshotOutput');
+            output.textContent = 'Taking snapshot...';
+            output.className = 'tool-output warn';
+
+            try {
+                const resp = await fetch('/api/av/snapshot', { method: 'POST', signal: AbortSignal.timeout(10000) });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const fileCount = data.files ? data.files.length : 0;
+                    const files = data.files ? data.files.join('\n') : 'none';
+                    output.textContent = 'Status: ' + (data.status || 'ok') + '\nTimestamp: ' + (data.timestamp || '--') + '\nFiles (' + fileCount + '):\n' + files;
+                    output.className = 'tool-output success';
+                } else {
+                    output.textContent = 'Error: HTTP ' + resp.status;
+                    output.className = 'tool-output error';
+                }
+            } catch (e) {
+                output.textContent = 'Connection failed - engine may be offline';
+                output.className = 'tool-output error';
+            }
+        }
+
+        toolHealthCheck() {
+            const output = document.getElementById('toolHealthOutput');
+            const s = this.state;
+            const lines = [];
+            lines.push('AprilVision 3.2 Health Check');
+            lines.push('================================');
+            lines.push('Engine:       ' + (s.engineOnline ? 'ONLINE' : 'OFFLINE'));
+            lines.push('Proxy:        ' + (s.proxyOnline ? 'RUNNING' : 'DOWN'));
+            lines.push('Cameras:      ' + (s.cameras.length || s.detectedCameras.length || 0) + ' detected');
+            lines.push('Calibrated:   ' + s.cameras.filter(c => c.calibrated).length + '/' + s.cameras.length);
+            lines.push('Latency:      ' + (this.state.lastLatency !== null ? this.state.lastLatency + 'ms' : '--'));
+            lines.push('================================');
+
+            if (s.engineOnline) {
+                lines.push('Result: ALL SYSTEMS GO');
+                output.className = 'tool-output success';
+            } else {
+                lines.push('Result: ISSUES DETECTED');
+                lines.push('Run: ./scripts/health_check.sh on coprocessor');
+                output.className = 'tool-output error';
+            }
+
+            output.textContent = lines.join('\n');
+        }
+
+        confirmRestart(type) {
+            const what = type === 'engine' ? 'the detection engine' : 'the entire coprocessor system';
+            if (confirm('Are you sure you want to restart ' + what + '? This will interrupt detection temporarily.')) {
+                alert('Restart command sent. The ' + (type === 'engine' ? 'engine' : 'system') + ' will restart momentarily.\n\nIf using SSH, run:\n' +
+                    (type === 'engine' ? 'sudo systemctl restart aprilvision' : 'sudo reboot'));
+            }
+        }
+
+        /* ======================== LATENCY ======================== */
+
+        recordLatency(ms) {
+            this.state.lastLatency = ms;
+            this.state.latencyHistory.push(ms);
+            if (this.state.latencyHistory.length > 10) {
+                this.state.latencyHistory.shift();
+            }
+        }
+
+        getAvgLatency() {
+            const h = this.state.latencyHistory;
+            if (h.length === 0) return null;
+            return Math.round(h.reduce((a, b) => a + b, 0) / h.length);
+        }
+
+        /* ======================== RENDERING ======================== */
+
+        renderTargetData() {
+            const t = this.state.targets;
+            if (!t) return;
+
+            // --- Tag Detection Summary Banner ---
+            this._renderTagBanner(t);
+
+            // Update stream placeholders with tag data (if streams are down)
+            document.querySelectorAll('.stream-placeholder').forEach(ph => {
+                const idx = parseInt(ph.getAttribute('data-cam-index'));
+                const type = ph.getAttribute('data-stream-type');
+                if (!isNaN(idx)) this._updateStreamPlaceholder(idx, type);
+            });
+
+            // Robot pose display
+            const pose = t.robotPose;
+            if (pose) {
+                document.getElementById('poseX').textContent = pose.x !== undefined ? pose.x.toFixed(3) : '--';
+                document.getElementById('poseY').textContent = pose.y !== undefined ? pose.y.toFixed(3) : '--';
+                document.getElementById('poseZ').textContent = pose.z !== undefined ? pose.z.toFixed(3) : '--';
+                document.getElementById('poseYaw').textContent = (pose.rotation !== undefined ? pose.rotation.toFixed(1) + '\u00B0' : '--');
+                document.getElementById('poseRoll').textContent = '--';
+                document.getElementById('posePitch').textContent = '--';
+                document.getElementById('poseSource').textContent = 'Source: ' + t.dataSource + (t.ntConnected ? ' (NT connected)' : '');
+                this.drawFieldMap(pose.x, pose.y, pose.rotation);
+            } else {
+                // Try to get pose from per-camera data
+                let foundPose = false;
+                const cams = t.cameras || {};
+                for (const camName of Object.keys(cams)) {
+                    const cam = cams[camName];
+                    if (cam.pose) {
+                        document.getElementById('poseX').textContent = cam.pose.x.toFixed(3);
+                        document.getElementById('poseY').textContent = cam.pose.y.toFixed(3);
+                        document.getElementById('poseZ').textContent = cam.pose.z.toFixed(3);
+                        document.getElementById('poseRoll').textContent = cam.pose.rx !== undefined ? cam.pose.rx.toFixed(1) + '\u00B0' : '--';
+                        document.getElementById('posePitch').textContent = cam.pose.ry !== undefined ? cam.pose.ry.toFixed(1) + '\u00B0' : '--';
+                        document.getElementById('poseYaw').textContent = cam.pose.rz !== undefined ? cam.pose.rz.toFixed(1) + '\u00B0' : '--';
+                        document.getElementById('poseSource').textContent = 'From: ' + camName + ' | Source: ' + t.dataSource;
+                        this.drawFieldMap(cam.pose.x, cam.pose.y, cam.pose.rz || 0);
+                        foundPose = true;
+                        break;
+                    }
+                }
+                if (!foundPose) {
+                    document.getElementById('poseSource').textContent = 'Source: ' + t.dataSource +
+                        (t.ntConnected ? ' (NT connected, no pose)' : ' (waiting for pose data)');
+                }
+            }
+
+            // Per-camera target info
+            const panel = document.getElementById('targetInfoPanel');
+            const cams = t.cameras || {};
+            const camNames = Object.keys(cams);
+            if (camNames.length === 0) {
+                panel.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:0.85rem;padding:12px 0;">No camera data yet (source: ' + t.dataSource + ')</div>';
+                return;
+            }
+
+            let html = '';
+            camNames.forEach(camName => {
+                const cam = cams[camName];
+                const hasTarget = cam.hasTarget;
+                const dotColor = hasTarget ? 'green' : 'red';
+                const allIds = cam.allTagIds || [];
+                const tagCount = cam.tagCount || (cam.bestFiducialId >= 0 ? 1 : 0);
+                const targetText = hasTarget ? (tagCount > 1 ? tagCount + ' TAGS' : 'TARGET LOCKED') : 'No Target';
+
+                html += '<div style="padding:8px 0;border-bottom:1px solid var(--border-subtle);">';
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                html += '<span style="font-weight:700;font-size:0.85rem;">' + this.escapeHtml(camName) + '</span>';
+                html += '<div style="display:flex;align-items:center;gap:6px;">';
+                if (cam.fps) html += '<span style="font-size:0.68rem;color:var(--text-muted);font-family:monospace;">' + Math.round(cam.fps) + ' FPS</span>';
+                html += '<span style="display:flex;align-items:center;gap:4px;font-size:0.75rem;font-weight:600;color:var(--accent-' + dotColor + ');">';
+                html += '<span class="dot ' + dotColor + '" style="width:6px;height:6px;"></span> ' + targetText + '</span>';
+                html += '</div></div>';
+
+                // Show all detected tag IDs as chips
+                if (allIds.length > 0) {
+                    html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">';
+                    allIds.forEach(function(id) {
+                        html += '<span style="display:inline-block;background:rgba(0,255,136,0.12);border:1px solid var(--accent-green);color:var(--accent-green);font-size:0.65rem;font-weight:700;padding:1px 6px;border-radius:8px;font-family:monospace;">Tag #' + id + '</span>';
+                    });
+                    html += '</div>';
+                }
+
+                if (hasTarget || cam.targetYaw !== undefined) {
+                    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px;font-size:0.72rem;">';
+                    if (allIds.length === 0 && cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) html += '<div><span style="color:var(--text-muted);">Tag:</span> <span style="font-family:monospace;font-weight:600;color:var(--accent-green);">#' + cam.bestFiducialId + '</span></div>';
+                    if (cam.targetYaw !== undefined) html += '<div><span style="color:var(--text-muted);">Yaw:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetYaw + '\u00B0</span></div>';
+                    if (cam.targetPitch !== undefined) html += '<div><span style="color:var(--text-muted);">Pitch:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetPitch + '\u00B0</span></div>';
+                    if (cam.targetArea !== undefined) html += '<div><span style="color:var(--text-muted);">Area:</span> <span style="font-family:monospace;font-weight:600;">' + cam.targetArea + '%</span></div>';
+                    // Distance from 3D pose (solvePnP)
+                    if (cam.pose) {
+                        var dist = Math.sqrt(cam.pose.x * cam.pose.x + cam.pose.y * cam.pose.y + cam.pose.z * cam.pose.z);
+                        var distColor = dist < 1.5 ? 'var(--accent-green)' : dist < 3 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                        html += '<div><span style="color:var(--text-muted);">Dist:</span> <span style="font-family:monospace;font-weight:600;color:' + distColor + ';">' + dist.toFixed(2) + 'm</span></div>';
+                    }
+                    if (cam.latencyMs) html += '<div><span style="color:var(--text-muted);">Latency:</span> <span style="font-family:monospace;font-weight:600;">' + cam.latencyMs + 'ms</span></div>';
+                    html += '</div>';
+                    // 3D Pose detail (if calibrated)
+                    if (cam.pose) {
+                        html += '<div style="margin-top:4px;font-size:0.68rem;color:var(--text-muted);font-family:monospace;">';
+                        html += 'Pose: X=' + cam.pose.x.toFixed(3) + ' Y=' + cam.pose.y.toFixed(3) + ' Z=' + cam.pose.z.toFixed(3);
+                        if (cam.pose.rx !== undefined) html += ' | Rx=' + cam.pose.rx.toFixed(1) + ' Ry=' + cam.pose.ry.toFixed(1) + ' Rz=' + cam.pose.rz.toFixed(1);
+                        html += '</div>';
+                    }
+                }
+                html += '</div>';
+            });
+            panel.innerHTML = html;
+        }
+
+        _renderTagBanner(t) {
+            const icon = document.getElementById('tagBannerIcon');
+            const title = document.getElementById('tagBannerTitle');
+            const badge = document.getElementById('tagBannerBadge');
+            const detail = document.getElementById('tagBannerDetail');
+            const tagsContainer = document.getElementById('tagBannerTags');
+            const distEl = document.getElementById('tagBannerDistance');
+            if (!icon) return;
+
+            const cams = t.cameras || {};
+            const camNames = Object.keys(cams);
+
+            // Collect ALL detected tags across all cameras
+            let totalTargets = 0;
+            let detectedTagIds = [];
+            let closestDist = null;
+            let activeCams = 0;
+            let totalTags = 0;
+
+            camNames.forEach(name => {
+                const cam = cams[name];
+                if (cam.hasTarget) {
+                    totalTargets++;
+                    activeCams++;
+                    // Use allTagIds if available (multi-tag)
+                    const allIds = cam.allTagIds || [];
+                    if (allIds.length > 0) {
+                        allIds.forEach(id => {
+                            detectedTagIds.push({ id: id, cam: name });
+                            totalTags++;
+                        });
+                    } else if (cam.bestFiducialId !== undefined && cam.bestFiducialId >= 0) {
+                        detectedTagIds.push({ id: cam.bestFiducialId, cam: name });
+                        totalTags++;
+                    }
+                    // Distance from pose (x,y,z relative to camera)
+                    if (cam.pose) {
+                        const d = Math.sqrt(cam.pose.x * cam.pose.x + cam.pose.y * cam.pose.y + cam.pose.z * cam.pose.z);
+                        if (d > 0 && (closestDist === null || d < closestDist)) closestDist = d;
+                    }
+                }
+            });
+
+            // Track distance history for chart
+            if (closestDist !== null) {
+                this.state.distanceHistory.push({ t: Date.now(), d: closestDist });
+                if (this.state.distanceHistory.length > this.MAX_DISTANCE_HISTORY) {
+                    this.state.distanceHistory.shift();
+                }
+            }
+
+            if (totalTargets > 0) {
+                // Tags detected
+                icon.style.background = 'rgba(0,255,136,0.15)';
+                icon.style.borderColor = 'var(--accent-green)';
+                icon.innerHTML = '&#127919;';
+                const tagLabel = totalTags + ' Tag' + (totalTags > 1 ? 's' : '') + ' Detected';
+                title.textContent = tagLabel;
+                title.style.color = 'var(--accent-green)';
+                badge.style.display = 'inline-block';
+                badge.textContent = totalTags > 1 ? 'MULTI-TAG' : 'LOCKED';
+                detail.textContent = activeCams + ' of ' + camNames.length + ' camera' + (camNames.length > 1 ? 's' : '') + ' tracking | Source: ' + (t.dataSource || 'unknown');
+
+                // Tag ID chips
+                tagsContainer.innerHTML = '';
+                detectedTagIds.forEach(tag => {
+                    const chip = document.createElement('span');
+                    chip.style.cssText = 'display:inline-block;background:rgba(0,255,136,0.15);border:1px solid var(--accent-green);color:var(--accent-green);font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:12px;font-family:monospace;';
+                    chip.textContent = 'Tag #' + tag.id + ' (' + tag.cam + ')';
+                    tagsContainer.appendChild(chip);
+                });
+
+                // Distance display
+                if (closestDist !== null) {
+                    distEl.textContent = closestDist.toFixed(2) + 'm';
+                    distEl.style.color = closestDist < 1.5 ? 'var(--accent-green)' : closestDist < 3 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                } else {
+                    distEl.textContent = '--';
+                    distEl.style.color = 'var(--text-muted)';
+                }
+            } else if (camNames.length > 0) {
+                // Cameras exist but no targets
+                icon.style.background = 'rgba(255,165,0,0.12)';
+                icon.style.borderColor = 'var(--accent-yellow)';
+                icon.innerHTML = '&#128269;';
+                title.textContent = 'Searching for Tags...';
+                title.style.color = 'var(--accent-yellow)';
+                badge.style.display = 'none';
+                detail.textContent = camNames.length + ' camera' + (camNames.length > 1 ? 's' : '') + ' active, no AprilTags in view | Source: ' + (t.dataSource || 'unknown');
+                tagsContainer.innerHTML = '';
+                distEl.textContent = '--';
+                distEl.style.color = 'var(--text-muted)';
+            } else {
+                // No camera data at all
+                icon.style.background = 'rgba(255,59,48,0.12)';
+                icon.style.borderColor = 'var(--accent-red)';
+                icon.innerHTML = '&#128204;';
+                title.textContent = 'No Tags Detected';
+                title.style.color = 'var(--text-secondary)';
+                badge.style.display = 'none';
+                const src = t.dataSource || 'none';
+                const ntStatus = t.ntConnected ? 'NT connected' : 'NT not connected';
+                detail.textContent = 'Source: ' + src + ' | ' + ntStatus + ' | Ensure engine is running';
+                tagsContainer.innerHTML = '';
+                distEl.textContent = '--';
+                distEl.style.color = 'var(--text-muted)';
+            }
+        }
+
+        drawFieldMap(x, y, rotation) {
+            const canvas = document.getElementById('fieldCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            // FRC field dimensions (meters)
+            const fieldW = 16.54;
+            const fieldH = 8.21;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Field background
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, w, h);
+
+            // Field border
+            ctx.strokeStyle = '#30363d';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(4, 4, w - 8, h - 8);
+
+            // Center line
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([8, 4]);
+            ctx.beginPath();
+            ctx.moveTo(w / 2, 4);
+            ctx.lineTo(w / 2, h - 4);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Alliance zones - highlight own alliance side
+            const isBlue = this.state.allianceColor === 'blue';
+            ctx.fillStyle = isBlue ? 'rgba(59, 130, 246, 0.15)' : 'rgba(59, 130, 246, 0.05)';
+            ctx.fillRect(4, 4, w / 2 - 4, h - 8);
+            ctx.fillStyle = !isBlue ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.05)';
+            ctx.fillRect(w / 2, 4, w / 2 - 4, h - 8);
+
+            // Grid lines
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 0.5;
+            for (let gx = 1; gx < fieldW; gx++) {
+                const px = 4 + (gx / fieldW) * (w - 8);
+                ctx.beginPath();
+                ctx.moveTo(px, 4);
+                ctx.lineTo(px, h - 4);
+                ctx.stroke();
+            }
+            for (let gy = 1; gy < fieldH; gy++) {
+                const py = 4 + (gy / fieldH) * (h - 8);
+                ctx.beginPath();
+                ctx.moveTo(4, py);
+                ctx.lineTo(w - 4, py);
+                ctx.stroke();
+            }
+
+            // AprilTag positions (approximate FRC 2026 - adjust as needed)
+            ctx.fillStyle = 'rgba(0, 255, 136, 0.3)';
+            const tagPositions = [
+                [0.5, 4.1], [0.5, 2.5], [0.5, 5.7],
+                [16.0, 4.1], [16.0, 2.5], [16.0, 5.7],
+                [4.0, 0.5], [4.0, 7.7],
+                [12.5, 0.5], [12.5, 7.7],
+            ];
+            tagPositions.forEach(function(pos) {
+                const px = 4 + (pos[0] / fieldW) * (w - 8);
+                const py = 4 + (pos[1] / fieldH) * (h - 8);
+                ctx.beginPath();
+                ctx.arc(px, py, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Robot position
+            if (x !== undefined && y !== undefined && (x !== 0 || y !== 0)) {
+                const px = 4 + (x / fieldW) * (w - 8);
+                const py = 4 + (y / fieldH) * (h - 8);
+                const rot = (rotation || 0) * Math.PI / 180;
+
+                // Robot body (triangle showing direction)
+                ctx.save();
+                ctx.translate(px, py);
+                ctx.rotate(-rot);
+                ctx.fillStyle = '#00ff88';
+                ctx.beginPath();
+                ctx.moveTo(10, 0);
+                ctx.lineTo(-6, -7);
+                ctx.lineTo(-6, 7);
+                ctx.closePath();
+                ctx.fill();
+
+                // Outline
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.restore();
+
+                // Position label
+                const label = document.getElementById('fieldPoseLabel');
+                if (label) label.textContent = 'X: ' + x.toFixed(2) + 'm  Y: ' + y.toFixed(2) + 'm  \u03B8: ' + (rotation || 0).toFixed(1) + '\u00B0';
+            }
+        }
+
+        renderMatchReadiness() {
+            const panel = document.getElementById('matchReadinessPanel');
+            const data = this.state.matchReadiness;
+            if (!data) return;
+
+            let html = '<div style="padding:8px 0;">';
+
+            // Summary banner
+            const bannerColor = data.allPass ? 'var(--accent-green)' : (data.ready ? 'var(--accent-yellow)' : 'var(--accent-red)');
+            const bannerBg = data.allPass ? 'rgba(0,255,136,0.1)' : (data.ready ? 'rgba(255,200,0,0.1)' : 'rgba(248,81,73,0.1)');
+            html += '<div style="background:' + bannerBg + ';border:1px solid ' + bannerColor + ';border-radius:8px;padding:12px;text-align:center;margin-bottom:12px;">';
+            html += '<div style="font-size:1.3rem;font-weight:900;color:' + bannerColor + ';">' + data.summary + '</div>';
+            html += '</div>';
+
+            // Individual checks
+            (data.checks || []).forEach(function(check) {
+                const icon = check.pass ? '<span style="color:var(--accent-green);">&#10003;</span>' : '<span style="color:var(--accent-red);">&#10007;</span>';
+                const critBadge = check.critical ? '<span style="font-size:0.6rem;background:rgba(248,81,73,0.2);color:var(--accent-red);padding:1px 4px;border-radius:3px;margin-left:6px;">CRITICAL</span>' : '';
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-subtle);">';
+                html += '<span style="font-weight:600;font-size:0.85rem;">' + icon + ' ' + check.name + critBadge + '</span>';
+                html += '<span style="font-size:0.75rem;color:var(--text-secondary);">' + check.detail + '</span>';
+                html += '</div>';
+            });
+
+            html += '<div style="text-align:center;margin-top:12px;"><button class="btn btn-green" onclick="AVApp.fetchMatchReadiness()">Re-check</button></div>';
+            html += '</div>';
+            panel.innerHTML = html;
+        }
+
+        renderDashboard() {
+            const s = this.state;
+
+            // Stat cards
+            const elEngine = document.getElementById('statEngine');
+            if (s.engineOnline) {
+                elEngine.textContent = 'Online';
+                elEngine.className = 'stat-value green';
+            } else if (s.consecutiveFailures > 3) {
+                elEngine.textContent = 'Offline';
+                elEngine.className = 'stat-value red';
+            } else {
+                elEngine.textContent = 'Starting...';
+                elEngine.className = 'stat-value yellow';
+            }
+
+            const camCount = s.cameras.length || s.detectedCameras.length || 0;
+            const elCams = document.getElementById('statCameras');
+            elCams.textContent = camCount;
+            elCams.className = 'stat-value ' + (camCount > 0 ? 'green' : 'yellow');
+
+            const elTags = document.getElementById('statTags');
+            // Show live detected tag count from target data
+            let tagCount = 0;
+            if (s.targets && s.targets.cameras) {
+                Object.values(s.targets.cameras).forEach(cam => {
+                    if (cam.tagCount) tagCount += cam.tagCount;
+                    else if (cam.hasTarget && cam.bestFiducialId >= 0) tagCount++;
+                });
+            }
+            if (tagCount > 0) {
+                elTags.textContent = tagCount;
+                elTags.className = 'stat-value green';
+            } else {
+                elTags.textContent = '0';
+                elTags.className = 'stat-value yellow';
+            }
+
+            // Version badge
+            document.getElementById('headerVersionBadge').textContent = s.version;
+
+            // System status dots - show engine error detail
+            const dotEngine = document.getElementById('dotEngine');
+            const txtEngine = document.getElementById('txtEngine');
+            if (s.engineOnline) {
+                dotEngine.className = 'dot green';
+                txtEngine.textContent = 'Online' + (s.engineApiPath ? ' (' + s.engineApiPath + ')' : '');
+            } else if (s.engineError) {
+                dotEngine.className = 'dot red';
+                txtEngine.textContent = s.engineError;
+            } else if (s.consecutiveFailures <= 3) {
+                dotEngine.className = 'dot yellow pulse';
+                txtEngine.textContent = 'Starting...';
+            } else {
+                dotEngine.className = 'dot red';
+                txtEngine.textContent = 'Offline';
+            }
+            this.setDot('dotProxy', 'txtProxy', s.proxyOnline, false);
+            // PV data link (WebSocket to engine)
+            const wsConnected = s.ws_connected || (s.targets && s.targets.wsConnected);
+            const dataSource = s.data_source || (s.targets && s.targets.dataSource) || 'none';
+            if (wsConnected) {
+                this.setDot('dotWebsocket', 'txtWebsocket', true, false);
+                document.getElementById('txtWebsocket').textContent = 'WebSocket connected';
+            } else if (dataSource === 'ntcore') {
+                this.setDot('dotWebsocket', 'txtWebsocket', true, false);
+                document.getElementById('txtWebsocket').textContent = 'NT connected';
+            } else if (dataSource.includes('connecting')) {
+                document.getElementById('dotWebsocket').className = 'dot yellow pulse';
+                document.getElementById('txtWebsocket').textContent = 'Connecting...';
+            } else {
+                this.setDot('dotWebsocket', 'txtWebsocket', false, false);
+                document.getElementById('txtWebsocket').textContent = 'Not connected';
+            }
+            // Data source indicator
+            const dsMap = { 'websocket': ['green', 'PV WebSocket (live)'], 'ntcore': ['green', 'NetworkTables (live)'], 'api': ['yellow', 'HTTP API (config only)'], 'none': ['red', 'No data source'] };
+            const dsKey = dataSource.split(' ')[0];
+            const ds = dsMap[dsKey] || ['yellow', dataSource];
+            document.getElementById('dotDataSource').className = 'dot ' + ds[0];
+            document.getElementById('txtDataSource').textContent = ds[1];
+
+            // 3D Pose
+            const hasCalibrated = s.cameras.some(c => c.calibrated);
+            const dot3d = document.getElementById('dotPose3d');
+            const txt3d = document.getElementById('txtPose3d');
+            if (hasCalibrated) {
+                dot3d.className = 'dot green';
+                txt3d.textContent = 'Available (Calibrated)';
+            } else if (camCount > 0) {
+                dot3d.className = 'dot yellow';
+                txt3d.textContent = 'Needs Calibration';
+            } else {
+                dot3d.className = 'dot red';
+                txt3d.textContent = 'No Cameras';
+            }
+
+            // Show/hide engine debug panel
+            const debugPanel = document.getElementById('engineDebugPanel');
+            if (debugPanel) {
+                if (!s.engineOnline && (s.engineError || s.consecutiveFailures > 2)) {
+                    debugPanel.style.display = 'block';
+                    const alert = document.getElementById('engineDebugAlert');
+                    if (alert && s.engineError) {
+                        alert.textContent = 'Engine issue: ' + s.engineError + ' - Click "Debug Engine Connection" to investigate.';
+                    }
+                } else if (s.engineOnline) {
+                    debugPanel.style.display = 'none';
+                }
+            }
+
+            // Camera previews on dashboard
+            this.renderCameraPreviews();
+
+            // Alliance, pipeline, performance, distance, driver view
+            this.updateAllianceUI();
+            this.renderQuickPipeline();
+            this.renderDistanceChart();
+            this.renderDriverView();
+
+            // Sidebar latency
+            const sidebarDot = document.getElementById('sidebarDot');
+            const sidebarLatency = document.getElementById('sidebarLatency');
+            if (this.state.lastLatency !== null) {
+                sidebarLatency.textContent = this.state.lastLatency + 'ms';
+                sidebarDot.className = 'dot ' + (this.state.lastLatency < 100 ? 'green' : this.state.lastLatency < 500 ? 'yellow' : 'red');
+                sidebarDot.style.width = '6px';
+                sidebarDot.style.height = '6px';
+            }
+        }
+
+        setDot(dotId, txtId, online, starting) {
+            const dot = document.getElementById(dotId);
+            const txt = document.getElementById(txtId);
+            if (!dot || !txt) return;
+            if (online) {
+                dot.className = 'dot green';
+                txt.textContent = 'Online';
+            } else if (starting) {
+                dot.className = 'dot yellow pulse';
+                txt.textContent = 'Starting...';
+            } else {
+                dot.className = 'dot red';
+                txt.textContent = 'Offline';
+            }
+        }
+
+        updateUptimeDisplay() {
+            const s = this.state;
+            const el = document.getElementById('statUptime');
+            if (!el) return;
+
+            if (s.uptime) {
+                el.textContent = this.formatUptime(s.uptime);
+            } else {
+                // Fallback: dashboard uptime
+                const dashUp = Date.now() - this.dashboardStartTime;
+                el.textContent = this.formatUptime(Math.floor(dashUp / 1000));
+            }
+        }
+
+        formatUptime(seconds) {
+            if (typeof seconds !== 'number' || seconds < 0) return '--';
+            const s = Math.floor(seconds);
+            if (s < 60) return s + 's';
+            const m = Math.floor(s / 60);
+            const rs = s % 60;
+            if (m < 60) return m + 'm ' + rs + 's';
+            const h = Math.floor(m / 60);
+            const rm = m % 60;
+            return h + 'h ' + rm + 'm';
+        }
+
+        renderCameraPreviews() {
+            const container = document.getElementById('dashCameraPreviews');
+            const cameras = this.state.cameras;
+
+            if (cameras.length === 0) {
+                if (container.querySelector('.empty-state')) return;
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div><p>No cameras connected</p></div>';
+                return;
+            }
+
+            // Only re-render if camera count changed
+            const existing = container.querySelectorAll('.camera-preview-card');
+            if (existing.length === cameras.length) {
+                this.refreshBrokenImages(container);
+                return;
+            }
+
+            container.innerHTML = '';
+            cameras.forEach(cam => {
+                const card = document.createElement('div');
+                card.className = 'camera-preview-card';
+                card.setAttribute('data-cam-index', cam.index);
+
+                const directUrl = this.getDirectStreamUrl(cam.index, 'output');
+                const proxyUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const frameUrl = this.getFrameFallbackUrl(cam.index, 'output');
+                card.innerHTML =
+                    '<img class="cam-thumb" src="' + this.escapeAttr(directUrl) + '" alt="' + this.escapeAttr(cam.name) + '" ' +
+                        'data-direct-url="' + this.escapeAttr(directUrl) + '" ' +
+                        'data-proxy-url="' + this.escapeAttr(proxyUrl) + '" ' +
+                        'data-frame-url="' + this.escapeAttr(frameUrl) + '" ' +
+                        'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                        'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')" loading="lazy">' +
+                    '<div class="cam-info">' +
+                    '<span class="cam-name">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
+                    '<span class="cam-index">#' + cam.index + (cam.calibrated ? ' &#10003;' : '') + '</span>' +
+                    '</div>';
+
+                container.appendChild(card);
+            });
+        }
+
+        renderDetectedCameras() {
+            const container = document.getElementById('dashCameraList');
+            const cams = this.state.detectedCameras;
+
+            if (cams.length === 0 && this.state.cameras.length === 0) {
+                container.innerHTML = '<div class="camera-item"><span class="cam-name" style="color:var(--accent-yellow);">No cameras detected</span><span class="cam-device">Check USB connections</span></div>';
+                return;
+            }
+
+            // Merge detected and engine cameras
+            const allCams = cams.length > 0 ? cams : this.state.cameras;
+            container.innerHTML = '';
+
+            allCams.forEach(cam => {
+                const item = document.createElement('div');
+                item.className = 'camera-item';
+                const name = cam.name || 'Camera ' + (cam.index !== undefined ? cam.index : '?');
+                const device = cam.device || cam.source || '';
+                const source = cam.source || (cam.connected ? 'connected' : '');
+                item.innerHTML =
+                    '<span class="cam-name">' + this.escapeHtml(name) + '</span>' +
+                    '<span class="cam-device">' + this.escapeHtml(device) +
+                    (source ? '<span class="cam-source">(' + this.escapeHtml(source) + ')</span>' : '') +
+                    '</span>';
+                container.appendChild(item);
+            });
+        }
+
+        renderCameraFeeds() {
+            const container = document.getElementById('cameraFeedsContainer');
+            const cameras = this.state.cameras;
+
+            if (cameras.length === 0) {
+                if (container.querySelector('.empty-state')) return;
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div>' +
+                    '<p>No cameras connected to the detection engine.</p>' +
+                    '<p style="font-size:0.78rem;color:var(--text-muted);margin-top:8px;">Connect a USB camera, then check the engine UI at <a href="/pv/" style="color:var(--accent-blue);">/pv/</a></p></div>';
+                return;
+            }
+
+            const existing = container.querySelectorAll('.camera-feed-block');
+            if (existing.length === cameras.length) {
+                this.refreshBrokenImages(container);
+                this.updateStreamStatusBadges();
+                return;
+            }
+
+            const infoMap = {};
+            if (this.state.cameraInfo && this.state.cameraInfo.engineCameras) {
+                this.state.cameraInfo.engineCameras.forEach(c => { infoMap[c.index] = c; });
+            }
+
+            container.innerHTML = '';
+            cameras.forEach(cam => {
+                const block = document.createElement('div');
+                block.className = 'camera-feed-block';
+                block.setAttribute('data-cam-index', cam.index);
+
+                // PRIMARY: proxy URL (same-origin, always reachable through bridge)
+                // FALLBACK: direct cscore URL (browser -> stream port directly)
+                const proxyInputUrl = this.getProxyStreamUrl(cam.index, 'input');
+                const proxyOutputUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
+                const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
+                const frameInputUrl = this.getFrameFallbackUrl(cam.index, 'input');
+                const frameOutputUrl = this.getFrameFallbackUrl(cam.index, 'output');
+                const calibIcon = cam.calibrated ? '&#10003; Calibrated' : '&#9888; Not Calibrated';
+                const calibColor = cam.calibrated ? 'var(--accent-green)' : 'var(--accent-yellow)';
+
+                const info = infoMap[cam.index];
+                const devicePath = info ? info.devicePath : '';
+                const inputPort = this.STREAM_BASE_PORT + (cam.index * 2);
+                const outputPort = inputPort + 1;
+                const pipelineName = (info && info.currentPipeline) ? info.currentPipeline.name : '';
+
+                block.innerHTML =
+                    '<div class="camera-feed-header">' +
+                    '<span class="feed-title">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
+                    '<span class="feed-meta">' +
+                    '<span>Index: ' + cam.index + '</span>' +
+                    '<span>Pipelines: ' + (cam.pipelineCount || 0) + '</span>' +
+                    (pipelineName ? '<span style="color:var(--accent-blue);">' + this.escapeHtml(pipelineName) + '</span>' : '') +
+                    '<span style="color:' + calibColor + ';">' + calibIcon + '</span>' +
+                    '</span>' +
+                    '</div>' +
+                    '<div class="feed-pair">' +
+                    '<div class="feed-panel">' +
+                    '<span class="feed-label">Input (Raw)</span>' +
+                    '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-input"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
+                    '<img src="' + this.escapeAttr(proxyInputUrl) + '" alt="Input Stream" ' +
+                        'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
+                        'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
+                        'data-frame-url="' + this.escapeAttr(frameInputUrl) + '" ' +
+                        'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
+                        'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
+                    '</div>' +
+                    '<div class="feed-panel">' +
+                    '<span class="feed-label">Output (Detection)</span>' +
+                    '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-output"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
+                    '<img src="' + this.escapeAttr(proxyOutputUrl) + '" alt="Output Stream" ' +
+                        'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
+                        'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
+                        'data-frame-url="' + this.escapeAttr(frameOutputUrl) + '" ' +
+                        'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                        'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
+                    '</div>' +
+                    '</div>' +
+                    '<div class="camera-info-bar">' +
+                    (devicePath ? '<div class="info-item"><span class="info-label">Device:</span><span class="info-value">' + this.escapeHtml(devicePath) + '</span></div>' : '') +
+                    '<div class="info-item"><span class="info-label">Input:</span><span class="info-value">:' + inputPort + '</span></div>' +
+                    '<div class="info-item"><span class="info-label">Output:</span><span class="info-value">:' + outputPort + '</span></div>' +
+                    '<div class="info-item"><span class="info-label">Mode:</span><span class="info-value" id="streamMode-' + cam.index + '">direct</span></div>' +
+                    '</div>';
+
+                container.appendChild(block);
+            });
+        }
+
+        updateStreamStatusBadges() {
+            if (!this.state.cameraInfo || !this.state.cameraInfo.engineCameras) return;
+            this.state.cameraInfo.engineCameras.forEach(cam => {
+                ['input', 'output'].forEach(type => {
+                    const badge = document.getElementById('streamStatus-' + cam.index + '-' + type);
+                    if (!badge) return;
+                    const status = type === 'input' ? cam.inputStreamStatus : cam.outputStreamStatus;
+                    if (status === 'live') {
+                        badge.className = 'feed-status live';
+                        badge.innerHTML = '<span class="dot green" style="width:6px;height:6px;"></span> Live';
+                    } else if (status === 'responding') {
+                        badge.className = 'feed-status connecting';
+                        badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Responding';
+                    } else if (status === 'unreachable') {
+                        badge.className = 'feed-status error';
+                        badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Unreachable';
+                    }
+                });
+            });
+        }
+
+        /* ======================== PERFORMANCE MONITOR ======================== */
+
+        renderPerformance() {
+            const panel = document.getElementById('perfMonitorPanel');
+            if (!panel) return;
+            const p = this.state.performance;
+            if (!p) return;
+
+            let html = '';
+            // System stats
+            const sys = p.system || {};
+            html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;margin-bottom:8px;">';
+            if (sys.cpuTempC !== undefined) {
+                const tempColor = sys.cpuTempC < 60 ? 'var(--accent-green)' : sys.cpuTempC < 75 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                html += '<div><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">CPU Temp</div><div style="font-size:1rem;font-weight:800;font-family:monospace;color:' + tempColor + ';">' + sys.cpuTempC + '\u00B0C</div></div>';
+            }
+            if (sys.memUsedPct !== undefined) {
+                const memColor = sys.memUsedPct < 70 ? 'var(--accent-green)' : sys.memUsedPct < 85 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                html += '<div><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Memory</div><div style="font-size:1rem;font-weight:800;font-family:monospace;color:' + memColor + ';">' + sys.memUsedPct + '%</div></div>';
+            }
+            if (sys.loadAvg1m !== undefined) {
+                html += '<div><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Load (1m)</div><div style="font-size:1rem;font-weight:800;font-family:monospace;">' + sys.loadAvg1m.toFixed(2) + '</div></div>';
+            }
+            html += '<div><div style="font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;">Uptime</div><div style="font-size:1rem;font-weight:800;font-family:monospace;">' + this.formatUptime(sys.uptimeS || 0) + '</div></div>';
+            html += '</div>';
+
+            // Per-camera FPS
+            const cams = p.cameras || {};
+            const camNames = Object.keys(cams);
+            if (camNames.length > 0) {
+                html += '<div style="border-top:1px solid var(--border-subtle);padding-top:8px;">';
+                camNames.forEach(name => {
+                    const cam = cams[name];
+                    const fpsColor = cam.fps > 20 ? 'var(--accent-green)' : cam.fps > 10 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:0.75rem;">';
+                    html += '<span style="font-weight:600;">' + this.escapeHtml(name) + '</span>';
+                    html += '<div style="display:flex;gap:12px;font-family:monospace;">';
+                    html += '<span style="color:' + fpsColor + ';font-weight:700;">' + Math.round(cam.fps) + ' FPS</span>';
+                    html += '<span>' + cam.latencyMs + 'ms</span>';
+                    html += '<span style="color:var(--text-muted);">' + cam.tagCount + ' tags</span>';
+                    html += '</div></div>';
+                });
+                html += '</div>';
+            }
+            panel.innerHTML = html;
+        }
+
+        formatUptime(s) {
+            if (!s || s < 0) return '--';
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            if (h > 0) return h + 'h ' + m + 'm';
+            if (m > 0) return m + 'm ' + sec + 's';
+            return sec + 's';
+        }
+
+        /* ======================== DISTANCE CHART ======================== */
+
+        renderDistanceChart() {
+            const canvas = document.getElementById('distanceChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const hist = this.state.distanceHistory;
+            const label = document.getElementById('distChartLabel');
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, w, h);
+
+            if (hist.length < 2) {
+                ctx.fillStyle = '#484f58';
+                ctx.font = '12px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('Waiting for distance data...', w / 2, h / 2);
+                if (label) label.textContent = 'No data';
+                return;
+            }
+
+            // Y axis: 0 to max distance + 20%
+            const maxD = Math.max(...hist.map(p => p.d), 1) * 1.2;
+            const minT = hist[0].t;
+            const maxT = hist[hist.length - 1].t;
+            const tRange = Math.max(maxT - minT, 1000);
+
+            // Grid lines
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth = 0.5;
+            for (let i = 1; i <= 4; i++) {
+                const gy = h - (h * (i / 4));
+                ctx.beginPath();
+                ctx.moveTo(0, gy);
+                ctx.lineTo(w, gy);
+                ctx.stroke();
+                ctx.fillStyle = '#484f58';
+                ctx.font = '9px monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText((maxD * i / 4).toFixed(1) + 'm', 4, gy - 2);
+            }
+
+            // Distance line
+            ctx.beginPath();
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            hist.forEach((pt, i) => {
+                const x = ((pt.t - minT) / tRange) * w;
+                const y = h - (pt.d / maxD) * h;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Fill below line
+            ctx.lineTo(w, h);
+            ctx.lineTo(0, h);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0,255,136,0.08)';
+            ctx.fill();
+
+            // Threshold lines
+            [1.5, 3.0].forEach(threshold => {
+                if (threshold < maxD) {
+                    const ty = h - (threshold / maxD) * h;
+                    ctx.strokeStyle = threshold === 1.5 ? 'rgba(0,255,136,0.3)' : 'rgba(255,165,0,0.3)';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(0, ty);
+                    ctx.lineTo(w, ty);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            });
+
+            const lastD = hist[hist.length - 1].d;
+            if (label) label.textContent = 'Current: ' + lastD.toFixed(2) + 'm';
+        }
+
+        /* ======================== QUICK PIPELINE SWITCHER ======================== */
+
+        renderQuickPipeline() {
+            const container = document.getElementById('quickPipelineSwitcher');
+            if (!container) return;
+            const cameras = this.state.cameras;
+            if (!cameras || cameras.length === 0) return;
+
+            let html = '<span style="font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;flex-shrink:0;">Pipeline:</span>';
+            cameras.forEach((cam, i) => {
+                const name = cam.name || 'Camera ' + i;
+                const pipeCount = cam.pipelineCount || 0;
+                const currentPipe = cam.currentPipeline !== undefined ? cam.currentPipeline : 0;
+                html += '<div style="display:flex;align-items:center;gap:4px;">';
+                html += '<span style="font-size:0.72rem;color:var(--text-secondary);font-weight:600;">' + this.escapeHtml(name) + ':</span>';
+                if (pipeCount > 0) {
+                    html += '<select onchange="AVApp.setPipeline(' + i + ', parseInt(this.value))" style="background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:4px;padding:2px 6px;font-size:0.72rem;cursor:pointer;">';
+                    for (let p = 0; p < pipeCount; p++) {
+                        html += '<option value="' + p + '"' + (p === currentPipe ? ' selected' : '') + '>Pipeline ' + p + '</option>';
+                    }
+                    html += '</select>';
+                } else {
+                    html += '<span style="font-size:0.72rem;color:var(--text-muted);">No pipelines</span>';
+                }
+                if (i < cameras.length - 1) html += '<span style="color:var(--border-subtle);margin:0 4px;">|</span>';
+                html += '</div>';
+            });
+            container.innerHTML = html;
+        }
+
+        toggleDriverMode() {
+            const btn = document.getElementById('driverModeToggle');
+            const newState = !this.state.driverMode;
+            // Toggle driver mode for all cameras
+            this.state.cameras.forEach((cam, i) => {
+                this.setDriverMode(i, newState);
+            });
+            if (btn) {
+                btn.textContent = newState ? 'ON' : 'OFF';
+                btn.style.borderColor = newState ? 'var(--accent-green)' : 'var(--border-subtle)';
+                btn.style.color = newState ? 'var(--accent-green)' : 'var(--text-secondary)';
+                btn.style.background = newState ? 'rgba(0,255,136,0.1)' : 'transparent';
+            }
+        }
+
+        /* ======================== ALLIANCE STYLING ======================== */
+
+        updateAllianceUI() {
+            const blueBtn = document.getElementById('allianceBlueBtn');
+            const redBtn = document.getElementById('allianceRedBtn');
+            if (!blueBtn) return;
+            const isBlue = this.state.allianceColor === 'blue';
+            blueBtn.style.background = isBlue ? 'rgba(59,130,246,0.3)' : 'transparent';
+            blueBtn.style.fontWeight = isBlue ? '900' : '700';
+            redBtn.style.background = !isBlue ? 'rgba(239,68,68,0.3)' : 'transparent';
+            redBtn.style.fontWeight = !isBlue ? '900' : '700';
+        }
+
+        /* ======================== DRIVER VIEW ======================== */
+
+        renderDriverView() {
+            const container = document.getElementById('driverViewContainer');
+            if (!container) return;
+
+            // Set up stream if not done
+            const streamImg = document.getElementById('driverMainStream');
+            const fallback = document.getElementById('driverStreamFallback');
+            if (streamImg && !streamImg.src && this.state.cameras.length > 0) {
+                const url = this.getDirectStreamUrl(0, 'output');
+                streamImg.src = url;
+                streamImg.onerror = () => {
+                    streamImg.style.display = 'none';
+                    if (fallback) fallback.style.display = 'flex';
+                    // Try proxy
+                    setTimeout(() => {
+                        streamImg.src = this.getProxyStreamUrl(0, 'output');
+                        streamImg.style.display = 'block';
+                    }, 2000);
+                };
+                streamImg.onload = () => {
+                    streamImg.style.display = 'block';
+                    if (fallback) fallback.style.display = 'none';
+                };
+            }
+
+            // Alliance badge
+            const badge = document.getElementById('driverAllianceBadge');
+            if (badge) {
+                const isBlue = this.state.allianceColor === 'blue';
+                badge.textContent = (isBlue ? 'BLUE' : 'RED') + ' ALLIANCE';
+                badge.style.background = isBlue ? 'rgba(59,130,246,0.8)' : 'rgba(239,68,68,0.8)';
+            }
+
+            // Target lock, tags, distance, yaw from target data
+            const t = this.state.targets;
+            if (!t) return;
+
+            const cams = t.cameras || {};
+            const camNames = Object.keys(cams);
+            let hasAnyTarget = false;
+            let bestYaw = 0;
+            let bestDist = null;
+            let allDetectedIds = [];
+            let bestFps = 0;
+            let bestLatency = 0;
+
+            camNames.forEach(name => {
+                const cam = cams[name];
+                if (cam.hasTarget) {
+                    hasAnyTarget = true;
+                    bestYaw = cam.targetYaw || 0;
+                    if (cam.fps) bestFps = Math.max(bestFps, cam.fps);
+                    bestLatency = cam.latencyMs || 0;
+                    const ids = cam.allTagIds || [];
+                    if (ids.length > 0) {
+                        ids.forEach(id => { if (allDetectedIds.indexOf(id) < 0) allDetectedIds.push(id); });
+                    } else if (cam.bestFiducialId >= 0) {
+                        if (allDetectedIds.indexOf(cam.bestFiducialId) < 0) allDetectedIds.push(cam.bestFiducialId);
+                    }
+                    if (cam.pose) {
+                        const d = Math.sqrt(cam.pose.x * cam.pose.x + cam.pose.y * cam.pose.y + cam.pose.z * cam.pose.z);
+                        if (d > 0 && (bestDist === null || d < bestDist)) bestDist = d;
+                    }
+                }
+            });
+
+            // Target lock
+            const lockEl = document.getElementById('driverTargetLock');
+            const lockText = document.getElementById('driverLockStatus');
+            if (lockEl && lockText) {
+                if (hasAnyTarget) {
+                    lockEl.style.borderColor = '#00ff88';
+                    lockText.textContent = allDetectedIds.length > 0 ? 'TAG #' + allDetectedIds[0] : 'LOCKED';
+                    lockText.style.color = '#00ff88';
+                    lockEl.querySelector('div').style.color = '#00ff88';
+                } else {
+                    lockEl.style.borderColor = '#ff3b30';
+                    lockText.textContent = 'NO LOCK';
+                    lockText.style.color = '#ff3b30';
+                    lockEl.querySelector('div').style.color = '#ff3b30';
+                }
+            }
+
+            // FPS/Latency
+            const fpsEl = document.getElementById('driverFPS');
+            const latEl = document.getElementById('driverLatency');
+            if (fpsEl) fpsEl.textContent = Math.round(bestFps) + ' FPS';
+            if (latEl) latEl.textContent = bestLatency + ' ms';
+
+            // Tag chips
+            const chips = document.getElementById('driverTagChips');
+            if (chips) {
+                if (allDetectedIds.length > 0) {
+                    chips.innerHTML = allDetectedIds.map(id =>
+                        '<span style="background:rgba(0,255,136,0.2);border:1px solid #00ff88;color:#00ff88;padding:2px 10px;border-radius:12px;font-size:0.78rem;font-weight:800;font-family:monospace;">Tag #' + id + '</span>'
+                    ).join('');
+                } else {
+                    chips.innerHTML = '<span style="color:var(--text-muted);font-size:0.78rem;">None in view</span>';
+                }
+            }
+
+            // Distance
+            const distEl = document.getElementById('driverDistance');
+            if (distEl) {
+                if (bestDist !== null) {
+                    distEl.textContent = bestDist.toFixed(2) + 'm';
+                    distEl.style.color = bestDist < 1.5 ? '#00ff88' : bestDist < 3 ? '#f59e0b' : '#ff3b30';
+                } else {
+                    distEl.textContent = '--';
+                    distEl.style.color = 'var(--text-muted)';
+                }
+            }
+
+            // Yaw
+            const yawEl = document.getElementById('driverYaw');
+            const yawInd = document.getElementById('driverYawIndicator');
+            if (yawEl) {
+                if (hasAnyTarget) {
+                    yawEl.textContent = bestYaw.toFixed(1) + '\u00B0';
+                    const abortThreshold = 30;
+                    const yawColor = Math.abs(bestYaw) < 3 ? '#00ff88' : Math.abs(bestYaw) < 10 ? '#f59e0b' : '#ff3b30';
+                    yawEl.style.color = yawColor;
+                    if (yawInd) {
+                        const pct = 50 + (bestYaw / abortThreshold) * 50;
+                        yawInd.style.left = Math.max(0, Math.min(100, pct)) + '%';
+                        yawInd.style.background = yawColor;
+                    }
+                } else {
+                    yawEl.textContent = '--';
+                    yawEl.style.color = 'var(--text-muted)';
+                    if (yawInd) { yawInd.style.left = '50%'; yawInd.style.background = '#444'; }
+                }
+            }
+        }
+
+        renderCalibrationStatus() {
+            const container = document.getElementById('calibStatusGrid');
+            const cameras = this.state.cameras;
+
+            if (cameras.length === 0) {
+                if (container.querySelector('.empty-state')) return;
+                container.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-icon">&#128247;</div><p>No cameras connected</p></div>';
+                return;
+            }
+
+            const existing = container.querySelectorAll('.calib-card');
+            if (existing.length === cameras.length) return;
+
+            container.innerHTML = '';
+            cameras.forEach(cam => {
+                const card = document.createElement('div');
+                card.className = 'calib-card';
+
+                const calibrated = cam.calibrated;
+                const badgeClass = calibrated ? 'calibrated' : 'not-calibrated';
+                const badgeIcon = calibrated ? '&#10003;' : '&#9888;';
+                const badgeText = calibrated ? 'Calibrated' : 'Not Calibrated';
+
+                card.innerHTML =
+                    '<div class="calib-cam-name">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</div>' +
+                    '<div class="calib-status-badge ' + badgeClass + '">' + badgeIcon + ' ' + badgeText + '</div>' +
+                    '<div style="margin-top:10px;font-size:0.78rem;color:var(--text-secondary);">' +
+                    'Index: ' + cam.index +
+                    (cam.currentPipeline !== undefined ? ' | Pipeline: ' + cam.currentPipeline : '') +
+                    '</div>';
+
+                container.appendChild(card);
+            });
+        }
+
+        renderSettings() {
+            const s = this.state;
+            const teamEl = document.getElementById('settingsTeamNum');
+            const verEl = document.getElementById('settingsEngineVer');
+            const ntEl = document.getElementById('settingsNT');
+
+            if (s.teamNumber !== null && s.teamNumber !== undefined) {
+                teamEl.textContent = s.teamNumber;
+            }
+
+            verEl.textContent = s.version;
+
+            if (s.teamNumber) {
+                const t = String(s.teamNumber);
+                let ip;
+                if (t.length <= 2) {
+                    ip = '10.0.' + t + '.2';
+                } else if (t.length === 3) {
+                    ip = '10.' + t[0] + '.' + t.substring(1) + '.2';
+                } else {
+                    ip = '10.' + t.substring(0, t.length - 2) + '.' + t.substring(t.length - 2) + '.2';
+                }
+                ntEl.textContent = ip + ':5810';
+            }
+        }
+
+        renderLatencyTool() {
+            const valEl = document.getElementById('toolLatencyValue');
+            const avgEl = document.getElementById('toolLatencyAvg');
+            const dotEl = document.getElementById('toolLatencyDot');
+            const statusEl = document.getElementById('toolLatencyStatus');
+
+            if (this.state.lastLatency !== null) {
+                valEl.textContent = this.state.lastLatency + 'ms';
+            }
+
+            const avg = this.getAvgLatency();
+            if (avg !== null) {
+                avgEl.textContent = avg + 'ms';
+            }
+
+            if (this.state.engineOnline && this.state.lastLatency !== null) {
+                if (this.state.lastLatency < 50) {
+                    dotEl.className = 'dot green';
+                    statusEl.textContent = 'Excellent';
+                    statusEl.style.color = 'var(--accent-green)';
+                } else if (this.state.lastLatency < 200) {
+                    dotEl.className = 'dot green';
+                    statusEl.textContent = 'Good';
+                    statusEl.style.color = 'var(--accent-green)';
+                } else if (this.state.lastLatency < 500) {
+                    dotEl.className = 'dot yellow';
+                    statusEl.textContent = 'Slow';
+                    statusEl.style.color = 'var(--accent-yellow)';
+                } else {
+                    dotEl.className = 'dot red';
+                    statusEl.textContent = 'High Latency';
+                    statusEl.style.color = 'var(--accent-red)';
+                }
+            } else if (!this.state.engineOnline) {
+                dotEl.className = 'dot red';
+                statusEl.textContent = 'Engine Offline';
+                statusEl.style.color = 'var(--accent-red)';
+            }
+        }
+
+        /* ======================== IMAGE ERROR HANDLING ======================== */
+
+        handleImgLoad(img, camIdx, streamType) {
+            img.style.display = '';
+            img.style.opacity = '1';
+            // Remove placeholder if stream came back
+            const panel = img.closest('.feed-panel');
+            if (panel) {
+                const ph = panel.querySelector('.stream-placeholder');
+                if (ph) ph.remove();
+            }
+            const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
+            if (badge) {
+                badge.className = 'feed-status live';
+                badge.innerHTML = '<span class="dot green" style="width:6px;height:6px;"></span> Live';
+            }
+            const key = camIdx + '-' + streamType;
+            this._streamRetryBackoff[key] = 0;
+            // Track which mode is working
+            const modeEl = document.getElementById('streamMode-' + camIdx);
+            if (modeEl) {
+                const src = img.getAttribute('src') || '';
+                if (src.indexOf('/api/av/frame/') !== -1) modeEl.textContent = 'frame-fallback';
+                else modeEl.textContent = src.startsWith('http') ? 'direct' : 'proxy';
+            }
+
+            // Keep refreshing single-frame fallback so it behaves like video.
+            if (img.getAttribute('src') && img.getAttribute('src').indexOf('/api/av/frame/') !== -1) {
+                this.scheduleFrameRefresh(img, camIdx, streamType);
+            } else {
+                const frameKey = camIdx + '-' + streamType;
+                if (this._frameRefreshTimers[frameKey]) {
+                    clearTimeout(this._frameRefreshTimers[frameKey]);
+                    delete this._frameRefreshTimers[frameKey];
+                }
+            }
+        }
+
+        scheduleFrameRefresh(img, camIdx, streamType) {
+            const frameKey = camIdx + '-' + streamType;
+            if (this._frameRefreshTimers[frameKey]) return;
+            this._frameRefreshTimers[frameKey] = setTimeout(() => {
+                delete this._frameRefreshTimers[frameKey];
+                const frameUrl = img.getAttribute('data-frame-url');
+                if (!frameUrl) return;
+                // Only refresh if still in frame mode and element still attached.
+                if (!document.body.contains(img)) return;
+                const current = img.getAttribute('src') || '';
+                if (current.indexOf('/api/av/frame/') === -1) return;
+                img.src = frameUrl + '?_t=' + Date.now();
+            }, 250);
+        }
+
+        handleStreamError(img, camIdx, streamType) {
+            // Smart fallback: proxy failed -> direct -> single-frame fallback -> retry with backoff
+            const directUrl = img.getAttribute('data-direct-url');
+            const proxyUrl = img.getAttribute('data-proxy-url');
+            const frameUrl = img.getAttribute('data-frame-url');
+            const currentSrc = (img.getAttribute('src') || '').split('?')[0];
+
+            img.style.opacity = '0.3';
+
+            const badge = document.getElementById('streamStatus-' + camIdx + '-' + streamType);
+            const key = camIdx + '-' + streamType;
+
+            // If proxy URL failed, try direct cscore URL
+            if (proxyUrl && currentSrc === proxyUrl && directUrl) {
+                if (badge) {
+                    badge.className = 'feed-status connecting';
+                    badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Trying direct...';
+                }
+                const modeEl = document.getElementById('streamMode-' + camIdx);
+                if (modeEl) modeEl.textContent = 'direct';
+                img.src = directUrl;
+                return;
+            }
+            // If direct failed, try proxy
+            if (directUrl && currentSrc === directUrl && proxyUrl) {
+                if (badge) {
+                    badge.className = 'feed-status connecting';
+                    badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Trying proxy...';
+                }
+                const modeEl = document.getElementById('streamMode-' + camIdx);
+                if (modeEl) modeEl.textContent = 'proxy';
+                img.src = proxyUrl;
+                return;
+            }
+
+            // If both MJPEG endpoints failed, try bridge frame fallback.
+            if (frameUrl && currentSrc !== frameUrl) {
+                if (badge) {
+                    badge.className = 'feed-status connecting';
+                    badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Trying frame fallback...';
+                }
+                const modeEl = document.getElementById('streamMode-' + camIdx);
+                if (modeEl) modeEl.textContent = 'frame-fallback';
+                img.src = frameUrl;
+                return;
+            }
+
+            // Both failed - show placeholder with target data, retry in background
+            if (badge) {
+                badge.className = 'feed-status error';
+                badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Stream unavailable';
+            }
+
+            // Show a meaningful placeholder instead of broken image
+            const panel = img.closest('.feed-panel');
+            if (panel && !panel.querySelector('.stream-placeholder')) {
+                img.style.display = 'none';
+                const ph = document.createElement('div');
+                ph.className = 'stream-placeholder';
+                ph.style.cssText = 'width:100%;aspect-ratio:4/3;background:linear-gradient(135deg,#0d1117,#161b22);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:0.78rem;color:var(--text-muted);border:1px dashed var(--border-subtle);';
+                ph.setAttribute('data-cam-index', camIdx);
+                ph.setAttribute('data-stream-type', streamType);
+                ph.innerHTML = '<div style="font-size:1.6rem;opacity:0.5;">&#128247;</div>' +
+                    '<div>Stream not available</div>' +
+                    '<div style="font-size:0.68rem;" id="phTargetInfo-' + camIdx + '-' + streamType + '">Checking for tag data...</div>' +
+                    '<div style="font-size:0.65rem;margin-top:4px;opacity:0.5;">Retrying connection...</div>';
+                panel.insertBefore(ph, img.nextSibling);
+                // Update placeholder with tag data if available
+                this._updateStreamPlaceholder(camIdx, streamType);
+            }
+
+            if (this._cameraRefreshTimers[key]) return;
+
+            const attempt = this._streamRetryBackoff[key] || 0;
+            const delay = Math.min(1500 * Math.pow(2, attempt), 12000);
+            this._streamRetryBackoff[key] = attempt + 1;
+
+            this._cameraRefreshTimers[key] = setTimeout(() => {
+                delete this._cameraRefreshTimers[key];
+                // Retry cycle: proxy -> direct -> frame fallback.
+                const modeEl = document.getElementById('streamMode-' + camIdx);
+                let url = proxyUrl || directUrl || frameUrl;
+                if (attempt % 3 === 1 && directUrl) {
+                    url = directUrl;
+                    if (modeEl) modeEl.textContent = 'direct';
+                } else if (attempt % 3 === 2 && frameUrl) {
+                    url = frameUrl;
+                    if (modeEl) modeEl.textContent = 'frame-fallback';
+                } else {
+                    if (modeEl) modeEl.textContent = 'proxy';
+                }
+                img.style.display = '';
+                img.style.opacity = '1';
+                img.src = url + '?_t=' + Date.now();
+            }, delay);
+        }
+
+        _updateStreamPlaceholder(camIdx, streamType) {
+            const el = document.getElementById('phTargetInfo-' + camIdx + '-' + streamType);
+            if (!el) return;
+            const t = this.state.targets;
+            if (!t || !t.cameras) { el.textContent = 'No target data'; return; }
+            // Find camera by index
+            const cams = t.cameras;
+            for (const name of Object.keys(cams)) {
+                const cam = cams[name];
+                if (cam.cameraIndex === camIdx || Object.keys(cams).indexOf(name) === camIdx) {
+                    if (cam.hasTarget) {
+                        let info = 'Tag #' + (cam.bestFiducialId >= 0 ? cam.bestFiducialId : '?') + ' detected';
+                        if (cam.pose) {
+                            const d = Math.sqrt(cam.pose.x * cam.pose.x + cam.pose.y * cam.pose.y + cam.pose.z * cam.pose.z);
+                            info += ' | ' + d.toFixed(2) + 'm away';
+                        }
+                        el.innerHTML = '<span style="color:var(--accent-green);">' + info + '</span>';
+                    } else {
+                        el.textContent = 'No tags in view';
+                    }
+                    return;
+                }
+            }
+            el.textContent = 'No target data for this camera';
+        }
+
+        handleImgError(img, camIdx, streamType) {
+            this.handleStreamError(img, camIdx, streamType);
+        }
+
+        refreshBrokenImages(container) {
+            const images = container.querySelectorAll('img');
+            images.forEach(img => {
+                if (img.naturalWidth === 0 && img.complete) {
+                    const block = img.closest('.camera-feed-block') || img.closest('.camera-preview-card');
+                    const camIdx = block ? parseInt(block.getAttribute('data-cam-index')) : undefined;
+                    const panel = img.closest('.feed-panel');
+                    let streamType = undefined;
+                    if (panel) {
+                        const label = panel.querySelector('.feed-label');
+                        streamType = label && label.textContent.includes('Input') ? 'input' : 'output';
+                    }
+                    this.handleImgError(img, camIdx, streamType);
+                }
+            });
+        }
+
+        /* ======================== UTILITIES ======================== */
+
+        escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = String(str);
+            return div.innerHTML;
+        }
+
+        escapeAttr(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+    }
+
+    /* ======================== INITIALIZE ======================== */
+    const AVApp = new AprilVisionApp();
+    // Make globally accessible for inline event handlers (onload, onerror, onclick)
+    window.AVApp = AVApp;
+    </script>
+</body>
+</html>

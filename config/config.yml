@@ -1,0 +1,91 @@
+# ==============================================================================
+# AprilVision 3.2 - FRC Competition Vision System
+# Configuration File
+#
+# Built by Team 1226 | FRC 2026 Season
+# ==============================================================================
+
+# ==============================================================================
+# Team Configuration
+# ==============================================================================
+# Set via: ./setup.sh --team YOUR_TEAM_NUMBER
+# roboRIO IP is calculated automatically from team number
+team_number: 0000
+nt_server: "10.00.00.2"
+
+# ==============================================================================
+# Detection Engine Settings
+# ==============================================================================
+# Camera configuration is done through the dashboard at :5801.
+# This config is used by the AprilVision dashboard proxy.
+engine:
+  port: 5800
+  config_dir: /opt/photonvision/photonvision_config
+
+# ==============================================================================
+# Dashboard Proxy Settings
+# ==============================================================================
+# The AprilVision proxy runs on port 5801 and forwards to the detection engine
+# while injecting custom branding and health monitoring.
+dashboard:
+  port: 5801
+  refresh_rate_ms: 500
+
+# ==============================================================================
+# Camera Configuration Reference
+# ==============================================================================
+# Cameras are configured through the AprilVision dashboard at :5801
+#
+#   Camera Names (must match robot code and dashboard):
+#     - "front" : Forward-facing camera
+#     - "left"  : Left-side camera
+#     - "right" : Right-side camera
+#
+#   Recommended Settings:
+#     Resolution: 640x480 (best speed-to-accuracy ratio)
+#     FPS: 30 (reliable detection without overloading USB)
+#     Pipeline: AprilTag
+#     Tag Family: tag36h11 (FRC standard)
+#     Decimation: 2 (half-res processing, faster cycles)
+#
+#   Camera Mounting (set in robot code Transform3d):
+#     Front: x=0.25m forward, z=0.50m up, yaw=0
+#     Left:  y=0.20m left, z=0.50m up, yaw=90deg
+#     Right: y=-0.20m right, z=0.50m up, yaw=-90deg
+cameras:
+  - name: front
+    engine_name: "front"
+    extrinsics:
+      x: 0.25
+      y: 0.0
+      z: 0.50
+      roll: 0.0
+      pitch: 0.0
+      yaw: 0.0
+
+  - name: left
+    engine_name: "left"
+    extrinsics:
+      x: 0.0
+      y: 0.20
+      z: 0.50
+      roll: 0.0
+      pitch: 0.0
+      yaw: 90.0
+
+  - name: right
+    engine_name: "right"
+    extrinsics:
+      x: 0.0
+      y: -0.20
+      z: 0.50
+      roll: 0.0
+      pitch: 0.0
+      yaw: -90.0
+
+# ==============================================================================
+# Field Layout
+# ==============================================================================
+field:
+  name: "FRC 2026"
+  tag_size_m: 0.1651
