@@ -1,86 +1,76 @@
 /**
  * AprilVision 3.2 - FRC Competition Vision System
- * Dashboard status monitor, camera detection, and health checker
+ * Minimal helper module for external script usage.
+ *
+ * The main SPA logic resides in index.html (AprilVisionApp class).
+ * This file provides lightweight utility functions that can be
+ * imported by other pages or scripts if needed.
  *
  * Built by Team 1226
  */
 
-class AprilVisionStatus {
-    constructor() {
-        this.engineConnected = false;
-        this.lastCheckTime = null;
-        this.consecutiveFailures = 0;
-        this.checkInterval = null;
-        this.cameraCount = 0;
-        this.init();
-    }
-
-    init() {
-        this.checkEngineStatus();
-        this.checkInterval = setInterval(() => {
-            this.checkEngineStatus();
-        }, 5000);
-    }
-
-    async checkEngineStatus() {
+const AVHelpers = {
+    /**
+     * Check if the AprilVision engine API is reachable.
+     * Returns a promise resolving to { online: boolean, latency: number }.
+     */
+    async pingEngine() {
+        const start = performance.now();
         try {
-            const response = await fetch('/api/settings/general', {
+            const resp = await fetch('/api/av/status', {
                 signal: AbortSignal.timeout(3000)
             });
-            this.engineConnected = response.ok;
-            if (response.ok) {
-                this.consecutiveFailures = 0;
-            }
-        } catch {
-            this.engineConnected = false;
-            this.consecutiveFailures++;
+            const latency = Math.round(performance.now() - start);
+            return { online: resp.ok, latency: latency };
+        } catch (e) {
+            const latency = Math.round(performance.now() - start);
+            return { online: false, latency: latency };
         }
+    },
 
-        // Also check cameras via custom API
+    /**
+     * Fetch the list of detected cameras from the AV API.
+     * Returns a promise resolving to an array of camera objects.
+     */
+    async getCameras() {
         try {
-            const camResp = await fetch('/api/aprilvision/cameras', {
-                signal: AbortSignal.timeout(3000)
+            const resp = await fetch('/api/av/cameras', {
+                signal: AbortSignal.timeout(5000)
             });
-            if (camResp.ok) {
-                const data = await camResp.json();
-                this.cameraCount = data.count || 0;
+            if (resp.ok) {
+                const data = await resp.json();
+                return data.cameras || [];
             }
-        } catch {
-            // Camera API may not be available yet
+        } catch (e) {
+            // API unavailable
         }
+        return [];
+    },
 
-        this.lastCheckTime = new Date();
-        this.updateStatusDisplay();
+    /**
+     * Get the MJPEG stream URL for a given camera index and type.
+     * @param {number} index - Camera index
+     * @param {string} type - 'input' or 'output'
+     * @returns {string} Stream URL
+     */
+    getStreamUrl(index, type) {
+        return '/stream/' + index + '/' + (type === 'input' ? 'input' : 'output');
+    },
+
+    /**
+     * Format seconds into a human-readable uptime string.
+     * @param {number} seconds
+     * @returns {string}
+     */
+    formatUptime(seconds) {
+        if (typeof seconds !== 'number' || seconds < 0) return '--';
+        const s = Math.floor(seconds);
+        if (s < 60) return s + 's';
+        const m = Math.floor(s / 60);
+        const rs = s % 60;
+        if (m < 60) return m + 'm ' + rs + 's';
+        const h = Math.floor(m / 60);
+        const rm = m % 60;
+        return h + 'h ' + rm + 'm';
     }
-
-    updateStatusDisplay() {
-        const statusEl = document.getElementById('pv-status');
-        const dotEl = document.getElementById('pv-dot');
-
-        if (statusEl) {
-            if (this.engineConnected) {
-                statusEl.textContent = 'Online';
-                if (dotEl) dotEl.className = 'status-dot green';
-            } else if (this.consecutiveFailures > 3) {
-                statusEl.textContent = 'Offline';
-                if (dotEl) dotEl.className = 'status-dot red';
-            } else {
-                statusEl.textContent = 'Starting...';
-                if (dotEl) dotEl.className = 'status-dot yellow';
-            }
-        }
-    }
-
-    isOnline() {
-        return this.engineConnected;
-    }
-
-    getCameraCount() {
-        return this.cameraCount;
-    }
-}
-
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    window.aprilVisionStatus = new AprilVisionStatus();
-});
+};
