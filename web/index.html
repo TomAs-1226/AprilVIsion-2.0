@@ -1460,11 +1460,17 @@
                 ">
                     <!-- Main stream (full width) -->
                     <div id="driverStreamBox" style="width:100%;background:#000;position:relative;">
-                        <img id="driverMainStream" style="width:100%;display:block;background:#111;" alt="Detection Stream">
+                        <img id="driverMainStream" style="width:100%;display:block;background:#111;" alt="Processed Stream">
                         <div id="driverStreamFallback" style="
                             display:none;width:100%;aspect-ratio:16/9;background:linear-gradient(135deg,#0a0a1a,#111);
                             display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:var(--text-muted);
-                        ">Waiting for camera stream...</div>
+                        ">Waiting for processed stream...</div>
+
+                        <div style="position:absolute;right:14px;bottom:14px;width:min(28vw,420px);min-width:220px;border:1px solid var(--border-color);border-radius:8px;overflow:hidden;background:#000;box-shadow:0 8px 24px rgba(0,0,0,0.45);">
+                            <div style="padding:6px 10px;font-size:0.72rem;color:var(--text-secondary);background:rgba(10,10,20,0.9);text-transform:uppercase;letter-spacing:0.6px;">Raw Feed (cropped)</div>
+                            <img id="driverRawStream" style="width:100%;aspect-ratio:16/9;display:block;background:#111;" alt="Raw Stream">
+                            <div id="driverRawFallback" style="display:none;padding:12px;text-align:center;font-size:0.72rem;color:var(--text-muted);background:#111;">Raw feed unavailable</div>
+                        </div>
                     </div>
 
                     <!-- HUD Overlay -->
@@ -3271,29 +3277,37 @@
             const container = document.getElementById('driverViewContainer');
             if (!container) return;
 
-            // Set up stream if not done
-            const streamImg = document.getElementById('driverMainStream');
-            const fallback = document.getElementById('driverStreamFallback');
-            if (streamImg && !streamImg.src && this.state.cameras.length > 0) {
-                const url = this.getDirectStreamUrl(0, 'output');
-                streamImg.setAttribute('data-cam-index', '0');
-                streamImg.setAttribute('data-stream-type', 'output');
-                this.applyCropToImage(streamImg, 0, 'output');
-                streamImg.src = url;
-                streamImg.onerror = () => {
-                    streamImg.style.display = 'none';
-                    if (fallback) fallback.style.display = 'flex';
-                    // Try proxy
-                    setTimeout(() => {
-                        streamImg.src = this.getProxyStreamUrl(0, 'output');
-                        streamImg.style.display = 'block';
-                    }, 2000);
-                };
-                streamImg.onload = () => {
-                    streamImg.style.display = 'block';
+            const setupDriverStream = (imgId, fallbackId, streamType, fallbackDisplay = 'block') => {
+                const img = document.getElementById(imgId);
+                const fallback = document.getElementById(fallbackId);
+                if (!img || this.state.cameras.length === 0) return;
+
+                const camIdx = 0;
+                const directUrl = this.getDirectStreamUrl(camIdx, streamType);
+                const proxyUrl = this.getProxyStreamUrl(camIdx, streamType);
+                const frameUrl = this.getFrameFallbackUrl(camIdx, streamType);
+
+                img.setAttribute('data-cam-index', String(camIdx));
+                img.setAttribute('data-stream-type', streamType);
+                img.setAttribute('data-direct-url', directUrl);
+                img.setAttribute('data-proxy-url', proxyUrl);
+                img.setAttribute('data-frame-url', frameUrl);
+                this.applyCropToImage(img, camIdx, streamType);
+
+                img.onload = () => {
+                    img.style.display = 'block';
                     if (fallback) fallback.style.display = 'none';
                 };
-            }
+                img.onerror = () => {
+                    this.handleStreamError(img, camIdx, streamType);
+                    if (fallback) fallback.style.display = fallbackDisplay;
+                };
+
+                if (!img.src) img.src = directUrl;
+            };
+
+            setupDriverStream('driverMainStream', 'driverStreamFallback', 'output', 'flex');
+            setupDriverStream('driverRawStream', 'driverRawFallback', 'input');
 
             // Alliance badge
             const badge = document.getElementById('driverAllianceBadge');
