@@ -343,9 +343,39 @@
         .camera-preview-card .cam-thumb {
             width: 100%;
             height: 200px;
-            object-fit: contain;
+            object-fit: cover;
             background: #000;
             display: block;
+        }
+
+        .camera-preview-streams {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1px;
+            background: #000;
+        }
+
+        .camera-preview-streams .cam-stream {
+            position: relative;
+            background: #000;
+        }
+
+        .camera-preview-streams .cam-stream-label {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            z-index: 2;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            font-size: 0.62rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .camera-preview-streams .cam-thumb {
+            height: 160px;
         }
 
         .camera-preview-card .cam-info {
@@ -363,6 +393,43 @@
         .camera-preview-card .cam-index {
             font-size: 0.72rem;
             color: var(--text-muted);
+        }
+
+
+        .crop-preview-shell {
+            margin-top: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        .crop-preview-stage {
+            position: relative;
+            width: 100%;
+            max-width: 820px;
+            aspect-ratio: 16/9;
+            background: #000;
+            margin: 0 auto;
+            overflow: hidden;
+            cursor: crosshair;
+            user-select: none;
+        }
+
+        .crop-preview-stage img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            pointer-events: none;
+        }
+
+        .crop-selection-box {
+            position: absolute;
+            border: 2px solid #00ff88;
+            background: rgba(0, 255, 136, 0.15);
+            display: none;
+            pointer-events: none;
         }
 
         /* ===== Buttons ===== */
@@ -874,6 +941,9 @@
                 </a>
 
                 <div class="nav-section-label">Utilities</div>
+                <a class="nav-link" href="#/streams" data-page="streams">
+                    <span class="nav-icon">&#128249;</span> Stream Test
+                </a>
                 <a class="nav-link" href="#/tools" data-page="tools">
                     <span class="nav-icon">&#9874;</span> Tools
                 </a>
@@ -979,6 +1049,11 @@
                         <div class="action-icon">&#9825;</div>
                         <div class="action-title">Health Check</div>
                         <div class="action-desc">Run pre-match system diagnostics</div>
+                    </div>
+                    <div class="action-card" onclick="location.hash='#/streams'">
+                        <div class="action-icon">&#9986;</div>
+                        <div class="action-title">Crop Setup</div>
+                        <div class="action-desc">Configure persistent crop for all camera streams</div>
                     </div>
                     <div class="action-card" onclick="location.hash='#/pipelines'">
                         <div class="action-icon">&#9881;</div>
@@ -1210,19 +1285,80 @@
                     </div>
                 </div>
 
-                <!-- Stream Debug Info (collapsible) -->
-                <div class="panel" style="margin-top: 20px;">
-                    <div class="panel-header" style="cursor:pointer;" onclick="document.getElementById('streamDebugBody').style.display = document.getElementById('streamDebugBody').style.display === 'none' ? 'block' : 'none';">
-                        Stream Debug Info (click to toggle)
+            </div>
+
+
+
+            <!-- ==================== STREAM CROP PAGE ==================== -->
+            <div class="page" id="page-streams">
+                <div class="page-header">
+                    <h1>Stream Crop Setup</h1>
+                    <div class="page-desc">Set your own crop for every camera stream (input + processed) and keep it after reboot</div>
+                </div>
+
+                <div class="alert alert-info">
+                    Configure crop once here and it is applied across dashboard previews, camera feeds, and stream cards. Crop settings are saved locally and restored after restarts.
+                </div>
+
+                <div class="panel" style="margin-bottom:14px;">
+                    <div class="panel-header">Crop Controls</div>
+                    <div class="panel-body">
+                        <div class="btn-group" style="margin-bottom:8px;">
+                            <button class="btn btn-blue" onclick="AVApp.renderStreamOnlyPage()">Refresh Stream View</button>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:10px;margin-bottom:10px;">
+                            <label style="font-size:0.78rem;color:var(--text-secondary);">Camera
+                                <select id="cropCamSelect" onchange="AVApp.onCropControlChange()" style="margin-top:4px;width:100%;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:6px;padding:8px;"></select>
+                            </label>
+                            <label style="font-size:0.78rem;color:var(--text-secondary);">Stream
+                                <select id="cropStreamSelect" onchange="AVApp.onCropControlChange()" style="margin-top:4px;width:100%;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:6px;padding:8px;">
+                                    <option value="input">Input (Raw)</option>
+                                    <option value="output">Processed (Output)</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div style="display:grid;gap:8px;">
+                            <label style="font-size:0.74rem;color:var(--text-secondary);">Horizontal (%): <span id="cropXVal">50</span>
+                                <input id="cropX" type="range" min="0" max="100" step="1" value="50" oninput="AVApp.onCropControlChange()" style="width:100%;">
+                            </label>
+                            <label style="font-size:0.74rem;color:var(--text-secondary);">Vertical (%): <span id="cropYVal">50</span>
+                                <input id="cropY" type="range" min="0" max="100" step="1" value="50" oninput="AVApp.onCropControlChange()" style="width:100%;">
+                            </label>
+                            <label style="font-size:0.74rem;color:var(--text-secondary);">Zoom: <span id="cropZoomVal">1.00</span>x
+                                <input id="cropZoom" type="range" min="1" max="2.2" step="0.01" value="1" oninput="AVApp.onCropControlChange()" style="width:100%;">
+                            </label>
+                        </div>
+                        <div class="btn-group" style="margin-top:10px;">
+                            <button class="btn btn-green" onclick="AVApp.saveCropProfiles()">Save Crop</button>
+                            <button class="btn" onclick="AVApp.resetCropForSelection()">Reset Selected Crop</button>
+                            <button class="btn" onclick="AVApp.resetAllCrops()">Reset All Crops</button>
+                        </div>
+                        <div class="btn-group" style="margin-top:8px;">
+                            <button class="btn btn-blue" onclick="AVApp.applySnipSelection()">Apply Rectangle Selection</button>
+                            <button class="btn" onclick="AVApp.clearSnipSelection()">Clear Selection</button>
+                        </div>
+                        <div class="crop-preview-shell">
+                            <div style="padding:8px 12px;background:var(--bg-header);border-bottom:1px solid var(--border-color);font-size:0.76rem;color:var(--text-secondary);">
+                                Snipping Crop Preview: drag a rectangle on this live preview, then click "Apply Rectangle Selection".
+                            </div>
+                            <div class="crop-preview-stage" id="cropPreviewStage"
+                                 onmousedown="AVApp.startSnipSelection(event)"
+                                 onmousemove="AVApp.moveSnipSelection(event)"
+                                 onmouseup="AVApp.endSnipSelection(event)"
+                                 onmouseleave="AVApp.endSnipSelection(event)">
+                                <img id="cropPreviewImg" src="" alt="Crop Preview">
+                                <div id="cropSelectionBox" class="crop-selection-box"></div>
+                            </div>
+                        </div>
+                        <div id="cropSetupOutput" class="tool-output" style="margin-top:10px;min-height:45px;">Adjust sliders or drag a rectangle on preview, then click Save Crop.</div>
                     </div>
-                    <div class="panel-body" id="streamDebugBody" style="display:none;">
-                        <div class="tool-output" id="streamDebugOutput" style="font-size: 0.75rem; min-height: 60px;">
-                            Click "Check Streams" to probe stream ports.
-                        </div>
-                        <div class="btn-group" style="margin-top: 10px;">
-                            <button class="btn btn-blue" onclick="AVApp.checkStreamHealth()">Check Streams</button>
-                            <button class="btn btn-green" onclick="AVApp.fetchCameraInfo()">Refresh Camera Info</button>
-                        </div>
+                </div>
+
+                <div class="section-title"><span class="section-icon">&#9724;</span> Stream-Only Feeds</div>
+                <div class="camera-feeds" id="streamOnlyFeedsContainer">
+                    <div class="empty-state">
+                        <div class="empty-icon">&#128247;</div>
+                        <p>Loading dedicated stream-only feeds...</p>
                     </div>
                 </div>
             </div>
@@ -1428,13 +1564,6 @@
                         <div class="tool-output" id="toolHealthOutput">Waiting...</div>
                     </div>
 
-                    <!-- Stream Port Checker -->
-                    <div class="tool-card">
-                        <h3>&#127909; Stream Health Checker</h3>
-                        <div class="tool-desc">Probe each camera's MJPEG stream ports to verify the engine is serving frames. Shows port status and stream URLs.</div>
-                        <button class="btn btn-blue" onclick="AVApp.toolStreamHealth()">Check Stream Ports</button>
-                        <div class="tool-output" id="toolStreamHealthOutput">Waiting...</div>
-                    </div>
 
                     <!-- Latency Monitor -->
                     <div class="tool-card">
@@ -1581,6 +1710,10 @@
                 allianceColor: localStorage.getItem('av_alliance') || 'blue',
                 driverMode: false,
                 distanceHistory: [],      // last N distance readings for chart
+                backend_ws_connected: false,
+                frontend_ws_connected: false,
+                cropProfiles: (() => { try { return JSON.parse(localStorage.getItem('av_stream_crops') || '{}'); } catch (e) { return {}; } })(),
+                cropConfigured: localStorage.getItem('av_crop_setup_done') === '1',
             };
             this.pollTimer = null;
             this.cameraPollTimer = null;
@@ -1594,6 +1727,8 @@
             this.MAX_DISTANCE_HISTORY = 60;
             this._pvWs = null;          // direct WebSocket to PV engine
             this._pvWsRetries = 0;
+            this._snipDrag = null;
+            this._snipSelection = null;
             this.init();
         }
 
@@ -1606,6 +1741,11 @@
             window.addEventListener('hashchange', () => this.navigateFromHash());
             // Draw empty field map immediately so canvas isn't blank
             this.drawFieldMap(0, 0, 0);
+
+            // First-time setup: take user directly to crop setup.
+            if (!this.state.cropConfigured && (!location.hash || location.hash === '#/dashboard' || location.hash === '#/')) {
+                setTimeout(() => { location.hash = '#/streams'; }, 400);
+            }
         }
 
         /* ======================== ROUTING ======================== */
@@ -1618,7 +1758,8 @@
                 '/pipelines': 'pipelines',
                 '/settings': 'settings',
                 '/tools': 'tools',
-                '/driver': 'driver'
+                '/driver': 'driver',
+                '/streams': 'streams'
             };
         }
 
@@ -1640,6 +1781,10 @@
             // Initialize driver view stream when entering
             if (pageName === 'driver') {
                 this.renderDriverView();
+            }
+
+            if (pageName === 'streams') {
+                this.renderStreamOnlyPage();
             }
         }
 
@@ -1703,7 +1848,7 @@
                     this.state.proxyOnline = data.proxy_online !== undefined ? data.proxy_online : true;
                     this.state.version = data.version || 'v3.2.0';
                     this.state.uptime = data.uptime || null;
-                    this.state.ws_connected = data.ws_connected || false;
+                    this.state.backend_ws_connected = data.ws_connected || false;
                     this.state.data_source = data.data_source || 'none';
                     this.state.consecutiveFailures = 0;
 
@@ -1882,57 +2027,83 @@
         /* ======================== PV WEBSOCKET (live data) ======================== */
 
         connectPVWebSocket() {
-            // Connect directly to PV's WebSocket through the bridge tunnel
-            // Bridge tunnels all WebSocket upgrades to PV at ws://engine:5800
+            // Prefer direct PhotonVision engine websocket first.
+            // This avoids proxy/tunnel edge cases and gives the most reliable live feed.
             const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = proto + '//' + window.location.host + '/websocket_data';
+            const host = window.location.hostname;
+            const candidates = [
+                proto + '//' + host + ':5800/websocket_data',
+                proto + '//' + window.location.host + '/websocket_data'
+            ];
 
-            try {
-                this._pvWs = new WebSocket(wsUrl);
-                this._pvWs.binaryType = 'arraybuffer';
+            const tryConnect = (idx) => {
+                const wsUrl = candidates[idx] || candidates[0];
+                try {
+                    this._pvWs = new WebSocket(wsUrl);
+                    this._pvWs.binaryType = 'arraybuffer';
 
-                this._pvWs.onopen = () => {
-                    console.log('[AV] PV WebSocket connected');
-                    this._pvWsRetries = 0;
-                };
+                    this._pvWs.onopen = () => {
+                        console.log('[AV] PV WebSocket connected via', wsUrl);
+                        this._pvWsRetries = 0;
+                        this.state.frontend_ws_connected = true;
+                    };
 
-                this._pvWs.onmessage = (event) => {
-                    // PV sends MessagePack binary frames
-                    // We can't decode without a msgpack library in the browser,
-                    // but we CAN detect that data is flowing (connection is live)
-                    if (event.data) {
-                        this.state.ws_connected = true;
+                    this._pvWs.onmessage = (event) => {
+                        if (event.data) this.state.frontend_ws_connected = true;
+                    };
+
+                    this._pvWs.onclose = () => {
+                        console.log('[AV] PV WebSocket closed:', wsUrl);
+                        this.state.frontend_ws_connected = false;
+                        this._pvWs = null;
+
+                        // If direct failed and proxy candidate exists, try proxy immediately.
+                        if (idx + 1 < candidates.length && this._pvWsRetries === 0) {
+                            tryConnect(idx + 1);
+                            return;
+                        }
+
+                        const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
+                        this._pvWsRetries++;
+                        setTimeout(() => this.connectPVWebSocket(), delay);
+                    };
+
+                    this._pvWs.onerror = () => {
+                        this.state.frontend_ws_connected = false;
+                    };
+                } catch (e) {
+                    if (idx + 1 < candidates.length) {
+                        tryConnect(idx + 1);
+                        return;
                     }
-                };
-
-                this._pvWs.onclose = () => {
-                    console.log('[AV] PV WebSocket closed, reconnecting...');
-                    this.state.ws_connected = false;
-                    this._pvWs = null;
-                    // Exponential backoff reconnect
+                    console.log('[AV] WebSocket error:', e);
                     const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
                     this._pvWsRetries++;
                     setTimeout(() => this.connectPVWebSocket(), delay);
-                };
+                }
+            };
 
-                this._pvWs.onerror = () => {
-                    // onclose will fire after this
-                    this.state.ws_connected = false;
-                };
-            } catch (e) {
-                console.log('[AV] WebSocket error:', e);
-                const delay = Math.min(1000 * Math.pow(2, this._pvWsRetries), 15000);
-                this._pvWsRetries++;
-                setTimeout(() => this.connectPVWebSocket(), delay);
-            }
+            tryConnect(0);
         }
 
         /* ======================== STREAM URL HELPERS ======================== */
 
         getDirectStreamUrl(camIdx, type) {
-            // Direct to cscore MJPEG - bypasses proxy entirely
+            // Direct to PhotonVision camera stream port (prefer discovered dynamic ports).
             const host = window.location.hostname;
-            const port = this.STREAM_BASE_PORT + (camIdx * 2) + (type === 'output' ? 1 : 0);
+            let inPort = this.STREAM_BASE_PORT + (camIdx * 2);
+            let outPort = inPort + 1;
+
+            const info = this.state.cameraInfo && Array.isArray(this.state.cameraInfo.engineCameras)
+                ? this.state.cameraInfo.engineCameras.find(c => c.index === camIdx)
+                : null;
+
+            if (info) {
+                if (info.inputStreamPort) inPort = info.inputStreamPort;
+                if (info.outputStreamPort) outPort = info.outputStreamPort;
+            }
+
+            const port = type === 'output' ? outPort : inPort;
             return 'http://' + host + ':' + port + '/stream.mjpg';
         }
 
@@ -2001,6 +2172,335 @@
                     output.className = 'tool-output error';
                 }
             }
+        }
+
+
+        getCropKey(camIdx, streamType) {
+            return String(camIdx) + ':' + (streamType === 'input' ? 'input' : 'output');
+        }
+
+        getCropProfile(camIdx, streamType) {
+            const key = this.getCropKey(camIdx, streamType);
+            const d = this.state.cropProfiles && this.state.cropProfiles[key] ? this.state.cropProfiles[key] : {};
+            const x = Math.max(0, Math.min(100, Number(d.x ?? 50)));
+            const y = Math.max(0, Math.min(100, Number(d.y ?? 50)));
+            const zoom = Math.max(1, Math.min(2.2, Number(d.zoom ?? 1)));
+            return { x, y, zoom };
+        }
+
+        getCropStyle(camIdx, streamType) {
+            const c = this.getCropProfile(camIdx, streamType);
+            return 'object-fit:cover;object-position:' + c.x + '% ' + c.y + '%;transform:scale(' + c.zoom.toFixed(2) + ');transform-origin:center center;';
+        }
+
+        applyCropToImage(img, camIdx, streamType) {
+            if (!img) return;
+            img.style.objectFit = 'cover';
+            const c = this.getCropProfile(camIdx, streamType);
+            img.style.objectPosition = c.x + '% ' + c.y + '%';
+            img.style.transform = 'scale(' + c.zoom.toFixed(2) + ')';
+            img.style.transformOrigin = 'center center';
+        }
+
+        applyCropToAllVisibleStreams() {
+            document.querySelectorAll('img[data-cam-index][data-stream-type]').forEach(img => {
+                const cam = parseInt(img.getAttribute('data-cam-index'), 10);
+                const st = img.getAttribute('data-stream-type') || 'output';
+                if (!isNaN(cam)) this.applyCropToImage(img, cam, st);
+            });
+            const driver = document.getElementById('driverMainStream');
+            if (driver) this.applyCropToImage(driver, 0, 'output');
+        }
+
+        populateCropCameraOptions() {
+            const sel = document.getElementById('cropCamSelect');
+            if (!sel) return;
+            const cams = this.state.cameras || [];
+            const prev = sel.value;
+            sel.innerHTML = '';
+            cams.forEach(cam => {
+                const opt = document.createElement('option');
+                opt.value = String(cam.index);
+                opt.textContent = (cam.name || ('Camera ' + cam.index)) + ' (#' + cam.index + ')';
+                sel.appendChild(opt);
+            });
+            if (cams.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '0';
+                opt.textContent = 'Camera 0';
+                sel.appendChild(opt);
+            }
+            if (prev && sel.querySelector('option[value="' + prev + '"]')) sel.value = prev;
+        }
+
+        loadCropControlsForSelection() {
+            this.populateCropCameraOptions();
+            const camSel = document.getElementById('cropCamSelect');
+            const streamSel = document.getElementById('cropStreamSelect');
+            if (!camSel || !streamSel) return;
+            const camIdx = parseInt(camSel.value || '0', 10);
+            const st = streamSel.value || 'output';
+            const c = this.getCropProfile(camIdx, st);
+            const xEl = document.getElementById('cropX');
+            const yEl = document.getElementById('cropY');
+            const zEl = document.getElementById('cropZoom');
+            if (xEl) xEl.value = String(c.x);
+            if (yEl) yEl.value = String(c.y);
+            if (zEl) zEl.value = String(c.zoom);
+            const xv = document.getElementById('cropXVal'); if (xv) xv.textContent = String(c.x);
+            const yv = document.getElementById('cropYVal'); if (yv) yv.textContent = String(c.y);
+            const zv = document.getElementById('cropZoomVal'); if (zv) zv.textContent = c.zoom.toFixed(2);
+            this.refreshCropPreviewSource();
+        }
+
+        onCropControlChange() {
+            const camSel = document.getElementById('cropCamSelect');
+            const streamSel = document.getElementById('cropStreamSelect');
+            const xEl = document.getElementById('cropX');
+            const yEl = document.getElementById('cropY');
+            const zEl = document.getElementById('cropZoom');
+            if (!camSel || !streamSel || !xEl || !yEl || !zEl) return;
+            const camIdx = parseInt(camSel.value || '0', 10);
+            const st = streamSel.value || 'output';
+            const x = Math.max(0, Math.min(100, Number(xEl.value)));
+            const y = Math.max(0, Math.min(100, Number(yEl.value)));
+            const zoom = Math.max(1, Math.min(2.2, Number(zEl.value)));
+            this.state.cropProfiles[this.getCropKey(camIdx, st)] = { x, y, zoom };
+            const xv = document.getElementById('cropXVal'); if (xv) xv.textContent = String(Math.round(x));
+            const yv = document.getElementById('cropYVal'); if (yv) yv.textContent = String(Math.round(y));
+            const zv = document.getElementById('cropZoomVal'); if (zv) zv.textContent = zoom.toFixed(2);
+            this.applyCropToAllVisibleStreams();
+            this.refreshCropPreviewSource();
+        }
+
+        saveCropProfiles() {
+            localStorage.setItem('av_stream_crops', JSON.stringify(this.state.cropProfiles || {}));
+            localStorage.setItem('av_crop_setup_done', '1');
+            this.state.cropConfigured = true;
+            const out = document.getElementById('cropSetupOutput');
+            if (out) {
+                out.textContent = 'Crop settings saved. They will remain after restart.';
+                out.className = 'tool-output success';
+            }
+        }
+
+        resetCropForSelection() {
+            const camSel = document.getElementById('cropCamSelect');
+            const streamSel = document.getElementById('cropStreamSelect');
+            if (!camSel || !streamSel) return;
+            const key = this.getCropKey(parseInt(camSel.value || '0', 10), streamSel.value || 'output');
+            delete this.state.cropProfiles[key];
+            this.loadCropControlsForSelection();
+            this.applyCropToAllVisibleStreams();
+            this.refreshCropPreviewSource();
+        }
+
+        resetAllCrops() {
+            this.state.cropProfiles = {};
+            localStorage.removeItem('av_stream_crops');
+            localStorage.removeItem('av_crop_setup_done');
+            this.state.cropConfigured = false;
+            this.loadCropControlsForSelection();
+            this.applyCropToAllVisibleStreams();
+            const out = document.getElementById('cropSetupOutput');
+            if (out) {
+                out.textContent = 'All crop settings reset to defaults.';
+                out.className = 'tool-output warn';
+            }
+        }
+
+        refreshCropPreviewSource() {
+            const img = document.getElementById('cropPreviewImg');
+            const camSel = document.getElementById('cropCamSelect');
+            const streamSel = document.getElementById('cropStreamSelect');
+            if (!img || !camSel || !streamSel) return;
+
+            const camIdx = parseInt(camSel.value || '0', 10);
+            const st = streamSel.value || 'output';
+            img.setAttribute('data-preview-cam-index', String(camIdx));
+            img.setAttribute('data-preview-stream-type', st);
+            const direct = this.getDirectStreamUrl(camIdx, st);
+            const proxy = this.getProxyStreamUrl(camIdx, st);
+            const frame = this.getFrameFallbackUrl(camIdx, st);
+
+            img.style.objectFit = 'contain';
+            img.style.objectPosition = '50% 50%';
+            img.style.transform = 'none';
+
+            const current = (img.getAttribute('src') || '').split('?')[0];
+            if (!current || (current !== direct && current !== proxy && current !== frame)) {
+                img.src = direct;
+                img.onerror = () => {
+                    if ((img.getAttribute('src') || '').split('?')[0] === direct) {
+                        img.src = proxy;
+                    } else if ((img.getAttribute('src') || '').split('?')[0] === proxy) {
+                        img.src = frame + '?_t=' + Date.now();
+                    }
+                };
+            }
+        }
+
+        _stagePosToPct(stage, x, y) {
+            const r = stage.getBoundingClientRect();
+            const px = Math.max(0, Math.min(1, (x - r.left) / Math.max(1, r.width)));
+            const py = Math.max(0, Math.min(1, (y - r.top) / Math.max(1, r.height)));
+            return { px, py };
+        }
+
+        startSnipSelection(event) {
+            const stage = document.getElementById('cropPreviewStage');
+            if (!stage) return;
+            const { px, py } = this._stagePosToPct(stage, event.clientX, event.clientY);
+            this._snipDrag = { x0: px, y0: py, x1: px, y1: py };
+            this._snipSelection = null;
+            this._renderSnipSelection();
+        }
+
+        moveSnipSelection(event) {
+            if (!this._snipDrag) return;
+            const stage = document.getElementById('cropPreviewStage');
+            if (!stage) return;
+            const { px, py } = this._stagePosToPct(stage, event.clientX, event.clientY);
+            this._snipDrag.x1 = px;
+            this._snipDrag.y1 = py;
+            this._renderSnipSelection();
+        }
+
+        endSnipSelection(event) {
+            if (!this._snipDrag) return;
+            if (event) this.moveSnipSelection(event);
+            const d = this._snipDrag;
+            const x0 = Math.min(d.x0, d.x1);
+            const y0 = Math.min(d.y0, d.y1);
+            const x1 = Math.max(d.x0, d.x1);
+            const y1 = Math.max(d.y0, d.y1);
+            const w = x1 - x0;
+            const h = y1 - y0;
+            this._snipDrag = null;
+            if (w < 0.02 || h < 0.02) {
+                this._snipSelection = null;
+            } else {
+                this._snipSelection = { x: x0, y: y0, w, h };
+            }
+            this._renderSnipSelection();
+        }
+
+        _renderSnipSelection() {
+            const box = document.getElementById('cropSelectionBox');
+            if (!box) return;
+            const s = this._snipDrag ? {
+                x: Math.min(this._snipDrag.x0, this._snipDrag.x1),
+                y: Math.min(this._snipDrag.y0, this._snipDrag.y1),
+                w: Math.abs(this._snipDrag.x1 - this._snipDrag.x0),
+                h: Math.abs(this._snipDrag.y1 - this._snipDrag.y0),
+            } : this._snipSelection;
+
+            if (!s) {
+                box.style.display = 'none';
+                return;
+            }
+            box.style.display = 'block';
+            box.style.left = (s.x * 100) + '%';
+            box.style.top = (s.y * 100) + '%';
+            box.style.width = (s.w * 100) + '%';
+            box.style.height = (s.h * 100) + '%';
+        }
+
+        applySnipSelection() {
+            if (!this._snipSelection) {
+                const out = document.getElementById('cropSetupOutput');
+                if (out) {
+                    out.textContent = 'Draw a rectangle on the preview first.';
+                    out.className = 'tool-output warn';
+                }
+                return;
+            }
+            const camSel = document.getElementById('cropCamSelect');
+            const streamSel = document.getElementById('cropStreamSelect');
+            if (!camSel || !streamSel) return;
+
+            const camIdx = parseInt(camSel.value || '0', 10);
+            const st = streamSel.value || 'output';
+            const r = this._snipSelection;
+            const cx = (r.x + (r.w / 2)) * 100;
+            const cy = (r.y + (r.h / 2)) * 100;
+            const zoom = Math.max(1, Math.min(2.2, 1 / Math.max(r.w, r.h)));
+
+            this.state.cropProfiles[this.getCropKey(camIdx, st)] = {
+                x: Math.round(cx),
+                y: Math.round(cy),
+                zoom: Number(zoom.toFixed(2))
+            };
+            this.loadCropControlsForSelection();
+            this.applyCropToAllVisibleStreams();
+
+            const out = document.getElementById('cropSetupOutput');
+            if (out) {
+                out.textContent = 'Rectangle applied. Click Save Crop to persist after restart.';
+                out.className = 'tool-output success';
+            }
+        }
+
+        clearSnipSelection() {
+            this._snipSelection = null;
+            this._snipDrag = null;
+            this._renderSnipSelection();
+        }
+
+        renderStreamOnlyPage() {
+            const container = document.getElementById('streamOnlyFeedsContainer');
+            if (!container) return;
+
+            const cameras = this.state.cameras || [];
+            if (cameras.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div><p>No cameras discovered yet. Try running stream test suite.</p></div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            this.loadCropControlsForSelection();
+            cameras.forEach(cam => {
+                const card = document.createElement('div');
+                card.className = 'camera-feed-block';
+                const inUrl = this.getProxyStreamUrl(cam.index, 'input');
+                const outUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const directIn = this.getDirectStreamUrl(cam.index, 'input');
+                const directOut = this.getDirectStreamUrl(cam.index, 'output');
+                const frameIn = this.getFrameFallbackUrl(cam.index, 'input');
+                const frameOut = this.getFrameFallbackUrl(cam.index, 'output');
+                card.innerHTML =
+                    '<div class="camera-feed-header">' +
+                    '<span class="feed-title">' + this.escapeHtml(cam.name || ('Camera ' + cam.index)) + '</span>' +
+                    '<span class="feed-meta"><span>Stream-only view</span><span>Index: ' + cam.index + '</span></span>' +
+                    '</div>' +
+                    '<div class="feed-pair">' +
+                        '<div class="feed-panel">' +
+                            '<span class="feed-label">Input Stream</span>' +
+                            '<img src="' + this.escapeAttr(directIn) + '" alt="Input Stream" ' +
+                                 'data-proxy-url="' + this.escapeAttr(inUrl) + '" ' +
+                                 'data-direct-url="' + this.escapeAttr(directIn) + '" ' +
+                                 'data-frame-url="' + this.escapeAttr(frameIn) + '" ' +
+                                 'data-cam-index="' + cam.index + '" data-stream-type="input" ' +
+                                 'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'input')) + '" ' +
+                                 'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
+                                 'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
+                        '</div>' +
+                        '<div class="feed-panel">' +
+                            '<span class="feed-label">Output Stream</span>' +
+                            '<img src="' + this.escapeAttr(directOut) + '" alt="Output Stream" ' +
+                                 'data-proxy-url="' + this.escapeAttr(outUrl) + '" ' +
+                                 'data-direct-url="' + this.escapeAttr(directOut) + '" ' +
+                                 'data-frame-url="' + this.escapeAttr(frameOut) + '" ' +
+                                 'data-cam-index="' + cam.index + '" data-stream-type="output" ' +
+                                 'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'output')) + '" ' +
+                                 'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                                 'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
+                        '</div>' +
+                    '</div>';
+                container.appendChild(card);
+            });
+            this.applyCropToAllVisibleStreams();
+            this.refreshCropPreviewSource();
         }
 
         async toolStreamHealth() {
@@ -2638,7 +3138,7 @@
             }
             this.setDot('dotProxy', 'txtProxy', s.proxyOnline, false);
             // PV data link (WebSocket to engine)
-            const wsConnected = s.ws_connected || (s.targets && s.targets.wsConnected);
+            const wsConnected = s.backend_ws_connected || s.frontend_ws_connected || (s.targets && s.targets.wsConnected);
             const dataSource = s.data_source || (s.targets && s.targets.dataSource) || 'none';
             if (wsConnected) {
                 this.setDot('dotWebsocket', 'txtWebsocket', true, false);
@@ -2761,29 +3261,53 @@
                 return;
             }
 
-            // Only re-render if camera count changed
+            // Re-render when camera count changes OR preview layout is stale.
             const existing = container.querySelectorAll('.camera-preview-card');
-            if (existing.length === cameras.length) {
+            if (existing.length === cameras.length && container.querySelector('.camera-preview-streams')) {
                 this.refreshBrokenImages(container);
                 return;
             }
 
             container.innerHTML = '';
+            this.loadCropControlsForSelection();
             cameras.forEach(cam => {
                 const card = document.createElement('div');
                 card.className = 'camera-preview-card';
                 card.setAttribute('data-cam-index', cam.index);
 
-                const directUrl = this.getDirectStreamUrl(cam.index, 'output');
-                const proxyUrl = this.getProxyStreamUrl(cam.index, 'output');
-                const frameUrl = this.getFrameFallbackUrl(cam.index, 'output');
+                const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
+                const proxyInputUrl = this.getProxyStreamUrl(cam.index, 'input');
+                const frameInputUrl = this.getFrameFallbackUrl(cam.index, 'input');
+
+                const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
+                const proxyOutputUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const frameOutputUrl = this.getFrameFallbackUrl(cam.index, 'output');
+
                 card.innerHTML =
-                    '<img class="cam-thumb" src="' + this.escapeAttr(directUrl) + '" alt="' + this.escapeAttr(cam.name) + '" ' +
-                        'data-direct-url="' + this.escapeAttr(directUrl) + '" ' +
-                        'data-proxy-url="' + this.escapeAttr(proxyUrl) + '" ' +
-                        'data-frame-url="' + this.escapeAttr(frameUrl) + '" ' +
-                        'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
-                        'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')" loading="lazy">' +
+                    '<div class="camera-preview-streams">' +
+                        '<div class="cam-stream">' +
+                            '<span class="cam-stream-label">Input</span>' +
+                            '<img class="cam-thumb" src="' + this.escapeAttr(directInputUrl) + '" alt="' + this.escapeAttr((cam.name || 'Camera ' + cam.index) + ' Input') + '" ' +
+                                'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
+                                'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
+                                'data-frame-url="' + this.escapeAttr(frameInputUrl) + '" ' +
+                                'data-cam-index="' + cam.index + '" data-stream-type="input" ' +
+                                'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'input')) + '" ' +
+                                'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
+                                'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')" loading="lazy">' +
+                        '</div>' +
+                        '<div class="cam-stream">' +
+                            '<span class="cam-stream-label">Processed</span>' +
+                            '<img class="cam-thumb" src="' + this.escapeAttr(directOutputUrl) + '" alt="' + this.escapeAttr((cam.name || 'Camera ' + cam.index) + ' Output') + '" ' +
+                                'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
+                                'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
+                                'data-frame-url="' + this.escapeAttr(frameOutputUrl) + '" ' +
+                                'data-cam-index="' + cam.index + '" data-stream-type="output" ' +
+                                'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'output')) + '" ' +
+                                'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                                'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')" loading="lazy">' +
+                        '</div>' +
+                    '</div>' +
                     '<div class="cam-info">' +
                     '<span class="cam-name">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
                     '<span class="cam-index">#' + cam.index + (cam.calibrated ? ' &#10003;' : '') + '</span>' +
@@ -2846,6 +3370,7 @@
             }
 
             container.innerHTML = '';
+            this.loadCropControlsForSelection();
             cameras.forEach(cam => {
                 const block = document.createElement('div');
                 block.className = 'camera-feed-block';
@@ -2886,6 +3411,8 @@
                         'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
                         'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
                         'data-frame-url="' + this.escapeAttr(frameInputUrl) + '" ' +
+                        'data-cam-index="' + cam.index + '" data-stream-type="input" ' +
+                        'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'input')) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
                     '</div>' +
@@ -2896,6 +3423,8 @@
                         'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
                         'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
                         'data-frame-url="' + this.escapeAttr(frameOutputUrl) + '" ' +
+                        'data-cam-index="' + cam.index + '" data-stream-type="output" ' +
+                        'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'output')) + '" ' +
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
                     '</div>' +
@@ -3142,6 +3671,9 @@
             const fallback = document.getElementById('driverStreamFallback');
             if (streamImg && !streamImg.src && this.state.cameras.length > 0) {
                 const url = this.getDirectStreamUrl(0, 'output');
+                streamImg.setAttribute('data-cam-index', '0');
+                streamImg.setAttribute('data-stream-type', 'output');
+                this.applyCropToImage(streamImg, 0, 'output');
                 streamImg.src = url;
                 streamImg.onerror = () => {
                     streamImg.style.display = 'none';
@@ -3282,6 +3814,7 @@
             if (existing.length === cameras.length) return;
 
             container.innerHTML = '';
+            this.loadCropControlsForSelection();
             cameras.forEach(cam => {
                 const card = document.createElement('div');
                 card.className = 'calib-card';
@@ -3374,6 +3907,7 @@
         handleImgLoad(img, camIdx, streamType) {
             img.style.display = '';
             img.style.opacity = '1';
+            this.applyCropToImage(img, camIdx, streamType);
             // Remove placeholder if stream came back
             const panel = img.closest('.feed-panel');
             if (panel) {
