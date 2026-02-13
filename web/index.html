@@ -2940,7 +2940,6 @@
             const rm = m % 60;
             return h + 'h ' + rm + 'm';
         }
-
         renderCameraPreviews() {
             const container = document.getElementById('dashCameraPreviews');
             const cameras = this.state.cameras;
@@ -2951,9 +2950,8 @@
                 return;
             }
 
-            // Re-render when camera count changes OR preview layout is stale.
-            const existing = container.querySelectorAll('.camera-preview-card');
-            if (existing.length === cameras.length && container.querySelector('.camera-preview-streams')) {
+            const existing = container.querySelectorAll('.camera-feed-block');
+            if (existing.length === cameras.length) {
                 this.refreshBrokenImages(container);
                 return;
             }
@@ -2961,49 +2959,48 @@
             container.innerHTML = '';
             this.loadCropControlsForSelection();
             cameras.forEach(cam => {
-                const card = document.createElement('div');
-                card.className = 'camera-preview-card';
-                card.setAttribute('data-cam-index', cam.index);
+                const block = document.createElement('div');
+                block.className = 'camera-feed-block';
+                block.setAttribute('data-cam-index', cam.index);
 
-                const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
                 const proxyInputUrl = this.getProxyStreamUrl(cam.index, 'input');
-                const frameInputUrl = this.getFrameFallbackUrl(cam.index, 'input');
-
-                const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
                 const proxyOutputUrl = this.getProxyStreamUrl(cam.index, 'output');
+                const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
+                const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
+                const frameInputUrl = this.getFrameFallbackUrl(cam.index, 'input');
                 const frameOutputUrl = this.getFrameFallbackUrl(cam.index, 'output');
 
-                card.innerHTML =
-                    '<div class="camera-preview-streams">' +
-                        '<div class="cam-stream">' +
-                            '<span class="cam-stream-label">Input</span>' +
-                            '<img class="cam-thumb" src="' + this.escapeAttr(directInputUrl) + '" alt="' + this.escapeAttr((cam.name || 'Camera ' + cam.index) + ' Input') + '" ' +
-                                'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
-                                'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
-                                'data-frame-url="' + this.escapeAttr(frameInputUrl) + '" ' +
-                                'data-cam-index="' + cam.index + '" data-stream-type="input" ' +
-                                'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'input')) + '" ' +
-                                'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
-                                'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')" loading="lazy">' +
-                        '</div>' +
-                        '<div class="cam-stream">' +
-                            '<span class="cam-stream-label">Processed</span>' +
-                            '<img class="cam-thumb" src="' + this.escapeAttr(directOutputUrl) + '" alt="' + this.escapeAttr((cam.name || 'Camera ' + cam.index) + ' Output') + '" ' +
-                                'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
-                                'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
-                                'data-frame-url="' + this.escapeAttr(frameOutputUrl) + '" ' +
-                                'data-cam-index="' + cam.index + '" data-stream-type="output" ' +
-                                'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'output')) + '" ' +
-                                'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
-                                'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')" loading="lazy">' +
-                        '</div>' +
+                block.innerHTML =
+                    '<div class="camera-feed-header">' +
+                    '<span class="feed-title">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
+                    '<span class="feed-meta"><span>Dashboard Preview</span><span>Index: ' + cam.index + '</span></span>' +
                     '</div>' +
-                    '<div class="cam-info">' +
-                    '<span class="cam-name">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
-                    '<span class="cam-index">#' + cam.index + (cam.calibrated ? ' &#10003;' : '') + '</span>' +
+                    '<div class="feed-pair">' +
+                        '<div class="feed-panel">' +
+                            '<span class="feed-label">Raw Feed</span>' +
+                            '<img src="' + this.escapeAttr(directInputUrl) + '" alt="Raw Feed" ' +
+                                 'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
+                                 'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
+                                 'data-frame-url="' + this.escapeAttr(frameInputUrl) + '" ' +
+                                 'data-cam-index="' + cam.index + '" data-stream-type="input" ' +
+                                 'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'input')) + '" ' +
+                                 'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'input\')" ' +
+                                 'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
+                        '</div>' +
+                        '<div class="feed-panel">' +
+                            '<span class="feed-label">Processed Feed</span>' +
+                            '<img src="' + this.escapeAttr(directOutputUrl) + '" alt="Processed Feed" ' +
+                                 'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
+                                 'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
+                                 'data-frame-url="' + this.escapeAttr(frameOutputUrl) + '" ' +
+                                 'data-cam-index="' + cam.index + '" data-stream-type="output" ' +
+                                 'style="' + this.escapeAttr(this.getCropStyle(cam.index, 'output')) + '" ' +
+                                 'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
+                                 'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
+                        '</div>' +
                     '</div>';
 
-                container.appendChild(card);
+                container.appendChild(block);
             });
         }
 
