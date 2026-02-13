@@ -942,10 +942,7 @@
 
                 <div class="nav-section-label">Utilities</div>
                 <a class="nav-link" href="#/streams" data-page="streams">
-                    <span class="nav-icon">&#128249;</span> Stream Test
-                </a>
-                <a class="nav-link" href="#/tools" data-page="tools">
-                    <span class="nav-icon">&#9874;</span> Tools
+                    <span class="nav-icon">&#128249;</span> Stream Crop
                 </a>
             </div>
 
@@ -1251,16 +1248,6 @@
                     </div>
                 </div>
 
-                <!-- Detected Cameras -->
-                <div class="section-title"><span class="section-icon">&#128249;</span> Detected Cameras</div>
-                <div class="panel">
-                    <div id="dashCameraList">
-                        <div class="camera-item">
-                            <span class="cam-name">Scanning...</span>
-                            <span class="cam-device">Detecting cameras</span>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <!-- ==================== CAMERAS PAGE ==================== -->
@@ -1270,13 +1257,9 @@
                     <div class="page-desc">Live input (raw) and output (detection overlay) MJPEG streams from the detection engine</div>
                 </div>
 
-                <!-- Stream source explanation -->
                 <div class="alert alert-info" id="cameraSourceBanner">
-                    Streams are sourced from the PhotonVision engine backend. The engine owns the camera devices and serves MJPEG streams which this dashboard proxies.
+                    All camera feeds on this dashboard are direct PhotonVision streams.
                 </div>
-
-                <!-- Stream health status -->
-                <div id="streamHealthBar" style="display:none;" class="alert alert-warn"></div>
 
                 <div class="camera-feeds" id="cameraFeedsContainer">
                     <div class="empty-state">
@@ -1367,7 +1350,16 @@
             <div class="page" id="page-calibration">
                 <div class="page-header">
                     <h1>Camera Calibration</h1>
-                    <div class="page-desc">Calibrate cameras for accurate 3D AprilTag pose estimation</div>
+                    <div class="page-desc">Use PhotonVision's calibration workflow for accurate 3D AprilTag pose estimation</div>
+                </div>
+
+                <div class="panel" style="margin-bottom:16px;">
+                    <div class="panel-body" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                        <div style="font-size:0.86rem;color:var(--text-secondary);max-width:640px;">
+                            Follow PhotonVision's guided process: open calibration, capture snapshots from multiple angles, then save the calibration.
+                        </div>
+                        <a class="btn btn-green" href="/pv/" target="_blank">Start One-Button Calibration in PhotonVision</a>
+                    </div>
                 </div>
 
                 <!-- Calibration Status Per Camera -->
@@ -1392,18 +1384,15 @@
                     </p>
                 </div>
 
-                <!-- Step-by-Step -->
                 <div class="info-box">
-                    <h3>Step-by-Step Calibration Guide</h3>
+                    <h3>PhotonVision Calibration Sequence</h3>
                     <ol>
                         <li><strong>Print a ChArUco board.</strong> Run: <code>./scripts/aruco_calibration.py --generate</code> to create a printable PDF. Tape it flat to a rigid surface.</li>
-                        <li><strong>Open the engine pipeline config.</strong> Click the button below or go to <code>/pv/</code> in your browser.</li>
-                        <li><strong>Select your camera</strong> from the camera dropdown in the sidebar.</li>
-                        <li><strong>Go to the Calibration tab</strong> in the pipeline settings.</li>
-                        <li><strong>Set the resolution</strong> to <strong>640x480</strong> (recommended for consistent calibration).</li>
-                        <li><strong>Take 15&ndash;25 snapshots</strong> of the ChArUco board from different angles, distances, and positions. Cover the full frame, tilt the board in various orientations.</li>
-                        <li><strong>Run calibration.</strong> Click "Calibrate" and wait for it to complete. The reprojection error should be below 1.0px for good results.</li>
-                        <li><strong>Enable 3D.</strong> Once complete, go to the AprilTag pipeline and toggle <strong>3D</strong> on. Your camera now reports accurate pose data.</li>
+                        <li><strong>Click "Start One-Button Calibration in PhotonVision" above.</strong></li>
+                        <li><strong>Select a camera</strong> and open its <strong>Calibration</strong> tab in PhotonVision.</li>
+                        <li><strong>Capture 15&ndash;25 snapshots</strong> from different distances and angles while keeping the whole board visible.</li>
+                        <li><strong>Run calibration and save.</strong> Aim for reprojection error under 1.0px.</li>
+                        <li><strong>Repeat per camera</strong> and verify 3D pose is enabled for your AprilTag pipeline.</li>
                     </ol>
                     <p class="warning-text">Repeat calibration for each camera. Accurate calibration is critical for pose accuracy in autonomous.</p>
                 </div>
@@ -1502,87 +1491,6 @@
                         <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 10px;">Fetch the full engine settings JSON for debugging.</p>
                         <button class="btn btn-blue" onclick="AVApp.fetchEngineSettings()">Fetch Engine Settings</button>
                         <div class="tool-output" id="engineSettingsOutput" style="display:none; margin-top: 10px; max-height: 250px; overflow-y: auto;"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ==================== TOOLS PAGE ==================== -->
-            <div class="page" id="page-tools">
-                <div class="page-header">
-                    <h1>Tools</h1>
-                    <div class="page-desc">Diagnostic tools, snapshots, and system utilities</div>
-                </div>
-
-                <div class="tools-grid">
-                    <!-- Camera Snapshot -->
-                    <div class="tool-card">
-                        <h3>&#128247; Camera Snapshot</h3>
-                        <div class="tool-desc">Save a timestamped snapshot from all connected cameras for post-match analysis and debugging.</div>
-                        <button class="btn btn-green" onclick="AVApp.toolSnapshot()">Take Snapshot</button>
-                        <div class="tool-output" id="toolSnapshotOutput">Waiting...</div>
-                    </div>
-
-                    <!-- Network Diagnostics -->
-                    <div class="tool-card">
-                        <h3>&#127760; Network Diagnostics</h3>
-                        <div class="tool-desc">Check network connectivity, DNS resolution, and NetworkTables communication with the roboRIO.</div>
-                        <p style="font-size: 0.78rem; color: var(--text-secondary);">Run on the coprocessor:</p>
-                        <code style="display:block;background:var(--bg-primary);padding:8px 12px;border-radius:6px;color:var(--accent-green);font-size:0.78rem;margin-top:6px;">./scripts/network_diagnostics.sh</code>
-                    </div>
-
-                    <!-- Match Mode -->
-                    <div class="tool-card">
-                        <h3>&#127942; Match Mode</h3>
-                        <div class="tool-desc">Match mode optimizes detection latency. Configure pipeline settings for competition.</div>
-                        <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6;">
-                            <strong>To enable:</strong> Open Pipeline Config, select your pipeline, lower the resolution to 640x480, reduce exposure, and disable any unnecessary processing.<br>
-                            <strong>To disable:</strong> Revert to higher resolution settings for calibration or testing.
-                        </p>
-                        <button class="btn btn-blue" onclick="location.hash='#/pipelines'" style="margin-top: 10px;">Open Pipeline Config</button>
-                    </div>
-
-                    <!-- ArUco Calibration -->
-                    <div class="tool-card">
-                        <h3>&#9678; ArUco Calibration</h3>
-                        <div class="tool-desc">Generate a ChArUco calibration board and run the calibration script.</div>
-                        <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6;">
-                            <strong>Generate board:</strong>
-                        </p>
-                        <code style="display:block;background:var(--bg-primary);padding:8px 12px;border-radius:6px;color:var(--accent-green);font-size:0.78rem;margin:6px 0;">./scripts/aruco_calibration.py --generate</code>
-                        <p style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.6;">
-                            <strong>Run calibration:</strong>
-                        </p>
-                        <code style="display:block;background:var(--bg-primary);padding:8px 12px;border-radius:6px;color:var(--accent-green);font-size:0.78rem;margin:6px 0;">./scripts/aruco_calibration.py --calibrate --camera 0</code>
-                        <button class="btn btn-purple" onclick="location.hash='#/calibration'" style="margin-top: 10px;">Go to Calibration Guide</button>
-                    </div>
-
-                    <!-- System Health Check -->
-                    <div class="tool-card">
-                        <h3>&#9825; System Health Check</h3>
-                        <div class="tool-desc">Verify all AprilVision components are running and communicating correctly.</div>
-                        <button class="btn btn-green" onclick="AVApp.toolHealthCheck()">Run Health Check</button>
-                        <div class="tool-output" id="toolHealthOutput">Waiting...</div>
-                    </div>
-
-
-                    <!-- Latency Monitor -->
-                    <div class="tool-card">
-                        <h3>&#9201; Latency Monitor</h3>
-                        <div class="tool-desc">Displays the round-trip time to the AprilVision engine API.</div>
-                        <div style="margin-top: 10px;">
-                            <div class="settings-row">
-                                <span class="label">Last Response Time</span>
-                                <span class="value" id="toolLatencyValue">--</span>
-                            </div>
-                            <div class="settings-row">
-                                <span class="label">Average (last 10)</span>
-                                <span class="value" id="toolLatencyAvg">--</span>
-                            </div>
-                            <div class="settings-row">
-                                <span class="label">Status</span>
-                                <span class="value"><span class="dot" id="toolLatencyDot"></span> <span id="toolLatencyStatus">--</span></span>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -1696,9 +1604,6 @@
                 uptime: null,
                 cameras: [],
                 cameraStreams: [],
-                detectedCameras: [],
-                cameraInfo: null,
-                streamHealth: null,
                 engineSettings: null,
                 teamNumber: null,
                 latencyHistory: [],
@@ -1757,7 +1662,6 @@
                 '/calibration': 'calibration',
                 '/pipelines': 'pipelines',
                 '/settings': 'settings',
-                '/tools': 'tools',
                 '/driver': 'driver',
                 '/streams': 'streams'
             };
@@ -1815,11 +1719,9 @@
         startPolling() {
             this.fetchStatus();
             this.fetchCameras();
-            this.fetchCameraInfo();
             this.fetchTargets();
             this.pollTimer = setInterval(() => this.fetchStatus(), 3000);
             this.cameraPollTimer = setInterval(() => this.fetchCameras(), 10000);
-            setInterval(() => this.fetchCameraInfo(), 15000);
             // Target/pose data - poll fast for real-time feel
             setInterval(() => this.fetchTargets(), 500);
             // Performance data
@@ -1873,7 +1775,6 @@
             this.renderCameraFeeds();
             this.renderCalibrationStatus();
             this.renderSettings();
-            this.renderLatencyTool();
         }
 
         handleStatusFailure() {
@@ -1885,19 +1786,6 @@
 
         async fetchCameras() {
             try {
-                const resp = await fetch('/api/av/cameras', { signal: AbortSignal.timeout(5000) });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    if (data.cameras) {
-                        this.state.detectedCameras = data.cameras;
-                    }
-                }
-            } catch (e) {
-                // Camera API may not be available
-            }
-
-            // Also fetch streams
-            try {
                 const resp = await fetch('/api/av/streams', { signal: AbortSignal.timeout(5000) });
                 if (resp.ok) {
                     const data = await resp.json();
@@ -1908,8 +1796,6 @@
             } catch (e) {
                 // Streams API may not be available
             }
-
-            this.renderDetectedCameras();
         }
 
         async fetchEngineSettings() {
@@ -1943,18 +1829,7 @@
             }
         }
 
-        /* ======================== CAMERA INFO & STREAM HEALTH ======================== */
-
-        async fetchCameraInfo() {
-            try {
-                const resp = await fetch('/api/av/camera-info', { signal: AbortSignal.timeout(8000) });
-                if (resp.ok) {
-                    this.state.cameraInfo = await resp.json();
-                }
-            } catch (e) {
-                // Camera info API may not be available
-            }
-        }
+        /* ======================== PHOTONVISION DATA ======================== */
 
         async fetchTargets() {
             try {
@@ -2114,66 +1989,6 @@
         getFrameFallbackUrl(camIdx, type) {
             return '/api/av/frame/' + camIdx + '/' + type;
         }
-
-        async checkStreamHealth() {
-            const output = document.getElementById('streamDebugOutput');
-            if (output) {
-                output.textContent = 'Probing stream ports...';
-                output.className = 'tool-output warn';
-            }
-
-            try {
-                const resp = await fetch('/api/av/stream-health', { signal: AbortSignal.timeout(10000) });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    this.state.streamHealth = data;
-
-                    // Update the health bar
-                    const bar = document.getElementById('streamHealthBar');
-                    if (bar && data.streams && data.streams.length > 0) {
-                        const allLive = data.streams.every(s => s.inputStatus === 'live' || s.outputStatus === 'live');
-                        const anyLive = data.streams.some(s => s.inputStatus === 'live' || s.outputStatus === 'live');
-                        if (allLive) {
-                            bar.style.display = 'block';
-                            bar.className = 'alert alert-success';
-                            bar.textContent = 'All ' + data.streams.length + ' camera stream(s) are live and serving MJPEG frames.';
-                        } else if (anyLive) {
-                            bar.style.display = 'block';
-                            bar.className = 'alert alert-warn';
-                            const liveCount = data.streams.filter(s => s.inputStatus === 'live' || s.outputStatus === 'live').length;
-                            bar.textContent = liveCount + '/' + data.streams.length + ' stream(s) are live. Some streams may still be starting.';
-                        } else {
-                            bar.style.display = 'block';
-                            bar.className = 'alert alert-warn';
-                            bar.textContent = 'No streams are live yet. The engine may still be starting or no cameras are connected.';
-                        }
-                    }
-
-                    // Update debug output
-                    if (output) {
-                        const lines = ['Stream Health Report', '=' .repeat(40)];
-                        data.streams.forEach(s => {
-                            lines.push('');
-                            lines.push(s.camera + ' (index ' + s.index + ')');
-                            lines.push('  Input:  port ' + s.inputPort + ' -> ' + s.inputStatus + '  ' + s.inputUrl);
-                            lines.push('  Output: port ' + s.outputPort + ' -> ' + s.outputStatus + '  ' + s.outputUrl);
-                        });
-                        if (data.streams.length === 0) {
-                            lines.push('No cameras found in engine settings.');
-                            lines.push('Ensure the engine is running and cameras are connected.');
-                        }
-                        output.textContent = lines.join('\n');
-                        output.className = 'tool-output ' + (data.streams.some(s => s.inputStatus === 'live') ? 'success' : 'warn');
-                    }
-                }
-            } catch (e) {
-                if (output) {
-                    output.textContent = 'Failed to check stream health: ' + e.message;
-                    output.className = 'tool-output error';
-                }
-            }
-        }
-
 
         getCropKey(camIdx, streamType) {
             return String(camIdx) + ':' + (streamType === 'input' ? 'input' : 'output');
@@ -2453,7 +2268,7 @@
 
             const cameras = this.state.cameras || [];
             if (cameras.length === 0) {
-                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div><p>No cameras discovered yet. Try running stream test suite.</p></div>';
+                container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#128247;</div><p>No cameras discovered yet. Check PhotonVision camera configuration at /pv/.</p></div>';
                 return;
             }
 
@@ -2503,43 +2318,6 @@
             this.refreshCropPreviewSource();
         }
 
-        async toolStreamHealth() {
-            const output = document.getElementById('toolStreamHealthOutput');
-            output.textContent = 'Probing stream ports...';
-            output.className = 'tool-output warn';
-
-            try {
-                const resp = await fetch('/api/av/stream-health', { signal: AbortSignal.timeout(10000) });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    const lines = ['AprilVision Stream Health', '=' .repeat(40)];
-                    data.streams.forEach(s => {
-                        const inputIcon = s.inputStatus === 'live' ? '[LIVE]' : s.inputStatus === 'responding' ? '[OK]' : '[DOWN]';
-                        const outputIcon = s.outputStatus === 'live' ? '[LIVE]' : s.outputStatus === 'responding' ? '[OK]' : '[DOWN]';
-                        lines.push('');
-                        lines.push(s.camera + ' (#' + s.index + ')');
-                        lines.push('  Input  ' + inputIcon + '  :' + s.inputPort + '  ' + s.inputUrl);
-                        lines.push('  Output ' + outputIcon + '  :' + s.outputPort + '  ' + s.outputUrl);
-                    });
-                    if (data.streams.length === 0) {
-                        lines.push('');
-                        lines.push('No cameras found in engine. Check:');
-                        lines.push('  1. Engine is running (port 5800)');
-                        lines.push('  2. USB cameras are plugged in');
-                        lines.push('  3. Cameras are configured in engine UI (/pv/)');
-                    }
-                    output.textContent = lines.join('\n');
-                    output.className = 'tool-output ' + (data.streams.some(s => s.inputStatus === 'live') ? 'success' : 'error');
-                } else {
-                    output.textContent = 'Error: HTTP ' + resp.status;
-                    output.className = 'tool-output error';
-                }
-            } catch (e) {
-                output.textContent = 'Connection failed: ' + e.message;
-                output.className = 'tool-output error';
-            }
-        }
-
         /* ======================== ACTIONS ======================== */
 
         async takeSnapshot() {
@@ -2575,7 +2353,7 @@
             lines.push(this.healthLine('Detection Engine', s.engineOnline));
             lines.push(this.healthLine('Dashboard Proxy', s.proxyOnline));
             lines.push(this.healthLine('WebSocket Tunnel', s.proxyOnline));
-            lines.push(this.healthLine('Cameras Detected', s.cameras.length > 0 || s.detectedCameras.length > 0));
+            lines.push(this.healthLine('Cameras Detected', s.cameras.length > 0));
 
             const hasCalibrated = s.cameras.some(c => c.calibrated);
             lines.push(this.healthLine('3D Pose (Calibrated)', hasCalibrated));
@@ -2649,54 +2427,6 @@
                 output.textContent = 'Failed: ' + e.message;
                 output.className = 'tool-output error';
             }
-        }
-
-        async toolSnapshot() {
-            const output = document.getElementById('toolSnapshotOutput');
-            output.textContent = 'Taking snapshot...';
-            output.className = 'tool-output warn';
-
-            try {
-                const resp = await fetch('/api/av/snapshot', { method: 'POST', signal: AbortSignal.timeout(10000) });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    const fileCount = data.files ? data.files.length : 0;
-                    const files = data.files ? data.files.join('\n') : 'none';
-                    output.textContent = 'Status: ' + (data.status || 'ok') + '\nTimestamp: ' + (data.timestamp || '--') + '\nFiles (' + fileCount + '):\n' + files;
-                    output.className = 'tool-output success';
-                } else {
-                    output.textContent = 'Error: HTTP ' + resp.status;
-                    output.className = 'tool-output error';
-                }
-            } catch (e) {
-                output.textContent = 'Connection failed - engine may be offline';
-                output.className = 'tool-output error';
-            }
-        }
-
-        toolHealthCheck() {
-            const output = document.getElementById('toolHealthOutput');
-            const s = this.state;
-            const lines = [];
-            lines.push('AprilVision 3.2 Health Check');
-            lines.push('================================');
-            lines.push('Engine:       ' + (s.engineOnline ? 'ONLINE' : 'OFFLINE'));
-            lines.push('Proxy:        ' + (s.proxyOnline ? 'RUNNING' : 'DOWN'));
-            lines.push('Cameras:      ' + (s.cameras.length || s.detectedCameras.length || 0) + ' detected');
-            lines.push('Calibrated:   ' + s.cameras.filter(c => c.calibrated).length + '/' + s.cameras.length);
-            lines.push('Latency:      ' + (this.state.lastLatency !== null ? this.state.lastLatency + 'ms' : '--'));
-            lines.push('================================');
-
-            if (s.engineOnline) {
-                lines.push('Result: ALL SYSTEMS GO');
-                output.className = 'tool-output success';
-            } else {
-                lines.push('Result: ISSUES DETECTED');
-                lines.push('Run: ./scripts/health_check.sh on coprocessor');
-                output.className = 'tool-output error';
-            }
-
-            output.textContent = lines.join('\n');
         }
 
         confirmRestart(type) {
@@ -3095,7 +2825,7 @@
                 elEngine.className = 'stat-value yellow';
             }
 
-            const camCount = s.cameras.length || s.detectedCameras.length || 0;
+            const camCount = s.cameras.length || 0;
             const elCams = document.getElementById('statCameras');
             elCams.textContent = camCount;
             elCams.className = 'stat-value ' + (camCount > 0 ? 'green' : 'yellow');
@@ -3314,34 +3044,6 @@
                     '</div>';
 
                 container.appendChild(card);
-            });
-        }
-
-        renderDetectedCameras() {
-            const container = document.getElementById('dashCameraList');
-            const cams = this.state.detectedCameras;
-
-            if (cams.length === 0 && this.state.cameras.length === 0) {
-                container.innerHTML = '<div class="camera-item"><span class="cam-name" style="color:var(--accent-yellow);">No cameras detected</span><span class="cam-device">Check USB connections</span></div>';
-                return;
-            }
-
-            // Merge detected and engine cameras
-            const allCams = cams.length > 0 ? cams : this.state.cameras;
-            container.innerHTML = '';
-
-            allCams.forEach(cam => {
-                const item = document.createElement('div');
-                item.className = 'camera-item';
-                const name = cam.name || 'Camera ' + (cam.index !== undefined ? cam.index : '?');
-                const device = cam.device || cam.source || '';
-                const source = cam.source || (cam.connected ? 'connected' : '');
-                item.innerHTML =
-                    '<span class="cam-name">' + this.escapeHtml(name) + '</span>' +
-                    '<span class="cam-device">' + this.escapeHtml(device) +
-                    (source ? '<span class="cam-source">(' + this.escapeHtml(source) + ')</span>' : '') +
-                    '</span>';
-                container.appendChild(item);
             });
         }
 
@@ -3867,6 +3569,7 @@
             const avgEl = document.getElementById('toolLatencyAvg');
             const dotEl = document.getElementById('toolLatencyDot');
             const statusEl = document.getElementById('toolLatencyStatus');
+            if (!valEl || !avgEl || !dotEl || !statusEl) return;
 
             if (this.state.lastLatency !== null) {
                 valEl.textContent = this.state.lastLatency + 'ms';
