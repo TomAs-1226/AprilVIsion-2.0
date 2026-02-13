@@ -1285,21 +1285,6 @@
                     </div>
                 </div>
 
-                <!-- Stream Debug Info (collapsible) -->
-                <div class="panel" style="margin-top: 20px;">
-                    <div class="panel-header" style="cursor:pointer;" onclick="document.getElementById('streamDebugBody').style.display = document.getElementById('streamDebugBody').style.display === 'none' ? 'block' : 'none';">
-                        Stream Debug Info (click to toggle)
-                    </div>
-                    <div class="panel-body" id="streamDebugBody" style="display:none;">
-                        <div class="tool-output" id="streamDebugOutput" style="font-size: 0.75rem; min-height: 60px;">
-                            Click "Check Streams" to probe stream ports.
-                        </div>
-                        <div class="btn-group" style="margin-top: 10px;">
-                            <button class="btn btn-blue" onclick="AVApp.checkStreamHealth()">Check Streams</button>
-                            <button class="btn btn-green" onclick="AVApp.fetchCameraInfo()">Refresh Camera Info</button>
-                        </div>
-                    </div>
-                </div>
             </div>
 
 
@@ -1320,7 +1305,6 @@
                     <div class="panel-body">
                         <div class="btn-group" style="margin-bottom:8px;">
                             <button class="btn btn-blue" onclick="AVApp.renderStreamOnlyPage()">Refresh Stream View</button>
-                            <button class="btn" onclick="AVApp.checkStreamHealth()">Quick Port Check</button>
                         </div>
                         <div style="display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:10px;margin-bottom:10px;">
                             <label style="font-size:0.78rem;color:var(--text-secondary);">Camera
@@ -1362,10 +1346,7 @@
                                  onmousemove="AVApp.moveSnipSelection(event)"
                                  onmouseup="AVApp.endSnipSelection(event)"
                                  onmouseleave="AVApp.endSnipSelection(event)">
-                                <img id="cropPreviewImg" src="" alt="Crop Preview"
-                                     data-cam-index="0" data-stream-type="output"
-                                     onload="AVApp.handleImgLoad(this, parseInt(this.getAttribute('data-cam-index') || '0', 10), this.getAttribute('data-stream-type') || 'output')"
-                                     onerror="AVApp.handleStreamError(this, parseInt(this.getAttribute('data-cam-index') || '0', 10), this.getAttribute('data-stream-type') || 'output')">
+                                <img id="cropPreviewImg" src="" alt="Crop Preview">
                                 <div id="cropSelectionBox" class="crop-selection-box"></div>
                             </div>
                         </div>
@@ -1583,13 +1564,6 @@
                         <div class="tool-output" id="toolHealthOutput">Waiting...</div>
                     </div>
 
-                    <!-- Stream Port Checker -->
-                    <div class="tool-card">
-                        <h3>&#127909; Stream Health Checker</h3>
-                        <div class="tool-desc">Probe each camera's MJPEG stream ports to verify the engine is serving frames. Shows port status and stream URLs.</div>
-                        <button class="btn btn-blue" onclick="AVApp.toolStreamHealth()">Check Stream Ports</button>
-                        <div class="tool-output" id="toolStreamHealthOutput">Waiting...</div>
-                    </div>
 
                     <!-- Latency Monitor -->
                     <div class="tool-card">
@@ -2343,17 +2317,26 @@
 
             const camIdx = parseInt(camSel.value || '0', 10);
             const st = streamSel.value || 'output';
-            img.setAttribute('data-cam-index', String(camIdx));
-            img.setAttribute('data-stream-type', st);
-            img.setAttribute('data-proxy-url', this.getProxyStreamUrl(camIdx, st));
-            img.setAttribute('data-direct-url', this.getDirectStreamUrl(camIdx, st));
-            img.setAttribute('data-frame-url', this.getFrameFallbackUrl(camIdx, st));
-            this.applyCropToImage(img, camIdx, st);
+            img.setAttribute('data-preview-cam-index', String(camIdx));
+            img.setAttribute('data-preview-stream-type', st);
+            const direct = this.getDirectStreamUrl(camIdx, st);
+            const proxy = this.getProxyStreamUrl(camIdx, st);
+            const frame = this.getFrameFallbackUrl(camIdx, st);
+
+            img.style.objectFit = 'contain';
+            img.style.objectPosition = '50% 50%';
+            img.style.transform = 'none';
 
             const current = (img.getAttribute('src') || '').split('?')[0];
-            const desired = this.getDirectStreamUrl(camIdx, st);
-            if (!current || current !== desired) {
-                img.src = desired;
+            if (!current || (current !== direct && current !== proxy && current !== frame)) {
+                img.src = direct;
+                img.onerror = () => {
+                    if ((img.getAttribute('src') || '').split('?')[0] === direct) {
+                        img.src = proxy;
+                    } else if ((img.getAttribute('src') || '').split('?')[0] === proxy) {
+                        img.src = frame + '?_t=' + Date.now();
+                    }
+                };
             }
         }
 
