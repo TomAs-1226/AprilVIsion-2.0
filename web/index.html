@@ -588,25 +588,6 @@
             z-index: 2;
         }
 
-        .feed-panel .feed-status {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background: rgba(0,0,0,0.7);
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.65rem;
-            font-weight: 600;
-            z-index: 2;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .feed-panel .feed-status.live { color: var(--accent-green); }
-        .feed-panel .feed-status.connecting { color: var(--accent-yellow); }
-        .feed-panel .feed-status.error { color: var(--accent-red); }
-
         .feed-panel img {
             width: 100%;
             height: 340px;
@@ -617,33 +598,6 @@
 
         .feed-panel + .feed-panel {
             border-left: 1px solid var(--border-color);
-        }
-
-        /* Camera info bar beneath feeds */
-        .camera-info-bar {
-            padding: 10px 18px;
-            border-top: 1px solid var(--border-subtle);
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-        }
-
-        .camera-info-bar .info-item {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .camera-info-bar .info-label {
-            color: var(--text-muted);
-        }
-
-        .camera-info-bar .info-value {
-            color: var(--text-primary);
-            font-weight: 600;
-            font-family: 'SFMono-Regular', Consolas, monospace;
         }
 
         /* ===== Calibration ===== */
@@ -987,7 +941,7 @@
                 </div>
 
                 <!-- Camera Previews -->
-                <div class="section-title"><span class="section-icon">&#9724;</span> Camera Previews</div>
+                <div class="section-title"><span class="section-icon">&#9724;</span> Camera Previews (Raw + Processed)</div>
                 <div class="camera-previews" id="dashCameraPreviews">
                     <div class="empty-state">
                         <div class="empty-icon">&#128247;</div>
@@ -1254,7 +1208,7 @@
             <div class="page" id="page-cameras">
                 <div class="page-header">
                     <h1>Camera Feeds</h1>
-                    <div class="page-desc">Live input (raw) and output (detection overlay) MJPEG streams from the detection engine</div>
+                    <div class="page-desc">PhotonVision raw and processed feeds, both shown side-by-side with your saved crop</div>
                 </div>
 
                 <div class="alert alert-info" id="cameraSourceBanner">
@@ -3062,15 +3016,8 @@
             const existing = container.querySelectorAll('.camera-feed-block');
             if (existing.length === cameras.length) {
                 this.refreshBrokenImages(container);
-                this.updateStreamStatusBadges();
                 return;
             }
-
-            const infoMap = {};
-            if (this.state.cameraInfo && this.state.cameraInfo.engineCameras) {
-                this.state.cameraInfo.engineCameras.forEach(c => { infoMap[c.index] = c; });
-            }
-
             container.innerHTML = '';
             this.loadCropControlsForSelection();
             cameras.forEach(cam => {
@@ -3078,38 +3025,22 @@
                 block.className = 'camera-feed-block';
                 block.setAttribute('data-cam-index', cam.index);
 
-                // PRIMARY: proxy URL (same-origin, always reachable through bridge)
-                // FALLBACK: direct cscore URL (browser -> stream port directly)
                 const proxyInputUrl = this.getProxyStreamUrl(cam.index, 'input');
                 const proxyOutputUrl = this.getProxyStreamUrl(cam.index, 'output');
                 const directInputUrl = this.getDirectStreamUrl(cam.index, 'input');
                 const directOutputUrl = this.getDirectStreamUrl(cam.index, 'output');
                 const frameInputUrl = this.getFrameFallbackUrl(cam.index, 'input');
                 const frameOutputUrl = this.getFrameFallbackUrl(cam.index, 'output');
-                const calibIcon = cam.calibrated ? '&#10003; Calibrated' : '&#9888; Not Calibrated';
-                const calibColor = cam.calibrated ? 'var(--accent-green)' : 'var(--accent-yellow)';
-
-                const info = infoMap[cam.index];
-                const devicePath = info ? info.devicePath : '';
-                const inputPort = this.STREAM_BASE_PORT + (cam.index * 2);
-                const outputPort = inputPort + 1;
-                const pipelineName = (info && info.currentPipeline) ? info.currentPipeline.name : '';
 
                 block.innerHTML =
                     '<div class="camera-feed-header">' +
                     '<span class="feed-title">' + this.escapeHtml(cam.name || 'Camera ' + cam.index) + '</span>' +
-                    '<span class="feed-meta">' +
-                    '<span>Index: ' + cam.index + '</span>' +
-                    '<span>Pipelines: ' + (cam.pipelineCount || 0) + '</span>' +
-                    (pipelineName ? '<span style="color:var(--accent-blue);">' + this.escapeHtml(pipelineName) + '</span>' : '') +
-                    '<span style="color:' + calibColor + ';">' + calibIcon + '</span>' +
-                    '</span>' +
+                    '<span class="feed-meta"><span>Index: ' + cam.index + '</span><span>Raw + Processed</span></span>' +
                     '</div>' +
                     '<div class="feed-pair">' +
                     '<div class="feed-panel">' +
-                    '<span class="feed-label">Input (Raw)</span>' +
-                    '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-input"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
-                    '<img src="' + this.escapeAttr(proxyInputUrl) + '" alt="Input Stream" ' +
+                    '<span class="feed-label">Raw Feed</span>' +
+                    '<img src="' + this.escapeAttr(proxyInputUrl) + '" alt="Raw Feed" ' +
                         'data-proxy-url="' + this.escapeAttr(proxyInputUrl) + '" ' +
                         'data-direct-url="' + this.escapeAttr(directInputUrl) + '" ' +
                         'data-frame-url="' + this.escapeAttr(frameInputUrl) + '" ' +
@@ -3119,9 +3050,8 @@
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'input\')">' +
                     '</div>' +
                     '<div class="feed-panel">' +
-                    '<span class="feed-label">Output (Detection)</span>' +
-                    '<span class="feed-status connecting" id="streamStatus-' + cam.index + '-output"><span class="dot yellow" style="width:6px;height:6px;"></span> Connecting</span>' +
-                    '<img src="' + this.escapeAttr(proxyOutputUrl) + '" alt="Output Stream" ' +
+                    '<span class="feed-label">Processed Feed</span>' +
+                    '<img src="' + this.escapeAttr(proxyOutputUrl) + '" alt="Processed Feed" ' +
                         'data-proxy-url="' + this.escapeAttr(proxyOutputUrl) + '" ' +
                         'data-direct-url="' + this.escapeAttr(directOutputUrl) + '" ' +
                         'data-frame-url="' + this.escapeAttr(frameOutputUrl) + '" ' +
@@ -3130,36 +3060,9 @@
                         'onload="AVApp.handleImgLoad(this,' + cam.index + ',\'output\')" ' +
                         'onerror="AVApp.handleStreamError(this,' + cam.index + ',\'output\')">' +
                     '</div>' +
-                    '</div>' +
-                    '<div class="camera-info-bar">' +
-                    (devicePath ? '<div class="info-item"><span class="info-label">Device:</span><span class="info-value">' + this.escapeHtml(devicePath) + '</span></div>' : '') +
-                    '<div class="info-item"><span class="info-label">Input:</span><span class="info-value">:' + inputPort + '</span></div>' +
-                    '<div class="info-item"><span class="info-label">Output:</span><span class="info-value">:' + outputPort + '</span></div>' +
-                    '<div class="info-item"><span class="info-label">Mode:</span><span class="info-value" id="streamMode-' + cam.index + '">direct</span></div>' +
                     '</div>';
 
                 container.appendChild(block);
-            });
-        }
-
-        updateStreamStatusBadges() {
-            if (!this.state.cameraInfo || !this.state.cameraInfo.engineCameras) return;
-            this.state.cameraInfo.engineCameras.forEach(cam => {
-                ['input', 'output'].forEach(type => {
-                    const badge = document.getElementById('streamStatus-' + cam.index + '-' + type);
-                    if (!badge) return;
-                    const status = type === 'input' ? cam.inputStreamStatus : cam.outputStreamStatus;
-                    if (status === 'live') {
-                        badge.className = 'feed-status live';
-                        badge.innerHTML = '<span class="dot green" style="width:6px;height:6px;"></span> Live';
-                    } else if (status === 'responding') {
-                        badge.className = 'feed-status connecting';
-                        badge.innerHTML = '<span class="dot yellow" style="width:6px;height:6px;"></span> Responding';
-                    } else if (status === 'unreachable') {
-                        badge.className = 'feed-status error';
-                        badge.innerHTML = '<span class="dot red" style="width:6px;height:6px;"></span> Unreachable';
-                    }
-                });
             });
         }
 
